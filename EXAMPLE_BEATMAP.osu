@@ -1,0 +1,70 @@
+osu file format v14
+
+[General]
+AudioFilename: audio.mp3
+AudioLeadIn: 0
+PreviewTime: -1
+Countdown: 0
+SampleSet: Normal
+StackLeniency: 0.7
+Mode: 3
+LetterboxInBreaks: 0
+SpecialStyle: 0
+WidescreenStoryboard: 0
+
+[Editor]
+DistanceSpacing: 1
+BeatDivisor: 4
+GridSize: 32
+TimelineZoom: 1
+
+[Metadata]
+Title:Example Song
+TitleUnicode:Example Song
+Artist:Test Artist
+ArtistUnicode:Test Artist
+Creator:Nullscent
+Version:4K Easy
+Source:
+Tags:test example 4k
+BeatmapID:0
+BeatmapSetID:-1
+
+[Difficulty]
+HPDrainRate:7
+CircleSize:4
+OverallDifficulty:7
+ApproachRate:5
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[Events]
+//Background and Video events
+//Break Periods
+//Storyboard Layer 0 (Background)
+//Storyboard Layer 1 (Fail)
+//Storyboard Layer 2 (Pass)
+//Storyboard Layer 3 (Foreground)
+//Storyboard Layer 4 (Overlay)
+//Storyboard Sound Samples
+
+[TimingPoints]
+0,500,4,2,0,50,1,0
+
+[HitObjects]
+64,192,1000,1,0,0:0:0:0:
+192,192,1500,1,0,0:0:0:0:
+320,192,2000,1,0,0:0:0:0:
+448,192,2500,1,0,0:0:0:0:
+64,192,3000,128,0,3500:0:0:0:0:
+192,192,3500,1,0,0:0:0:0:
+320,192,4000,128,0,4500:0:0:0:0:
+448,192,4500,1,0,0:0:0:0:
+64,192,5000,1,0,0:0:0:0:
+192,192,5250,1,0,0:0:0:0:
+320,192,5500,1,0,0:0:0:0:
+448,192,5750,1,0,0:0:0:0:
+64,192,6000,1,0,0:0:0:0:
+192,192,6000,1,0,0:0:0:0:
+320,192,6500,1,0,0:0:0:0:
+448,192,6500,1,0,0:0:0:0:

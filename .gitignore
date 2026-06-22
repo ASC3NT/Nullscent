@@ -1,0 +1,33 @@
+# Visual Studio / IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# Build output
+**/bin/
+**/obj/
+**/Content/obj/
+x64/
+
+# Runtime files
+settings.json
+nullscent_log.txt
+*.log
+
+# Temporary/cache
+*.cache
+*.tmp
+*.temp
+
+# Beatmaps (local library)
+Songs/
+
+# Generated skins/cache if any
+Skins/Cache/
+
+# OS files
+Thumbs.db
+Desktop.ini

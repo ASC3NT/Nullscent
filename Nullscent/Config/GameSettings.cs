@@ -110,9 +110,12 @@ namespace Nullscent.Config
         public float UIScale { get; set; } = 1.0f;
 
         /// <summary>
-        /// Mostrar contador de FPS.
-        /// </summary>
         public bool ShowFPS { get; set; } = false;
+
+        /// <summary>
+        /// Cadena de texto serializada con los mapeos de teclas del usuario.
+        /// </summary>
+        public string? CustomKeybinds { get; set; } = null;
 
         /// <summary>
         /// Dim del fondo (0.0 - 1.0, 0 = sin dim, 1 = totalmente oscuro).
@@ -284,6 +287,7 @@ namespace Nullscent.Config
             FPSLimit = defaults.FPSLimit;
             UIScale = defaults.UIScale;
             ShowFPS = defaults.ShowFPS;
+            CustomKeybinds = defaults.CustomKeybinds;
             BackgroundDim = defaults.BackgroundDim;
             ShowApproachCircles = defaults.ShowApproachCircles;
             ShowHitLighting = defaults.ShowHitLighting;

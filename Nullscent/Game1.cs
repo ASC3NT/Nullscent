@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -40,6 +40,15 @@ namespace Nullscent
         // Control de volumen con scroll
         private int _previousMouseScrollValue = 0;
 
+        // Transición de fundido de pantalla suave
+        private double _transitionAlpha = 1.0;
+        private Texture2D? _fadeTexture;
+
+        // Variables para contador global de FPS (ShowFPS)
+        private double _fpsTimer = 0;
+        private int _fpsCounter = 0;
+        private int _currentFps = 0;
+
         // Propiedades públicas para acceso desde screens
         public SpriteBatch SpriteBatch => _spriteBatch!;
         public GameStateManager StateManager => _stateManager!;
@@ -47,6 +56,7 @@ namespace Nullscent
         public AudioEngine AudioEngine => _audioEngine!;
         public HitSoundPlayer HitSoundPlayer => _hitSoundPlayer!;
         public GameSettings Settings => _settings!;
+        public FileDropManager FileDropManager => _fileDropManager!;
         public int WindowWidth => _graphics.PreferredBackBufferWidth;
         public int WindowHeight => _graphics.PreferredBackBufferHeight;
 
@@ -106,6 +116,11 @@ namespace Nullscent
 
             // Inicializar InputManager
             _inputManager = new InputManager();
+            if (!string.IsNullOrEmpty(_settings.CustomKeybinds))
+            {
+                _inputManager.LoadCustomKeybinds(_settings.CustomKeybinds);
+                Console.WriteLine("[Game1] Loaded custom keybinds");
+            }
             Console.WriteLine("[Game1] Input manager initialized");
 
             // Inicializar GameStateManager
@@ -126,6 +141,14 @@ namespace Nullscent
             // Inicializar TrueTypeFontRenderer con fuente.otf
             _fontRenderer = new TrueTypeFontRenderer(GraphicsDevice, _spriteBatch);
             string fontPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fuente.otf");
+
+            // Textura y suscripción para transiciones suaves
+            _fadeTexture = new Texture2D(GraphicsDevice, 1, 1);
+            _fadeTexture.SetData(new[] { Color.Black });
+            _stateManager!.OnStateChanged += (prev, next) =>
+            {
+                _transitionAlpha = 1.0;
+            };
 
             if (_fontRenderer.LoadFont(fontPath, 24))
             {
@@ -160,6 +183,10 @@ namespace Nullscent
             {
                 Console.WriteLine($"[FileDropManager] Beatmap imported: {path}");
                 // Trigger rescan en SongSelect si está activo
+                if (_stateManager != null && _stateManager.CurrentState == GameState.SongSelect && _stateManager.CurrentScreen is SongSelectScreen songSelect)
+                {
+                    songSelect.TriggerRescan(path);
+                }
             };
             _fileDropManager.OnSkinImported += path =>
             {
@@ -251,6 +278,22 @@ namespace Nullscent
                 }
                 _previousMouseScrollValue = mouseState.ScrollWheelValue;
 
+                // Actualizar contador de FPS
+                _fpsTimer += gameTime.ElapsedGameTime.TotalSeconds;
+                _fpsCounter++;
+                if (_fpsTimer >= 1.0)
+                {
+                    _currentFps = _fpsCounter;
+                    _fpsCounter = 0;
+                    _fpsTimer -= 1.0;
+                }
+
+                // Actualizar transición de fundido
+                if (_transitionAlpha > 0)
+                {
+                    _transitionAlpha = Math.Max(0.0, _transitionAlpha - gameTime.ElapsedGameTime.TotalSeconds * 4.0); // 250ms de fundido
+                }
+
                 // Actualizar estado actual del juego
                 _stateManager?.Update(gameTime);
             }
@@ -273,6 +316,25 @@ namespace Nullscent
 
                 // Dibujar pantalla actual
                 _stateManager?.Draw(gameTime);
+
+                // Dibujar transición de fundido
+                if (_transitionAlpha > 0 && _fadeTexture != null && _spriteBatch != null)
+                {
+                    _spriteBatch.Begin();
+                    _spriteBatch.Draw(_fadeTexture, new Rectangle(0, 0, WindowWidth, WindowHeight), Color.Black * (float)_transitionAlpha);
+                    _spriteBatch.End();
+                }
+
+                // Dibujar FPS si está activo
+                if (_settings != null && _settings.ShowFPS && _fontRenderer != null && _spriteBatch != null)
+                {
+                    _spriteBatch.Begin();
+                    _fontRenderer.SetFontSize(14);
+                    string fpsText = $"{_currentFps} FPS";
+                    var textSize = _fontRenderer.MeasureText(fpsText, 1.0f);
+                    _fontRenderer.DrawText(fpsText, new Vector2(WindowWidth - textSize.X - 10, WindowHeight - textSize.Y - 10), Color.LimeGreen, 1.0f);
+                    _spriteBatch.End();
+                }
             }
             catch (Exception ex)
             {

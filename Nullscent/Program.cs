@@ -1,15 +1,89 @@
-﻿using System;
+#nullable enable
+
+using System;
 using System.IO;
+using System.Text;
 
-// Configurar logging a archivo
-var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "nullscent_log.txt");
-var logWriter = new StreamWriter(logPath, append: false) { AutoFlush = true };
-Console.SetOut(logWriter);
+namespace Nullscent
+{
+    public static class Program
+    {
+        [STAThread]
+        public static void Main(string[] args)
+        {
+            var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "nullscent_log.txt");
+            var fileStream = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+            var logWriter = new StreamWriter(fileStream, Encoding.UTF8) { AutoFlush = true };
+            
+            // Guardar salida original de consola
+            var originalOut = Console.Out;
+            var dualWriter = new DualTextWriter(originalOut, logWriter);
+            Console.SetOut(dualWriter);
 
-Console.WriteLine($"=== Nullscent Log Started at {DateTime.Now} ===");
-Console.WriteLine($"Log file: {logPath}");
+            Console.WriteLine("==============================================");
+            Console.WriteLine($"=== Nullscent Practice Client Log Started ===");
+            Console.WriteLine($"Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            Console.WriteLine($"Log file path: {logPath}");
+            Console.WriteLine("==============================================");
 
-using var game = new Nullscent.Game1();
-game.Run();
+            try
+            {
+                using var game = new Nullscent.Game1();
+                game.Run();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FATAL] Unhandled Crash: {ex.GetType().Name} - {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
+            }
+            finally
+            {
+                logWriter.Close();
+                fileStream.Close();
+            }
+        }
+    }
 
-logWriter.Close();
+    /// <summary>
+    /// Escribe simultáneamente en la Consola estándar y en el archivo log con timestamps.
+    /// </summary>
+    public class DualTextWriter : TextWriter
+    {
+        private readonly TextWriter _consoleWriter;
+        private readonly TextWriter _fileWriter;
+
+        public DualTextWriter(TextWriter consoleWriter, TextWriter fileWriter)
+        {
+            _consoleWriter = consoleWriter;
+            _fileWriter = fileWriter;
+        }
+
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void Write(char value)
+        {
+            _consoleWriter.Write(value);
+            _fileWriter.Write(value);
+        }
+
+        public override void Write(string? value)
+        {
+            if (value == null) return;
+            _consoleWriter.Write(value);
+            _fileWriter.Write(value);
+        }
+
+        public override void WriteLine(string? value)
+        {
+            if (value == null) return;
+            
+            // Evitar duplicar marcas de tiempo si ya vienen formateadas
+            string formatted = value.StartsWith("[") && value.Contains("]") && value.Length > 12 && char.IsDigit(value[1])
+                ? value
+                : $"[{DateTime.Now:HH:mm:ss.fff}] {value}";
+
+            _consoleWriter.WriteLine(formatted);
+            _fileWriter.WriteLine(formatted);
+        }
+    }
+}

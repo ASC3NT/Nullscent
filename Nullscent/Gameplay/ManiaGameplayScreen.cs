@@ -53,7 +53,10 @@ namespace Nullscent.Gameplay
         private bool _isInitialized;
         private bool _wasEscapePressed;
         private bool _hasStarted;
+        private double _startupDelayTimer;
         private double _currentTime;
+        private string? _scrollNotificationText;
+        private double _scrollNotificationTimer;
 
         // Registro de estado de teclas
         private KeyboardState _previousKeyboardState;
@@ -221,6 +224,18 @@ namespace Nullscent.Gameplay
 
         private void SetupColumnBindings(int keyCount)
         {
+            // Intentar cargar keybinds personalizados desde el InputManager
+            _inputManager.ActiveKeyCount = keyCount;
+            if (_inputManager.Keybinds.TryGetValue(keyCount, out Keys[]? customKeys))
+            {
+                for (int i = 0; i < customKeys.Length && i < keyCount; i++)
+                {
+                    _columnBindings[i] = customKeys[i];
+                }
+                Console.WriteLine($"[ManiaGameplayScreen] Loaded custom keybinds for {keyCount}K from InputManager: {string.Join(", ", _columnBindings.Values)}");
+                return;
+            }
+
             // Mapeos de teclas estándar basados en la disposición física estilo osu!mania
             switch (keyCount)
             {
@@ -290,7 +305,7 @@ namespace Nullscent.Gameplay
             if (!_isInitialized || _maniaBeatmap == null || _playfield == null || _scoreProcessor == null)
                 return;
 
-            _audioEngine.Update();
+            _audioEngine.Update(_originalBeatmap?.Metadata?.AudioLeadIn ?? 0);
             _currentTime = _audioEngine.CurrentPositionMs;
 
             double runtimeScrollSpeed = Core.SettingsService.Instance.ScrollSpeed;
@@ -318,11 +333,15 @@ namespace Nullscent.Gameplay
                 return;
             }
 
-            // Auto-inicio de audio con un pequeño buffer
-            if (!_hasStarted && _currentTime < 100)
+            // Auto-inicio de audio después de un pequeño buffer de tiempo real (200ms) para transición fluida
+            if (!_hasStarted)
             {
-                _audioEngine.Play();
-                _hasStarted = true;
+                _startupDelayTimer += gameTime.ElapsedGameTime.TotalMilliseconds;
+                if (_startupDelayTimer >= 200)
+                {
+                    _audioEngine.Play();
+                    _hasStarted = true;
+                }
             }
 
             HandleInput(keyboardState);
@@ -338,6 +357,11 @@ namespace Nullscent.Gameplay
             }
 
             _hitErrorBar?.Update(_currentTime);
+
+            if (_scrollNotificationTimer > 0)
+            {
+                _scrollNotificationTimer -= gameTime.ElapsedGameTime.TotalMilliseconds;
+            }
 
             if (_scoreProcessor.HasFailed)
             {
@@ -359,6 +383,34 @@ namespace Nullscent.Gameplay
         private void HandleInput(KeyboardState keyboardState)
         {
             if (_playfield == null || _scoreProcessor == null) return;
+
+            // Ajuste de scroll speed en tiempo real (F3: disminuir, F4: aumentar)
+            if (keyboardState.IsKeyDown(Keys.F3) && !_previousKeyboardState.IsKeyDown(Keys.F3))
+            {
+                double currentSpeed = Core.SettingsService.Instance.ScrollSpeed;
+                double newSpeed = Math.Clamp(currentSpeed - 1.0, 1.0, 40.0);
+                if (newSpeed != currentSpeed)
+                {
+                    Core.SettingsService.Instance.ScrollSpeed = newSpeed;
+                    Core.SettingsService.Instance.SaveSettings();
+                    _scrollNotificationText = $"Velocidad: {newSpeed:F0}";
+                    _scrollNotificationTimer = 1200.0;
+                    Console.WriteLine($"[ManiaGameplayScreen] Scroll speed decreased to {newSpeed}");
+                }
+            }
+            if (keyboardState.IsKeyDown(Keys.F4) && !_previousKeyboardState.IsKeyDown(Keys.F4))
+            {
+                double currentSpeed = Core.SettingsService.Instance.ScrollSpeed;
+                double newSpeed = Math.Clamp(currentSpeed + 1.0, 1.0, 40.0);
+                if (newSpeed != currentSpeed)
+                {
+                    Core.SettingsService.Instance.ScrollSpeed = newSpeed;
+                    Core.SettingsService.Instance.SaveSettings();
+                    _scrollNotificationText = $"Velocidad: {newSpeed:F0}";
+                    _scrollNotificationTimer = 1200.0;
+                    Console.WriteLine($"[ManiaGameplayScreen] Scroll speed increased to {newSpeed}");
+                }
+            }
 
             foreach (var (column, key) in _columnBindings)
             {
@@ -401,6 +453,24 @@ namespace Nullscent.Gameplay
             {
                 _spriteBatch.Begin();
                 _hitErrorBar.Draw(_spriteBatch, _whitePixel, _currentTime);
+                _spriteBatch.End();
+            }
+
+            if (_scrollNotificationTimer > 0 && !string.IsNullOrEmpty(_scrollNotificationText) && _fontRenderer != null)
+            {
+                double progress = _scrollNotificationTimer / 1200.0;
+                float alpha = (float)Math.Min(1.0, progress * 4.0);
+                
+                int panelW = 280;
+                int panelH = 50;
+                int panelX = (_game.WindowWidth - panelW) / 2;
+                int panelY = (int)(_maniaConfig.ReceptorPosition - 80);
+
+                _spriteBatch.Begin();
+                _fontRenderer.SetFontSize(24);
+                _fontRenderer.DrawBox(new Rectangle(panelX, panelY, panelW, panelH), new Color(15, 15, 20, 220) * alpha);
+                _fontRenderer.DrawBoxBorder(new Rectangle(panelX, panelY, panelW, panelH), Color.HotPink * alpha, 2);
+                _fontRenderer.DrawTextCentered(_scrollNotificationText, panelX + panelW / 2, panelY + panelH / 2, Color.White * alpha);
                 _spriteBatch.End();
             }
 

@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework.Input;
 
 namespace Nullscent.Core
@@ -225,6 +226,56 @@ namespace Nullscent.Core
                 return null;
 
             return keys[columnIndex];
+        }
+
+        public void LoadCustomKeybinds(string? customBindsStr)
+        {
+            if (string.IsNullOrEmpty(customBindsStr))
+                return;
+
+            try
+            {
+                string[] sets = customBindsStr.Split('|', StringSplitOptions.RemoveEmptyEntries);
+                foreach (string set in sets)
+                {
+                    string[] parts = set.Split(':');
+                    if (parts.Length == 2)
+                    {
+                        if (int.TryParse(parts[0].Replace("K", ""), out int kCount))
+                        {
+                            string[] keyNames = parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries);
+                            Keys[] keys = new Keys[kCount];
+                            for (int i = 0; i < keyNames.Length && i < kCount; i++)
+                            {
+                                if (Enum.TryParse(keyNames[i], out Keys key))
+                                {
+                                    keys[i] = key;
+                                }
+                            }
+                            Keybinds[kCount] = keys;
+                        }
+                    }
+                }
+                Console.WriteLine($"[InputManager] Loaded custom keybinds mapping successfully: {customBindsStr}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[InputManager] Error loading custom keybinds: {ex.Message}");
+            }
+        }
+
+        public string SerializeCustomKeybinds()
+        {
+            var sets = new List<string>();
+            foreach (var kvp in Keybinds)
+            {
+                if (kvp.Key >= 1 && kvp.Key <= 10)
+                {
+                    string keysStr = string.Join(",", kvp.Value.Select(k => k.ToString()));
+                    sets.Add($"{kvp.Key}K:{keysStr}");
+                }
+            }
+            return string.Join("|", sets);
         }
 
         /// <summary>

@@ -74,7 +74,12 @@ namespace Nullscent.Audio
         public float Volume
         {
             get => Bass.GlobalStreamVolume / 10000f;
-            set => Bass.GlobalStreamVolume = (int)(Math.Clamp(value, 0f, 1f) * 10000);
+            set
+            {
+                int val = (int)(Math.Clamp(value, 0f, 1f) * 10000);
+                Bass.GlobalStreamVolume = val;
+                Bass.GlobalSampleVolume = val;
+            }
         }
 
         ///<summary>
@@ -134,6 +139,7 @@ namespace Nullscent.Audio
 
             // Volumen al 100% por defecto
             Bass.GlobalStreamVolume = 10000;
+            Bass.GlobalSampleVolume = 10000;
 
             Console.WriteLine($"[AudioEngine] Initialized successfully at {sampleRate}Hz");
 
@@ -291,12 +297,24 @@ namespace Nullscent.Audio
             if (_currentStream == 0 || !_isInitialized)
                 return;
 
-            // Usar tempo (preserva pitch) en lugar de frequency (cambia pitch)
-            // Tempo: 0 = velocidad normal, 100 = 2x, -50 = 0.5x
-            float tempoPercent = (float)((_rateMultiplier - 1.0) * 100.0);
-            Bass.ChannelSetAttribute(_currentStream, ChannelAttribute.Tempo, tempoPercent);
-
-            Console.WriteLine($"[AudioEngine] Rate set to {_rateMultiplier:F2}x (tempo: {tempoPercent:F1}%)");
+            // Al no disponer de bass_fx.dll ni del paquete ManagedBass.Fx en el cliente,
+            // usamos ChannelAttribute.Frequency para alterar la velocidad de reproducción.
+            // Esto variará el pitch (tono) de la música, igual que en osu! classic al activar DoubleTime/HalfTime.
+            ChannelInfo info;
+            if (Bass.ChannelGetInfo(_currentStream, out info))
+            {
+                float targetFrequency = (float)(info.Frequency * _rateMultiplier);
+                bool success = Bass.ChannelSetAttribute(_currentStream, ChannelAttribute.Frequency, targetFrequency);
+                if (success)
+                {
+                    Console.WriteLine($"[AudioEngine] Playback rate set to {_rateMultiplier:F2}x via Frequency ({targetFrequency:F0}Hz)");
+                }
+                else
+                {
+                    var error = Bass.LastError;
+                    Console.WriteLine($"[AudioEngine] Failed to set frequency: {error}");
+                }
+            }
         }
 
         /// <summary>

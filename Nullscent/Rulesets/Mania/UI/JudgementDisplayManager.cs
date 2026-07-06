@@ -22,6 +22,7 @@ namespace Nullscent.Rulesets.Mania.UI
         // Cola para manejar los juicios pendientes de renderizado
         private readonly List<QueuedJudgement> _queue = new();
         private readonly object _lock = new(); // Objeto para control de concurrencia
+        private int _currentCombo;
 
         // Posición en pantalla (generalmente el centro del playfield)
         public Vector2 Position { get; set; }
@@ -50,6 +51,7 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             lock (_lock)
             {
+                _currentCombo = combo;
                 _queue.Add(new QueuedJudgement
                 {
                     Result = result,
@@ -99,7 +101,6 @@ namespace Nullscent.Rulesets.Mania.UI
                 progress = Math.Clamp(progress, 0f, 1f);
 
                 string text = latest.Result.ToString();
-                int combo = latest.Combo;
 
                 // Calcular escala y desvanecimiento (fade out)
                 float scale = 1.0f + 0.5f * progress;
@@ -110,13 +111,25 @@ namespace Nullscent.Rulesets.Mania.UI
 
                 // Dibujar el texto del juicio centrado
                 _fontRenderer.DrawTextCentered(text, (int)Position.X, (int)Position.Y - 20, color, scale);
+            }
 
-                // Dibujar el contador de combo debajo del juicio si es mayor a 1
-                if (combo > 1)
+            // Dibujar el contador de combo siempre visible (si combo > 1)
+            if (_currentCombo > 1)
+            {
+                float comboAlpha = 0.8f;
+                float comboScale = 1.0f;
+
+                if (latest != null)
                 {
-                    _fontRenderer.SetFontSize(36);
-                    _fontRenderer.DrawTextCentered(combo + "x", (int)Position.X, (int)Position.Y + 30, Color.Yellow * alpha, 1.0f + 0.3f * progress);
+                    double age = currentTime - latest.Time;
+                    float progress = 1f - (float)(age / DISPLAY_LIFETIME);
+                    progress = Math.Clamp(progress, 0f, 1f);
+                    comboAlpha = 0.6f + 0.4f * progress;
+                    comboScale = 1.0f + 0.3f * progress;
                 }
+
+                _fontRenderer.SetFontSize(36);
+                _fontRenderer.DrawTextCentered(_currentCombo + "x", (int)Position.X, (int)Position.Y + 30, Color.Yellow * comboAlpha, comboScale);
             }
         }
 

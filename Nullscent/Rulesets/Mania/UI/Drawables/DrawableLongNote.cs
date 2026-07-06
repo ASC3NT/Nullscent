@@ -80,6 +80,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             int headY = downScroll ? receptorY - (int)headDistance : receptorY + (int)headDistance;
             int tailY = downScroll ? receptorY - (int)tailDistance : receptorY + (int)tailDistance;
 
+            // Clampar la cabeza de la LN al receptor si está siendo sostenida (Holding)
+            if (_longNote.State == LongNoteState.Holding)
+            {
+                headY = receptorY;
+            }
+
             int topY = Math.Min(headY, tailY);
             int bottomY = Math.Max(headY, tailY);
 

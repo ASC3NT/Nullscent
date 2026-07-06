@@ -285,5 +285,26 @@ namespace Nullscent.UI
                 SelectedDifficultyIndex = (_selectedDifficultyIndex - 1 + set.Difficulties.Count) % set.Difficulties.Count;
             }
         }
+
+        /// <summary>
+        /// Intenta seleccionar un beatmap específico por su ruta de archivo (.osu).
+        /// </summary>
+        public bool TrySelectDifficultyByPath(string filePath)
+        {
+            for (int setIdx = 0; setIdx < _filteredBeatmapSets.Count; setIdx++)
+            {
+                var set = _filteredBeatmapSets[setIdx];
+                for (int diffIdx = 0; diffIdx < set.Difficulties.Count; diffIdx++)
+                {
+                    if (string.Equals(set.Difficulties[diffIdx].FilePath, filePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _selectedSetIndex = setIdx;
+                        _selectedDifficultyIndex = diffIdx;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
     }
 }

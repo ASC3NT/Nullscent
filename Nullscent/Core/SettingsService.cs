@@ -80,8 +80,21 @@ namespace Nullscent.Core
 
         public int GlobalOffsetMs
         {
-            get => Get<int>(nameof(GlobalOffsetMs));
-            set => Set(nameof(GlobalOffsetMs), value);
+            get
+            {
+                if (_store.TryGetValue("GlobalAudioOffset", out var o))
+                {
+                    if (o is double d) return Convert.ToInt32(d);
+                    if (o is float f) return (int)f;
+                    if (o is int i) return i;
+                }
+                return Get<int>(nameof(GlobalOffsetMs));
+            }
+            set
+            {
+                Set(nameof(GlobalOffsetMs), value);
+                _store["GlobalAudioOffset"] = (double)value;
+            }
         }
 
         // Audio settings
@@ -119,7 +132,17 @@ namespace Nullscent.Core
         // Generic getter/setter backed by dictionary
         private T Get<T>(string key)
         {
-            if (_store.TryGetValue(key, out var o) && o is T t) return t;
+            if (_store.TryGetValue(key, out var o))
+            {
+                if (o is T t) return t;
+
+                // Handle conversions from double (System.Text.Json number default) to float or int
+                if (o is double d)
+                {
+                    if (typeof(T) == typeof(int)) return (T)(object)Convert.ToInt32(d);
+                    if (typeof(T) == typeof(float)) return (T)(object)Convert.ToSingle(d);
+                }
+            }
 
             // fallback defaults for simple types
             return typeof(T) == typeof(bool) ? (T)(object)false : default!;

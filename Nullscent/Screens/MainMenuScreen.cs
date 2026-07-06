@@ -22,9 +22,11 @@ namespace Nullscent.Screens
         private readonly TrueTypeFontRenderer _fontRenderer;
 
         private readonly List<MenuButton> _buttons = new();
+        private readonly List<float> _buttonHoverProgress = new();
         private int _selectedButtonIndex = 0;
 
         private KeyboardState _previousKeyState;
+        private MouseState _prevMouseState;
 
         public MainMenuScreen(Game1 game, InputManager inputManager, TrueTypeFontRenderer fontRenderer)
         {
@@ -64,8 +66,15 @@ namespace Nullscent.Screens
                 OnExitClicked
             ));
 
+            _buttonHoverProgress.Clear();
+            for (int i = 0; i < _buttons.Count; i++)
+            {
+                _buttonHoverProgress.Add(0f);
+            }
+
             _selectedButtonIndex = 0;
             _previousKeyState = Keyboard.GetState();
+            _prevMouseState = Mouse.GetState();
 
             Console.WriteLine("[MainMenuScreen] Main menu initialized");
         }
@@ -73,6 +82,23 @@ namespace Nullscent.Screens
         public void Update(GameTime gameTime)
         {
             var currentKeyState = Keyboard.GetState();
+            var currentMouseState = Mouse.GetState();
+
+            // Interactividad del mouse (hover y clic)
+            for (int i = 0; i < _buttons.Count; i++)
+            {
+                var button = _buttons[i];
+                if (button.Bounds.Contains(currentMouseState.X, currentMouseState.Y))
+                {
+                    _selectedButtonIndex = i;
+
+                    if (currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
+                    {
+                        button.OnClick?.Invoke();
+                        return;
+                    }
+                }
+            }
 
             // Navegación con teclado
             if (IsKeyPressed(currentKeyState, Keys.Down) || IsKeyPressed(currentKeyState, Keys.S))
@@ -97,7 +123,15 @@ namespace Nullscent.Screens
                 OnExitClicked();
             }
 
+            // Actualizar la interpolación de hover para animaciones suaves
+            for (int i = 0; i < _buttons.Count; i++)
+            {
+                float target = (i == _selectedButtonIndex) ? 1f : 0f;
+                _buttonHoverProgress[i] += (target - _buttonHoverProgress[i]) * 0.15f;
+            }
+
             _previousKeyState = currentKeyState;
+            _prevMouseState = currentMouseState;
 
             // Actualizar InputManager
             _inputManager.Update(gameTime.TotalGameTime.TotalMilliseconds);
@@ -126,40 +160,36 @@ namespace Nullscent.Screens
             for (int i = 0; i < _buttons.Count; i++)
             {
                 var button = _buttons[i];
-                bool isSelected = (i == _selectedButtonIndex);
+                float progress = _buttonHoverProgress[i];
 
-                // Color del botón
-                Color bgColor = isSelected ? new Color(80, 20, 60, 220) : new Color(30, 30, 40, 200);
-                Color borderColor = isSelected ? Color.HotPink : new Color(60, 60, 70);
-                Color textColor = isSelected ? Color.White : new Color(180, 180, 190);
+                // Animación de deslizamiento y escalado (desplazamiento a la derecha y aumento ligero)
+                int xOffset = (int)(progress * 25);
+                int padding = (int)(progress * 4);
+                var animatedBounds = new Rectangle(
+                    button.Bounds.X + xOffset - padding,
+                    button.Bounds.Y - padding,
+                    button.Bounds.Width + padding * 2,
+                    button.Bounds.Height + padding * 2
+                );
 
-                // Dibujar fondo del botón
-                _fontRenderer.DrawBox(button.Bounds, bgColor);
+                // Colores interpolados
+                Color bgColor = Color.Lerp(new Color(30, 30, 40, 200), new Color(90, 20, 60, 230), progress);
+                Color borderColor = Color.Lerp(new Color(60, 60, 70), Color.HotPink, progress);
+                Color textColor = Color.Lerp(new Color(180, 180, 190), Color.White, progress);
 
-                // Dibujar borde del botón
-                _fontRenderer.DrawBoxBorder(button.Bounds, borderColor, isSelected ? 4 : 2);
+                // Dibujar fondo del botón animado
+                _fontRenderer.DrawBox(animatedBounds, bgColor);
+
+                // Dibujar borde del botón animado
+                _fontRenderer.DrawBoxBorder(animatedBounds, borderColor, progress > 0.5f ? 4 : 2);
 
                 // Dibujar texto del botón
                 var textSize = _fontRenderer.MeasureText(button.Text, 1.0f);
                 var textPos = new Vector2(
-                    button.Bounds.X + (button.Bounds.Width - textSize.X) / 2,
-                    button.Bounds.Y + (button.Bounds.Height - textSize.Y) / 2
+                    animatedBounds.X + (animatedBounds.Width - textSize.X) / 2,
+                    animatedBounds.Y + (animatedBounds.Height - textSize.Y) / 2
                 );
                 _fontRenderer.DrawText(button.Text, textPos, textColor, 1.0f);
-            }
-
-            // Indicador de selección
-            if (_selectedButtonIndex >= 0 && _selectedButtonIndex < _buttons.Count)
-            {
-                var selectedButton = _buttons[_selectedButtonIndex];
-                string arrow = ">";
-                _fontRenderer.SetFontSize(48);
-                var arrowSize = _fontRenderer.MeasureText(arrow, 1.0f);
-                var arrowPos = new Vector2(
-                    selectedButton.Bounds.X - arrowSize.X - 20,
-                    selectedButton.Bounds.Y + (selectedButton.Bounds.Height - arrowSize.Y) / 2
-                );
-                _fontRenderer.DrawText(arrow, arrowPos, Color.HotPink, 1.0f);
             }
 
             // Instrucciones en la parte inferior

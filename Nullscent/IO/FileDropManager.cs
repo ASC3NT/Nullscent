@@ -35,70 +35,22 @@ namespace Nullscent.IO
             Console.WriteLine($"[FileDropManager] Songs directory: {_songsDirectory}");
             Console.WriteLine($"[FileDropManager] Skins directory: {_skinsDirectory}");
 
-            // Implementar drag-and-drop usando Windows Forms
             try
             {
-                var handle = window.Handle;
-                Console.WriteLine($"[FileDropManager] Window handle: {handle}");
-
-                var form = Control.FromHandle(handle);
-
-                if (form != null)
+                window.FileDrop += (sender, e) =>
                 {
-                    Console.WriteLine("[FileDropManager] Form control obtained successfully");
-
-                    try
+                    Console.WriteLine($"[FileDropManager] FileDrop event triggered via MonoGame, found {e.Files.Length} file(s)");
+                    foreach (var file in e.Files)
                     {
-                        form.AllowDrop = true;
+                        Console.WriteLine($"[FileDropManager] Processing file: {file}");
+                        ImportFile(file);
                     }
-                    catch (Exception dropEx)
-                    {
-                        // En algunas configuraciones de Windows, AllowDrop puede fallar por permisos COM
-                        Console.WriteLine($"[FileDropManager] WARNING: Could not enable AllowDrop: {dropEx.Message}");
-                        Console.WriteLine("[FileDropManager] Drag & drop may not work. Try running as administrator or use manual import.");
-                        return;
-                    }
-
-                    form.DragEnter += (sender, e) =>
-                    {
-                        Console.WriteLine("[FileDropManager] DragEnter event triggered");
-                        if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
-                        {
-                            e.Effect = DragDropEffects.Copy;
-                            Console.WriteLine("[FileDropManager] File drop detected - copy effect set");
-                        }
-                    };
-
-                    form.DragDrop += (sender, e) =>
-                    {
-                        Console.WriteLine("[FileDropManager] DragDrop event triggered");
-                        if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
-                        {
-                            var files = (string[]?)e.Data.GetData(DataFormats.FileDrop);
-                            if (files != null)
-                            {
-                                Console.WriteLine($"[FileDropManager] {files.Length} file(s) dropped");
-                                foreach (var file in files)
-                                {
-                                    Console.WriteLine($"[FileDropManager] Processing file: {file}");
-                                    ImportFile(file);
-                                }
-                            }
-                        }
-                    };
-
-                    Console.WriteLine("[FileDropManager] ✓ Drag & drop enabled successfully!");
-                    Console.WriteLine("[FileDropManager] You can now drag .osz, .osk, or .osu files into the window");
-                }
-                else
-                {
-                    Console.WriteLine("[FileDropManager] ERROR: Could not obtain form control from window handle");
-                }
+                };
+                Console.WriteLine("[FileDropManager] ✓ Drag & drop enabled successfully via MonoGame FileDrop!");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[FileDropManager] ERROR: Could not enable drag & drop: {ex.Message}");
-                Console.WriteLine($"[FileDropManager] Stack trace: {ex.StackTrace}");
+                Console.WriteLine($"[FileDropManager] ERROR: Could not enable MonoGame drag & drop: {ex.Message}");
             }
         }
 

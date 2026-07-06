@@ -9,7 +9,9 @@ using Nullscent.Config;
 using Nullscent.Core;
 using Nullscent.Gameplay;
 using Nullscent.Screens;
+using Nullscent.Rulesets.Mania.Mods;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
@@ -36,6 +38,11 @@ namespace Nullscent.UI
         private string _searchText = string.Empty;
         private int _scrollOffset;
         private KeyboardState _previousKeyboardState;
+        private MouseState _prevMouseState;
+        private bool _needsRescan;
+        private string? _pendingImportedPath;
+        private bool _showModsOverlay;
+        private readonly List<ManiaMod> _activeMods = new();
 
         // Colors (osu!lazer style)
         private readonly Color _backgroundColor = new(20, 20, 30);
@@ -75,8 +82,9 @@ namespace Nullscent.UI
 
             _songList = new SongList();
 
-            // Inicializar estado del teclado para prevenir input fantasma
+            // Inicializar estado del teclado y mouse para prevenir input fantasma
             _previousKeyboardState = Keyboard.GetState();
+            _prevMouseState = Mouse.GetState();
 
             // Escanear beatmaps de forma asíncrona
             Console.WriteLine($"[SongSelectScreen] Scanning {_settings.SongsDirectory}...");
@@ -101,11 +109,176 @@ namespace Nullscent.UI
                 return;
 
             var currentKeyboardState = Keyboard.GetState();
+            var currentMouseState = Mouse.GetState();
 
-            // Input handling
-            HandleInput(currentKeyboardState);
+            if (_showModsOverlay)
+            {
+                // ESC o F1 para cerrar
+                if (IsKeyPressed(currentKeyboardState, Keys.Escape) || IsKeyPressed(currentKeyboardState, Keys.F1))
+                {
+                    _showModsOverlay = false;
+                }
+
+                // Check clics en cerrar
+                int panelW = 600;
+                int panelH = 420;
+                int panelX = (_graphicsDevice.Viewport.Width - panelW) / 2;
+                int panelY = (_graphicsDevice.Viewport.Height - panelH) / 2;
+                var closeBtnRect = new Rectangle(panelX + (panelW - 150) / 2, panelY + panelH - 50, 150, 36);
+                if (closeBtnRect.Contains(currentMouseState.X, currentMouseState.Y) &&
+                    currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
+                {
+                    _showModsOverlay = false;
+                }
+
+                // Check clics en botones de mods
+                int cols = 3;
+                int btnW = 160;
+                int btnH = 80;
+                int startX = panelX + (panelW - (cols * btnW + (cols - 1) * 20)) / 2;
+                int startY = panelY + 80;
+
+                for (int i = 0; i < AvailableMods.Length; i++)
+                {
+                    var mod = AvailableMods[i];
+                    int col = i % cols;
+                    int row = i / cols;
+                    int x = startX + col * (btnW + 20);
+                    int y = startY + row * (btnH + 20);
+
+                    var btnRect = new Rectangle(x, y, btnW, btnH);
+                    if (btnRect.Contains(currentMouseState.X, currentMouseState.Y) &&
+                        currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
+                    {
+                        bool isActive = _activeMods.Any(m => m.GetType() == mod.ModType);
+                        if (isActive)
+                        {
+                            _activeMods.RemoveAll(m => m.GetType() == mod.ModType);
+                        }
+                        else
+                        {
+                            // Mutua exclusión de modificadores incompatibles
+                            if (mod.ModType == typeof(ManiaModDoubleTime))
+                                _activeMods.RemoveAll(m => m.GetType() == typeof(ManiaModHalfTime));
+                            else if (mod.ModType == typeof(ManiaModHalfTime))
+                                _activeMods.RemoveAll(m => m.GetType() == typeof(ManiaModDoubleTime));
+                            else if (mod.ModType == typeof(ManiaModEasy))
+                                _activeMods.RemoveAll(m => m.GetType() == typeof(ManiaModHardRock));
+                            else if (mod.ModType == typeof(ManiaModHardRock))
+                                _activeMods.RemoveAll(m => m.GetType() == typeof(ManiaModEasy));
+
+                            // Instanciar el modificador seleccionado
+                            var newMod = (ManiaMod)Activator.CreateInstance(mod.ModType)!;
+                            _activeMods.Add(newMod);
+                        }
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                // Detectar click en el botón de Importar (.osz)
+                var importButtonRect = new Rectangle(160, 12, 160, 36);
+                bool isImportHovered = currentMouseState.X >= importButtonRect.X && currentMouseState.X < importButtonRect.X + importButtonRect.Width &&
+                                       currentMouseState.Y >= importButtonRect.Y && currentMouseState.Y < importButtonRect.Y + importButtonRect.Height;
+
+                if (isImportHovered && currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
+                {
+                    OpenImportFileDialog();
+                }
+
+                // Detectar click en el botón de Mods
+                var modsButtonRect = new Rectangle(330, 12, 120, 36);
+                bool isModsHovered = currentMouseState.X >= modsButtonRect.X && currentMouseState.X < modsButtonRect.X + modsButtonRect.Width &&
+                                     currentMouseState.Y >= modsButtonRect.Y && currentMouseState.Y < modsButtonRect.Y + modsButtonRect.Height;
+
+                if (isModsHovered && currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
+                {
+                    _showModsOverlay = true;
+                }
+
+                // Tecla F1 para abrir mods
+                if (IsKeyPressed(currentKeyboardState, Keys.F1))
+                {
+                    _showModsOverlay = true;
+                }
+
+                // Click en elementos de la lista de canciones
+                int panelWidth = (int)(_graphicsDevice.Viewport.Width * 0.45f);
+                int panelHeight = _graphicsDevice.Viewport.Height - 120;
+                int panelY = 80;
+                int itemHeight = 60;
+                int visibleItems = panelHeight / itemHeight;
+                var filteredSets = _songList.FilteredBeatmapSets;
+                int startIndex = _scrollOffset;
+                int endIndex = Math.Min(startIndex + visibleItems, filteredSets.Count);
+
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    int yItem = panelY + (i - startIndex) * itemHeight;
+                    var itemRect = new Rectangle(10, yItem, panelWidth - 20, itemHeight);
+                    if (itemRect.Contains(currentMouseState.X, currentMouseState.Y))
+                    {
+                        if (currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
+                        {
+                            if (_songList.SelectedSetIndex == i)
+                            {
+                                StartSelectedBeatmap();
+                            }
+                            else
+                            {
+                                _songList.SelectedSetIndex = i;
+                                _songList.SelectedDifficultyIndex = 0;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // Click en dificultades del panel lateral
+                var selectedSet = _songList.SelectedBeatmapSet;
+                if (selectedSet != null)
+                {
+                    int panelX = (int)(_graphicsDevice.Viewport.Width * 0.5f);
+                    int xDiff = panelX + 20;
+                    int currentY = panelY + 115;
+                    for (int i = 0; i < selectedSet.Difficulties.Count; i++)
+                    {
+                        var diffRect = new Rectangle(xDiff + 10, currentY - 2, panelWidth - 40, 20);
+                        if (diffRect.Contains(currentMouseState.X, currentMouseState.Y))
+                        {
+                            if (currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
+                            {
+                                if (_songList.SelectedDifficultyIndex == i)
+                                {
+                                    StartSelectedBeatmap();
+                                }
+                                else
+                                {
+                                    _songList.SelectedDifficultyIndex = i;
+                                }
+                                break;
+                            }
+                        }
+                        currentY += 22;
+                    }
+                }
+
+                // Input handling
+                HandleInput(currentKeyboardState);
+            }
+
+            // Procesar re-escaneo asíncrono desde el hilo principal
+            if (_needsRescan)
+            {
+                _needsRescan = false;
+                string? pathToSelect = _pendingImportedPath;
+                _pendingImportedPath = null;
+                RescanBeatmaps(pathToSelect);
+            }
 
             _previousKeyboardState = currentKeyboardState;
+            _prevMouseState = currentMouseState;
         }
 
         private void HandleInput(KeyboardState keyboardState)
@@ -205,7 +378,8 @@ namespace Nullscent.UI
                     _inputManager,
                     _hitSoundPlayer,
                     _settings,
-                    beatmap
+                    beatmap,
+                    _activeMods
                 );
 
                 _stateManager.ChangeState(GameState.Gameplay, gameplayScreen);
@@ -214,6 +388,76 @@ namespace Nullscent.UI
             {
                 Console.WriteLine($"[SongSelectScreen] Failed to load beatmap: {ex.Message}");
             }
+        }
+
+        public void TriggerRescan(string? importedPath = null)
+        {
+            _pendingImportedPath = importedPath;
+            _needsRescan = true;
+        }
+
+        public async void RescanBeatmaps(string? newDirectoryToSelect = null)
+        {
+            if (_songList == null) return;
+
+            string? selectedDifficultyPath = _songList.SelectedDifficulty?.FilePath;
+
+            _isScanning = true;
+            Console.WriteLine($"[SongSelectScreen] Rescanning {_settings.SongsDirectory}...");
+
+            var beatmapSets = await BeatmapScanner.ScanDirectoryAsync(
+                _settings.SongsDirectory,
+                null
+            );
+
+            _songList.LoadBeatmapSets(beatmapSets);
+
+            bool selectedNew = false;
+            if (newDirectoryToSelect != null)
+            {
+                for (int i = 0; i < _songList.FilteredBeatmapSets.Count; i++)
+                {
+                    if (string.Equals(_songList.FilteredBeatmapSets[i].Directory, newDirectoryToSelect, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _songList.SelectedSetIndex = i;
+                        _songList.SelectedDifficultyIndex = 0;
+                        selectedNew = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!selectedNew && selectedDifficultyPath != null)
+            {
+                _songList.TrySelectDifficultyByPath(selectedDifficultyPath);
+            }
+
+            _isScanning = false;
+            Console.WriteLine($"[SongSelectScreen] Rescan complete: {beatmapSets.Count} sets loaded");
+        }
+
+        private void OpenImportFileDialog()
+        {
+            var thread = new System.Threading.Thread(() =>
+            {
+                using (var ofd = new System.Windows.Forms.OpenFileDialog())
+                {
+                    ofd.Title = "Select Beatmap (.osz) or Skin (.osk) files";
+                    ofd.Filter = "osu! Packages (*.osz;*.osk)|*.osz;*.osk|Beatmaps (*.osz)|*.osz|Skins (*.osk)|*.osk|All files (*.*)|*.*";
+                    ofd.Multiselect = true;
+
+                    if (ofd.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                    {
+                        Console.WriteLine($"[SongSelectScreen] User selected {ofd.FileNames.Length} files for import");
+                        foreach (var file in ofd.FileNames)
+                        {
+                            _game.FileDropManager.ImportFile(file);
+                        }
+                    }
+                }
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.Start();
         }
 
         public void Draw(GameTime gameTime)
@@ -232,6 +476,11 @@ namespace Nullscent.UI
             else if (_songList != null)
             {
                 DrawSongSelectUI();
+
+                if (_showModsOverlay)
+                {
+                    DrawModsOverlay(_graphicsDevice.Viewport.Width, _graphicsDevice.Viewport.Height);
+                }
             }
 
             _spriteBatch.End();
@@ -416,6 +665,23 @@ namespace Nullscent.UI
             // Logo/título
             _fontRenderer.DrawText("Nullscent", 20, 15, _accentColor);
 
+            var mouseState = Mouse.GetState();
+
+            // Botón de Importar (.osz)
+            var importButtonRect = new Rectangle(160, 12, 160, 36);
+            bool isImportHovered = importButtonRect.Contains(mouseState.X, mouseState.Y);
+            Color importBtnColor = isImportHovered ? _accentColor : _accentColor * 0.7f;
+            _fontRenderer.DrawBox(importButtonRect, importBtnColor);
+            _fontRenderer.DrawTextCentered("Import .osz", importButtonRect.X + importButtonRect.Width / 2, importButtonRect.Y + importButtonRect.Height / 2, Color.White);
+
+            // Botón de Mods
+            var modsButtonRect = new Rectangle(330, 12, 120, 36);
+            bool isModsHovered = modsButtonRect.Contains(mouseState.X, mouseState.Y);
+            string modsText = _activeMods.Count > 0 ? $"Mods ({_activeMods.Count})" : "Mods (F1)";
+            Color modsBtnColor = _showModsOverlay ? _accentColor : (isModsHovered ? _accentColor * 0.8f : new Color(40, 40, 50));
+            _fontRenderer.DrawBox(modsButtonRect, modsBtnColor);
+            _fontRenderer.DrawTextCentered(modsText, modsButtonRect.X + modsButtonRect.Width / 2, modsButtonRect.Y + modsButtonRect.Height / 2, Color.White);
+
             // Búsqueda
             string searchDisplay = string.IsNullOrEmpty(_searchText) ? "Type to search..." : _searchText;
             Color searchColor = string.IsNullOrEmpty(_searchText) ? _dimTextColor * 0.5f : _textColor;
@@ -477,6 +743,98 @@ namespace Nullscent.UI
             int minutes = totalSeconds / 60;
             int seconds = totalSeconds % 60;
             return $"{minutes}:{seconds:D2}";
+        }
+
+        private class ModItem
+        {
+            public string Name { get; }
+            public string Acronym { get; }
+            public Type ModType { get; }
+            public string Description { get; }
+
+            public ModItem(string name, string acronym, Type type, string desc)
+            {
+                Name = name;
+                Acronym = acronym;
+                ModType = type;
+                Description = desc;
+            }
+        }
+
+        private static readonly ModItem[] AvailableMods = new[]
+        {
+            new ModItem("Easy", "EZ", typeof(ManiaModEasy), "Reduces overall difficulty"),
+            new ModItem("No Fail", "NF", typeof(ManiaModNoFail), "You can't fail"),
+            new ModItem("Half Time", "HT", typeof(ManiaModHalfTime), "0.75x playback speed"),
+            new ModItem("Hard Rock", "HR", typeof(ManiaModHardRock), "Increases overall difficulty"),
+            new ModItem("Double Time", "DT", typeof(ManiaModDoubleTime), "1.5x playback speed"),
+            new ModItem("Hidden", "HD", typeof(ManiaModHidden), "Notes fade out before reaching the judgement line"),
+            new ModItem("Flashlight", "FL", typeof(ManiaModFlashlight), "Restricted view area"),
+            new ModItem("Random", "RD", typeof(ManiaModRandom), "Shuffle the columns"),
+            new ModItem("Mirror", "MR", typeof(ManiaModMirror), "Flip columns horizontally")
+        };
+
+        private void DrawModsOverlay(int screenWidth, int screenHeight)
+        {
+            if (_fontRenderer == null) return;
+
+            // Fondo negro semi-transparente para toda la pantalla
+            _fontRenderer.DrawBox(new Rectangle(0, 0, screenWidth, screenHeight), new Color(0, 0, 0, 150));
+
+            int panelW = 600;
+            int panelH = 420;
+            int panelX = (screenWidth - panelW) / 2;
+            int panelY = (screenHeight - panelH) / 2;
+
+            // Panel de mods
+            var panelRect = new Rectangle(panelX, panelY, panelW, panelH);
+            _fontRenderer.DrawBox(panelRect, new Color(25, 25, 35, 245));
+            _fontRenderer.DrawBoxBorder(panelRect, _accentColor, 4);
+
+            _fontRenderer.SetFontSize(36);
+            _fontRenderer.DrawTextCentered("MODIFIERS (Click to toggle)", panelX + panelW / 2, panelY + 30, Color.White);
+
+            int cols = 3;
+            int btnW = 160;
+            int btnH = 80;
+            int startX = panelX + (panelW - (cols * btnW + (cols - 1) * 20)) / 2;
+            int startY = panelY + 80;
+
+            var mouseState = Mouse.GetState();
+
+            for (int i = 0; i < AvailableMods.Length; i++)
+            {
+                var mod = AvailableMods[i];
+                int col = i % cols;
+                int row = i / cols;
+                int x = startX + col * (btnW + 20);
+                int y = startY + row * (btnH + 20);
+
+                var btnRect = new Rectangle(x, y, btnW, btnH);
+                bool isHovered = btnRect.Contains(mouseState.X, mouseState.Y);
+                bool isActive = _activeMods.Any(m => m.GetType() == mod.ModType);
+
+                Color bgColor = isActive ? _accentColor : (isHovered ? new Color(60, 60, 80) : new Color(40, 40, 50));
+                Color borderColor = isActive ? Color.White : (isHovered ? _accentColor * 0.7f : new Color(70, 70, 90));
+                Color textColor = isActive ? Color.White : (isHovered ? Color.White : _dimTextColor);
+
+                _fontRenderer.DrawBox(btnRect, bgColor);
+                _fontRenderer.DrawBoxBorder(btnRect, borderColor, 2);
+
+                _fontRenderer.SetFontSize(28);
+                _fontRenderer.DrawTextCentered(mod.Acronym, x + btnW / 2, y + 25, textColor);
+
+                _fontRenderer.SetFontSize(16);
+                _fontRenderer.DrawTextCentered(mod.Name, x + btnW / 2, y + 55, textColor * 0.9f);
+            }
+
+            // Botón cerrar
+            var closeBtnRect = new Rectangle(panelX + (panelW - 150) / 2, panelY + panelH - 50, 150, 36);
+            bool isCloseHovered = closeBtnRect.Contains(mouseState.X, mouseState.Y);
+            _fontRenderer.DrawBox(closeBtnRect, isCloseHovered ? _accentColor : new Color(50, 50, 60));
+            _fontRenderer.DrawBoxBorder(closeBtnRect, Color.White * 0.5f, 1);
+            _fontRenderer.SetFontSize(18);
+            _fontRenderer.DrawTextCentered("Close (ESC)", closeBtnRect.X + closeBtnRect.Width / 2, closeBtnRect.Y + closeBtnRect.Height / 2, Color.White);
         }
 
         public void Cleanup()

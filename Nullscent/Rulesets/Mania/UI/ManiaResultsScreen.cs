@@ -94,25 +94,32 @@ namespace Nullscent.Rulesets.Mania.UI
             int screenWidth = _graphicsDevice.Viewport.Width;
             int screenHeight = _graphicsDevice.Viewport.Height;
 
+            //TITULO
             _fontRenderer.SetFontSize(48);
             _fontRenderer.DrawTextCentered("RESULTS", screenWidth / 2, 40, new Color(255, 102, 171), 1.0f);
 
+            //PUNTAJE
             _fontRenderer.SetFontSize(64);
             _fontRenderer.DrawTextCentered($"{_scoreProcessor.Score:N0}", screenWidth / 2, screenHeight / 2 - 80, Color.White, 1.0f);
 
+            //ACCURACY
             _fontRenderer.SetFontSize(36);
             _fontRenderer.DrawTextCentered($"{_scoreProcessor.AccuracyPercent:F2}%", screenWidth / 2, screenHeight / 2, new Color(255, 102, 171), 1.0f);
 
+            //MAX COMBO
             _fontRenderer.SetFontSize(24);
             _fontRenderer.DrawTextCentered($"Max Combo: {_scoreProcessor.MaxCombo}x", screenWidth / 2, screenHeight / 2 + 60, Color.Cyan, 1.0f);
 
+            //RANK
             _fontRenderer.SetFontSize(128);
             _fontRenderer.DrawText(_scoreProcessor.Rank.ToString(), screenWidth - 200, screenHeight / 2 - 64, Color.Gold, 1.0f);
 
+            //BEATMAP INFO
             _fontRenderer.SetFontSize(18);
             _fontRenderer.DrawTextCentered($"{_beatmap.Metadata.Title} - {_beatmap.Metadata.Artist}", screenWidth / 2, screenHeight - 100, Color.White, 1.0f);
             _fontRenderer.DrawTextCentered($"[{_beatmap.Metadata.Version}] {_maniaBeatmap.KeyCount}K", screenWidth / 2, screenHeight - 75, new Color(180, 180, 200), 1.0f);
 
+            //INSTRUCCIONES
             _fontRenderer.SetFontSize(16);
             _fontRenderer.DrawTextCentered("Enter/Esc: Return to Song Select  |  R: Retry", screenWidth / 2, screenHeight - 30, new Color(180, 180, 200), 1.0f);
 

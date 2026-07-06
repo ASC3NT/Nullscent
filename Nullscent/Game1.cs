@@ -37,6 +37,9 @@ namespace Nullscent
         private FileDropManager? _fileDropManager;
         private TrueTypeFontRenderer? _fontRenderer;
 
+        // Control de volumen con scroll
+        private int _previousMouseScrollValue = 0;
+
         // Propiedades públicas para acceso desde screens
         public SpriteBatch SpriteBatch => _spriteBatch!;
         public GameStateManager StateManager => _stateManager!;
@@ -216,27 +219,68 @@ namespace Nullscent
 
         protected override void Update(GameTime gameTime)
         {
-            // Exit con Alt+F4 (no con Escape, usado para pause)
-            var keyboardState = Keyboard.GetState();
-            if (keyboardState.IsKeyDown(Keys.LeftAlt) && keyboardState.IsKeyDown(Keys.F4))
+            try
             {
-                Console.WriteLine("[Game1] Exiting via Alt+F4...");
+                // Exit con Alt+F4 (no con Escape, usado para pause)
+                var keyboardState = Keyboard.GetState();
+                if (keyboardState.IsKeyDown(Keys.LeftAlt) && keyboardState.IsKeyDown(Keys.F4))
+                {
+                    Console.WriteLine("[Game1] Exiting via Alt+F4...");
+                    Exit();
+                    return;
+                }
+
+                // Control de volumen con Alt + Rueda del mouse (estilo osu!)
+                var mouseState = Mouse.GetState();
+                if (keyboardState.IsKeyDown(Keys.LeftAlt) || keyboardState.IsKeyDown(Keys.RightAlt))
+                {
+                    if (mouseState.ScrollWheelValue != _previousMouseScrollValue)
+                    {
+                        int scrollDelta = mouseState.ScrollWheelValue - _previousMouseScrollValue;
+                        float volumeChange = scrollDelta > 0 ? 0.05f : -0.05f;
+
+                        float newVolume = Math.Clamp(_settings!.MasterVolume + volumeChange, 0.0f, 1.0f);
+                        _settings.MasterVolume = newVolume;
+                        _settings.Save();
+
+                        _audioEngine!.Volume = newVolume;
+                        Core.SettingsService.Instance.MasterVolume = newVolume;
+
+                        Console.WriteLine($"[Game1] Volume changed to {(int)(newVolume * 100)}% (Alt+Scroll)");
+                    }
+                }
+                _previousMouseScrollValue = mouseState.ScrollWheelValue;
+
+                // Actualizar estado actual del juego
+                _stateManager?.Update(gameTime);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] CRITICAL ERROR in Update: {ex.GetType().Name}: {ex.Message}");
+                Console.WriteLine($"[Game1] Stack trace: {ex.StackTrace}");
                 Exit();
                 return;
             }
-
-            // Actualizar estado actual del juego
-            _stateManager?.Update(gameTime);
 
             base.Update(gameTime);
         }
 
         protected override void Draw(GameTime gameTime)
         {
-            GraphicsDevice.Clear(Color.Black);
+            try
+            {
+                GraphicsDevice.Clear(Color.Black);
 
-            // Dibujar pantalla actual
-            _stateManager?.Draw(gameTime);
+                // Dibujar pantalla actual
+                _stateManager?.Draw(gameTime);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] CRITICAL ERROR in Draw: {ex.GetType().Name}: {ex.Message}");
+                Console.WriteLine($"[Game1] Stack trace: {ex.StackTrace}");
+                Exit();
+                return;
+            }
 
             base.Draw(gameTime);
         }

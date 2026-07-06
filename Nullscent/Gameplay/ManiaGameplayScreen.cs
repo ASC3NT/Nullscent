@@ -21,8 +21,8 @@ using System.Linq;
 namespace Nullscent.Gameplay
 {
     /// <summary>
-    /// Modern mania gameplay screen.
-    /// Completely rewritten using new architecture inspired by ppy/osu.
+    /// Pantalla de juego principal para el modo Mania.
+    /// Coordina el playfield, la lógica de entrada, el audio y la interfaz (HUD).
     /// </summary>
     public class ManiaGameplayScreen : IGameScreen
     {
@@ -45,6 +45,9 @@ namespace Nullscent.Gameplay
         private TrueTypeFontRenderer? _fontRenderer;
         private HitErrorBar? _hitErrorBar;
 
+        // Recurso optimizado para primitivas 2D
+        private Texture2D? _whitePixel;
+
         private readonly List<ManiaMod> _activeMods = new();
         private bool _isPaused;
         private bool _isInitialized;
@@ -52,7 +55,7 @@ namespace Nullscent.Gameplay
         private bool _hasStarted;
         private double _currentTime;
 
-        // Input tracking
+        // Registro de estado de teclas
         private KeyboardState _previousKeyboardState;
         private readonly Dictionary<int, Keys> _columnBindings = new();
 
@@ -78,39 +81,31 @@ namespace Nullscent.Gameplay
             _settings = settings;
             _originalBeatmap = beatmap;
 
-            // Load mania config
             _maniaConfig = LoadManiaConfig();
 
-            // Set mods
             if (mods != null)
                 _activeMods.AddRange(mods);
 
-            Console.WriteLine($"[ManiaGameplayScreen] Initialized with {_activeMods.Count} mods");
+            Console.WriteLine($"[ManiaGameplayScreen] Inicializado con {_activeMods.Count} modificadores activos");
         }
 
         public void Initialize()
         {
             if (_originalBeatmap == null)
             {
-                Console.WriteLine("[ManiaGameplayScreen] Error: No beatmap loaded");
+                Console.WriteLine("[ManiaGameplayScreen] Error: Ningún beatmap cargado");
                 return;
             }
 
-            Console.WriteLine($"[ManiaGameplayScreen] Initializing: {_originalBeatmap.Metadata.Title} [{_originalBeatmap.Metadata.Version}]");
-            Console.WriteLine($"[ManiaGameplayScreen] Original beatmap has {_originalBeatmap.HitObjects.Count} HitObjects");
-            Console.WriteLine($"[ManiaGameplayScreen] KeyCount: {_originalBeatmap.KeyCount}");
+            Console.WriteLine($"[ManiaGameplayScreen] Iniciando mapa: {_originalBeatmap.Metadata.Title} [{_originalBeatmap.Metadata.Version}]");
 
-            // Convert beatmap to mania format
+            // Convertir el formato del mapa base al formato nativo de Mania
             var converter = new ManiaBeatmapConverter(_originalBeatmap);
             _maniaBeatmap = converter.Convert();
 
-            Console.WriteLine($"[ManiaGameplayScreen] Converted to {_maniaBeatmap.HitObjects.Count} mania objects");
-            Console.WriteLine($"[ManiaGameplayScreen] Notes: {_maniaBeatmap.Notes.Count()}, HoldNotes: {_maniaBeatmap.HoldNotes.Count()}");
-
-            // Apply mods
             ApplyMods();
 
-            // Initialize score processor
+            // Configurar procesador de puntuaciones (Soporte ScoreV2 activo para LNs)
             int totalNotes = _maniaBeatmap.Notes.Count();
             int totalLongNotes = _maniaBeatmap.HoldNotes.Count();
             _scoreProcessor = new ManiaScoreProcessor(
@@ -118,51 +113,42 @@ namespace Nullscent.Gameplay
                 totalLongNotes,
                 _originalBeatmap.HPDrainRate,
                 _settings.HealthDrainEnabled,
-                isScoreV2: true // enable ScoreV2 semantics by default for LN parity
+                isScoreV2: true 
             );
 
-            // Initialize playfield
+            // ==========================================
+            // PREVENCIÓN DE FUGAS DE MEMORIA: Textura global
+            // ==========================================
+            _whitePixel = new Texture2D(_graphicsDevice, 1, 1);
+            _whitePixel.SetData(new[] { Color.White });
+
+            // Inicialización del entorno de juego (Playfield)
             _playfield = new ManiaPlayfield(
                 _graphicsDevice,
                 _spriteBatch,
                 _maniaBeatmap.KeyCount,
                 _game.WindowWidth,
                 _game.WindowHeight,
-                _game.FontRenderer, // Pass font renderer for judgement text
-                _originalBeatmap.OverallDifficulty // Pass OD explicitly for LN tail windows
+                _game.FontRenderer, 
+                _originalBeatmap.OverallDifficulty 
             );
 
-            // Add hit objects to playfield
-            Console.WriteLine($"[ManiaGameplayScreen] Adding {_maniaBeatmap.HitObjects.Count} objects to playfield");
-            int addedCount = 0;
+            // Poblar las columnas con las notas del mapa
             foreach (var hitObject in _maniaBeatmap.HitObjects)
             {
                 _playfield.AddHitObject(hitObject);
-                addedCount++;
             }
-            Console.WriteLine($"[ManiaGameplayScreen] Successfully added {addedCount} objects to playfield");
 
-            // Initialize HUD
+            // Componentes de interfaz (HUD y Pausa)
             _fontRenderer = _game.FontRenderer;
-            _hud = new ManiaHUD(
-                _graphicsDevice,
-                _spriteBatch,
-                _fontRenderer,
-                _maniaConfig
-            );
+            _hud = new ManiaHUD(_graphicsDevice, _spriteBatch, _fontRenderer, _maniaConfig);
+            _pauseOverlay = new ManiaPauseOverlay(_graphicsDevice, _spriteBatch, _audioEngine, _fontRenderer);
 
-            // Initialize pause overlay
-            _pauseOverlay = new ManiaPauseOverlay(
-                _graphicsDevice,
-                _spriteBatch,
-                _audioEngine,
-                _fontRenderer
-            );
-
-            // Initialize HitErrorBar if enabled in settings
+            // ==========================================
+            // CONFIGURACIÓN DEL HIT ERROR BAR
+            // ==========================================
             if (Core.SettingsService.Instance.ShowHitErrorBar && _playfield?.JudgementDisplayManager != null)
             {
-                // Create hit error bar with default OD
                 _hitErrorBar = new HitErrorBar(
                     x: _game.WindowWidth / 2 - 150,
                     y: _game.WindowHeight / 2 + 100,
@@ -171,43 +157,31 @@ namespace Nullscent.Gameplay
                     hitWindows: new Rulesets.Mania.Judgements.ManiaHitWindows(_originalBeatmap?.OverallDifficulty ?? 5.0)
                 );
 
-                // Subscribe to judgement events
+                // Suscripción al evento para capturar los desvíos temporales
                 _playfield.JudgementDisplayManager.JudgementOccurred += OnJudgementOccurred;
             }
 
-            // Setup column bindings
             SetupColumnBindings(_maniaBeatmap.KeyCount);
 
-            // Setup audio - use the beatmap's directory, not root Songs directory
+            // Configuración del track de audio relativo a la ruta del mapa
             string audioPath = System.IO.Path.Combine(_originalBeatmap.Directory, _originalBeatmap.Metadata.AudioFilename ?? "");
-            Console.WriteLine($"[ManiaGameplayScreen] Looking for audio at: {audioPath}");
-
+            
             if (System.IO.File.Exists(audioPath))
             {
-                Console.WriteLine($"[ManiaGameplayScreen] Audio file found, loading...");
                 _audioEngine.LoadTrack(audioPath);
-                // Apply user-configurable global offset from SettingsService if present
                 _audioEngine.GlobalOffsetMs = Core.SettingsService.Instance.GlobalOffsetMs;
                 _audioEngine.Volume = Core.SettingsService.Instance.Volume;
-
-                // Apply rate mods
                 ApplyRateMods();
-                Console.WriteLine($"[ManiaGameplayScreen] Audio loaded successfully");
             }
             else
             {
-                Console.WriteLine($"[ManiaGameplayScreen] ERROR: Audio file not found: {audioPath}");
-                Console.WriteLine($"[ManiaGameplayScreen] Beatmap directory: {_originalBeatmap.Directory}");
-                Console.WriteLine($"[ManiaGameplayScreen] Audio filename from metadata: {_originalBeatmap.Metadata.AudioFilename}");
+                Console.WriteLine($"[ManiaGameplayScreen] ERROR CRÍTICO: Archivo de audio no encontrado en la ruta {audioPath}");
             }
 
             _previousKeyboardState = Keyboard.GetState();
-
-            // Subscribe to runtime settings changes
-            Core.SettingsService.Instance.SettingChanged += OnSettingChanged; // persisted subscription
+            Core.SettingsService.Instance.SettingChanged += OnSettingChanged; 
+            
             _isInitialized = true;
-
-            Console.WriteLine($"[ManiaGameplayScreen] Initialization complete: {_maniaBeatmap.KeyCount}K, {_maniaBeatmap.TotalHitObjects} objects");
         }
 
         private void ApplyMods()
@@ -218,18 +192,16 @@ namespace Nullscent.Gameplay
             {
                 mod.Apply();
 
-                // Apply specific mod effects
+                // Lógica especial para mods que alteran la disposición de las notas
                 if (mod is ManiaModRandom)
                 {
                     var converter = new ManiaBeatmapConverter(_originalBeatmap!);
                     converter.ApplyRandomization(_maniaBeatmap.HitObjects);
-                    Console.WriteLine("[ManiaGameplayScreen] Applied Random mod");
                 }
                 else if (mod is ManiaModMirror)
                 {
                     var converter = new ManiaBeatmapConverter(_originalBeatmap!);
                     converter.ApplyMirror(_maniaBeatmap.HitObjects);
-                    Console.WriteLine("[ManiaGameplayScreen] Applied Mirror mod");
                 }
             }
         }
@@ -241,19 +213,15 @@ namespace Nullscent.Gameplay
             var dtMod = _activeMods.OfType<ManiaModDoubleTime>().FirstOrDefault();
             var htMod = _activeMods.OfType<ManiaModHalfTime>().FirstOrDefault();
 
-            if (dtMod != null)
-                rate = dtMod.SpeedMultiplier;
-            else if (htMod != null)
-                rate = htMod.SpeedMultiplier;
+            if (dtMod != null) rate = dtMod.SpeedMultiplier;
+            else if (htMod != null) rate = htMod.SpeedMultiplier;
 
             _audioEngine.RateMultiplier = rate;
-            Console.WriteLine($"[ManiaGameplayScreen] Audio rate: {rate}x");
         }
 
         private void SetupColumnBindings(int keyCount)
         {
-            // Default bindings based on key count
-            // Similar to osu!mania defaults
+            // Mapeos de teclas estándar basados en la disposición física estilo osu!mania
             switch (keyCount)
             {
                 case 1:
@@ -309,15 +277,12 @@ namespace Nullscent.Gameplay
                     _columnBindings[7] = Keys.OemSemicolon;
                     break;
                 default:
-                    // For 9K, 10K etc, use generic bindings
                     for (int i = 0; i < Math.Min(keyCount, 10); i++)
                     {
                         _columnBindings[i] = (Keys)((int)Keys.D1 + i);
                     }
                     break;
             }
-
-            Console.WriteLine($"[ManiaGameplayScreen] Column bindings set for {keyCount}K");
         }
 
         public void Update(GameTime gameTime)
@@ -325,16 +290,12 @@ namespace Nullscent.Gameplay
             if (!_isInitialized || _maniaBeatmap == null || _playfield == null || _scoreProcessor == null)
                 return;
 
-            // Update audio engine
             _audioEngine.Update();
             _currentTime = _audioEngine.CurrentPositionMs;
 
-            // Apply any runtime-updated scroll speed from SettingsService
-            // Note: SettingsService exposes ScrollSpeed as double
             double runtimeScrollSpeed = Core.SettingsService.Instance.ScrollSpeed;
             _maniaConfig.ScrollSpeed = runtimeScrollSpeed;
 
-            // Handle pause
             var keyboardState = Keyboard.GetState();
             bool escapePressed = keyboardState.IsKeyDown(Keys.Escape);
 
@@ -349,61 +310,43 @@ namespace Nullscent.Gameplay
             {
                 _pauseOverlay.Update(gameTime);
 
-                // Check pause menu actions
-                if (_pauseOverlay.ShouldResume)
-                {
-                    Resume();
-                }
-                else if (_pauseOverlay.ShouldRetry)
-                {
-                    Retry();
-                    return;
-                }
-                else if (_pauseOverlay.ShouldQuit)
-                {
-                    QuitToSongSelect();
-                    return;
-                }
+                if (_pauseOverlay.ShouldResume) Resume();
+                else if (_pauseOverlay.ShouldRetry) { Retry(); return; }
+                else if (_pauseOverlay.ShouldQuit) { QuitToSongSelect(); return; }
 
                 _previousKeyboardState = keyboardState;
                 return;
             }
 
-            // Start audio if not started
+            // Auto-inicio de audio con un pequeño buffer
             if (!_hasStarted && _currentTime < 100)
             {
                 _audioEngine.Play();
                 _hasStarted = true;
-                Console.WriteLine("[ManiaGameplayScreen] Audio started");
             }
 
-            // Handle input
             HandleInput(keyboardState);
 
-            // Calculate scroll speed
+            // Fórmula base de velocidad de caída (scroll speed)
             double scrollSpeed = (_game.WindowHeight / 1.5) * _maniaConfig.ScrollSpeed;
 
-            // Update playfield with all necessary parameters
             _playfield.Update(_currentTime, _scoreProcessor, scrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
-            // Update health drain
             if (!_scoreProcessor.HasFailed)
             {
                 _scoreProcessor.UpdateHealthDrain(gameTime.ElapsedGameTime.TotalSeconds);
             }
 
-            // Update hit error bar
             _hitErrorBar?.Update(_currentTime);
 
-            // Check for fail
             if (_scoreProcessor.HasFailed)
             {
                 HandleFail();
             }
 
-            // Check for completion
+            // Evaluar condición de fin de nivel
             bool allObjectsJudged = _scoreProcessor.TotalJudgements >= _maniaBeatmap.TotalHitObjects;
-            bool audioFinished = !_audioEngine.IsPlaying && _currentTime >= _audioEngine.LengthMs - 1000; // -1s buffer
+            bool audioFinished = !_audioEngine.IsPlaying && _currentTime >= _audioEngine.LengthMs - 1000; 
 
             if (audioFinished && allObjectsJudged && !_isPaused && _maniaBeatmap.TotalHitObjects > 0)
             {
@@ -417,7 +360,6 @@ namespace Nullscent.Gameplay
         {
             if (_playfield == null || _scoreProcessor == null) return;
 
-            // Check each column binding
             foreach (var (column, key) in _columnBindings)
             {
                 bool wasPressed = _previousKeyboardState.IsKeyDown(key);
@@ -425,13 +367,12 @@ namespace Nullscent.Gameplay
 
                 if (isPressed && !wasPressed)
                 {
-                    // Key pressed - use exact audio clock timestamp for replay-safe input
+                    // Sincronizar el input exactamente con el reloj de audio
                     double timestamp = _audioEngine.CurrentPositionMs;
                     _playfield.HandleKeyPress(column, timestamp, _scoreProcessor);
                 }
                 else if (!isPressed && wasPressed)
                 {
-                    // Key released (needed for LN tail judgements) - use audio clock timestamp
                     double timestamp = _audioEngine.CurrentPositionMs;
                     _playfield.HandleKeyRelease(column, timestamp, _scoreProcessor);
                 }
@@ -445,37 +386,24 @@ namespace Nullscent.Gameplay
 
             _graphicsDevice.Clear(new Color(15, 15, 20));
 
-            // Calculate scroll speed (pixels per second)
-            // At 1.0x speed, notes travel screen height in ~1.5 seconds
             double scrollSpeed = (_game.WindowHeight / 1.5) * _maniaConfig.ScrollSpeed;
-
-            // Draw playfield (columns, notes, receptors)
             _playfield.Draw(_currentTime, scrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
-            // Draw background dim overlay if needed
             if (_settings.BackgroundDim > 0)
             {
                 DrawBackgroundDim();
             }
 
-            // Draw HUD (score, accuracy, combo, health)
             _hud.Draw(gameTime, _scoreProcessor, _originalBeatmap!, _currentTime, _activeMods);
 
-            // Draw hit error bar if enabled and visible
-            if (_hitErrorBar != null && Core.SettingsService.Instance.ShowHitErrorBar)
+            // Renderizado óptimo de la barra de error usando la textura cacheada
+            if (_hitErrorBar != null && Core.SettingsService.Instance.ShowHitErrorBar && _whitePixel != null)
             {
-                // Create a temporary white pixel texture for drawing
-                var pixel = new Texture2D(_graphicsDevice, 1, 1);
-                pixel.SetData(new[] { Color.White });
-
                 _spriteBatch.Begin();
-                _hitErrorBar.Draw(_spriteBatch, pixel, _currentTime);
+                _hitErrorBar.Draw(_spriteBatch, _whitePixel, _currentTime);
                 _spriteBatch.End();
-
-                pixel.Dispose();
             }
 
-            // Draw pause overlay
             if (_isPaused && _pauseOverlay != null)
             {
                 _pauseOverlay.Draw(gameTime);
@@ -484,16 +412,12 @@ namespace Nullscent.Gameplay
 
         private void DrawBackgroundDim()
         {
+            if (_whitePixel == null) return;
+
             _spriteBatch.Begin();
-
-            var pixel = new Texture2D(_graphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
-
-            double dimAmount = Math.Min(_settings.BackgroundDim / 100.0, 0.7); // Max 70% dim to see gameplay
+            double dimAmount = Math.Min(_settings.BackgroundDim / 100.0, 0.7); 
             var fullScreenRect = new Rectangle(0, 0, _game.WindowWidth, _game.WindowHeight);
-            _spriteBatch.Draw(pixel, fullScreenRect, new Color(0, 0, 0, (float)dimAmount));
-
-            pixel.Dispose();
+            _spriteBatch.Draw(_whitePixel, fullScreenRect, new Color(0, 0, 0, (float)dimAmount));
             _spriteBatch.End();
         }
 
@@ -502,7 +426,6 @@ namespace Nullscent.Gameplay
             _isPaused = true;
             _audioEngine.Pause();
             _pauseOverlay?.Show();
-            Console.WriteLine("[ManiaGameplayScreen] Paused");
         }
 
         private void Resume()
@@ -510,81 +433,43 @@ namespace Nullscent.Gameplay
             _isPaused = false;
             _audioEngine.Play(restart: false);
             _pauseOverlay?.Hide();
-            _previousKeyboardState = Keyboard.GetState(); // Reset to prevent ghost input
-            Console.WriteLine("[ManiaGameplayScreen] Resumed");
+            _previousKeyboardState = Keyboard.GetState(); 
         }
 
         private void Retry()
         {
-            Console.WriteLine("[ManiaGameplayScreen] Retrying...");
-
             var newGameplay = new ManiaGameplayScreen(
-                _game,
-                _graphicsDevice,
-                _spriteBatch,
-                _stateManager,
-                _audioEngine,
-                _inputManager,
-                _hitSoundPlayer,
-                _settings,
-                _originalBeatmap!,
-                _activeMods
+                _game, _graphicsDevice, _spriteBatch, _stateManager, _audioEngine, _inputManager,
+                _hitSoundPlayer, _settings, _originalBeatmap!, _activeMods
             );
-
             _stateManager.ChangeState(GameState.Gameplay, newGameplay);
         }
 
         private void QuitToSongSelect()
         {
-            Console.WriteLine("[ManiaGameplayScreen] Quitting to song select...");
-
             var songSelect = new SongSelectScreen(
-                _game,
-                _graphicsDevice,
-                _spriteBatch,
-                _stateManager,
-                _audioEngine,
-                _inputManager,
-                _hitSoundPlayer,
-                _settings
+                _game, _graphicsDevice, _spriteBatch, _stateManager, _audioEngine, _inputManager,
+                _hitSoundPlayer, _settings
             );
-
             _stateManager.ChangeState(GameState.SongSelect, songSelect);
         }
 
         private void HandleFail()
         {
-            // For now, just log
-            // In future, could show fail animation
-            Console.WriteLine("[ManiaGameplayScreen] Failed!");
-            // Could implement No Fail mod check here
+            Console.WriteLine("[ManiaGameplayScreen] Jugador eliminido (Failed)");
         }
 
         private void TransitionToResults()
         {
-            Console.WriteLine("[ManiaGameplayScreen] Transitioning to results...");
-
             var resultsScreen = new ManiaResultsScreen(
-                _game,
-                _graphicsDevice,
-                _spriteBatch,
-                _stateManager,
-                _audioEngine,
-                _inputManager,
-                _settings,
-                _scoreProcessor!,
-                _originalBeatmap!,
-                _maniaBeatmap!,
-                _activeMods
+                _game, _graphicsDevice, _spriteBatch, _stateManager, _audioEngine, _inputManager,
+                _settings, _scoreProcessor!, _originalBeatmap!, _maniaBeatmap!, _activeMods
             );
-
             _stateManager.ChangeState(GameState.Results, resultsScreen);
         }
 
         private ManiaConfig LoadManiaConfig()
         {
-            // For now, create from game settings
-            // In future, could load from separate file
             return new ManiaConfig
             {
                 ScrollSpeed = _settings.ScrollSpeed,
@@ -604,47 +489,44 @@ namespace Nullscent.Gameplay
 
         public void Cleanup()
         {
-            Console.WriteLine("[ManiaGameplayScreen] Cleanup");
-
             _audioEngine.Stop();
             _inputManager.ClearEventListeners();
 
-            // Unsubscribe from settings changes
+            // Desvincular eventos para evitar fugas de memoria
             Core.SettingsService.Instance.SettingChanged -= OnSettingChanged;
 
-            // Unsubscribe from judgement events
             if (_playfield?.JudgementDisplayManager != null)
             {
                 _playfield.JudgementDisplayManager.JudgementOccurred -= OnJudgementOccurred;
             }
 
+            // Liberación de recursos no administrados (Textura cacheada)
+            _whitePixel?.Dispose();
             _pauseOverlay?.Dispose();
             _playfield?.Dispose();
             _isInitialized = false;
         }
 
+        /// <summary>
+        /// Delegado suscrito a los juicios del Playfield para mapearlos hacia el HitErrorBar.
+        /// </summary>
         private void OnJudgementOccurred(HitResult result, double offsetMs, double time)
         {
-            // Record hit in error bar
             _hitErrorBar?.RecordHit(offsetMs, result, time);
         }
 
         private void OnSettingChanged(string key, object? value)
         {
-            // Apply relevant runtime changes
             switch (key)
             {
                 case nameof(Core.SettingsService.ScrollSpeed):
-                    if (_maniaConfig != null)
-                        _maniaConfig.ScrollSpeed = Core.SettingsService.Instance.ScrollSpeed;
+                    if (_maniaConfig != null) _maniaConfig.ScrollSpeed = Core.SettingsService.Instance.ScrollSpeed;
                     break;
                 case nameof(Core.SettingsService.ReceptorPosition):
-                    if (_maniaConfig != null)
-                        _maniaConfig.ReceptorPosition = Core.SettingsService.Instance.ReceptorPosition;
+                    if (_maniaConfig != null) _maniaConfig.ReceptorPosition = Core.SettingsService.Instance.ReceptorPosition;
                     break;
                 case nameof(Core.SettingsService.DownScroll):
-                    if (_maniaConfig != null)
-                        _maniaConfig.DownScroll = Core.SettingsService.Instance.DownScroll;
+                    if (_maniaConfig != null) _maniaConfig.DownScroll = Core.SettingsService.Instance.DownScroll;
                     break;
                 case nameof(Core.SettingsService.GlobalOffsetMs):
                     _audioEngine.GlobalOffsetMs = Core.SettingsService.Instance.GlobalOffsetMs;

@@ -77,6 +77,41 @@ namespace Nullscent.Audio
             set => Bass.GlobalStreamVolume = (int)(Math.Clamp(value, 0f, 1f) * 10000);
         }
 
+        ///<summary>
+        ///Volumen del stream de musica actual (0.0 - 1.0).
+        ///Solo afecta el track actual, no el volumen global.
+        ///</summary>
+        public float StreamVolume
+        {
+            get
+            {
+                if (_currentStream == 0) return 1.0f;
+                //Bass.ChannelGetAttribute retorna bool (exito), el valor va en 'out float volume'
+                if (Bass.ChannelGetAttribute(_currentStream, ChannelAttribute.Volume, out float volume))
+                {
+                    return volume;
+                }
+                return 1.0f;
+            }
+            set
+            {
+                if(_currentStream != 0 && _isInitialized)
+                {
+                    float clampedVolume = Math.Clamp(value, 0f, 1f);
+                    //Bass.ChannelSetAttribute retorna bool (exito)
+                    bool success = Bass.ChannelSetAttribute(_currentStream, ChannelAttribute.Volume, clampedVolume);
+                    if (success)
+                    {
+                        Console.WriteLine($"[AudioEngine] Stream volume set to {clampedVolume:F2}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[AudioEngine] Failed to set stream volume");
+                    }
+                }
+            }
+        }
+
         /// <summary>
         /// Inicializa BASS con el dispositivo de audio predeterminado.
         /// </summary>
@@ -150,6 +185,11 @@ namespace Nullscent.Audio
             // Aplicar rate si no es 1.0x
             if (Math.Abs(_rateMultiplier - 1.0) > 0.001)
                 ApplyRate();
+
+            // Aplicar el volumen de música guardado al nuevo stream
+            float musicVolume = Core.SettingsService.Instance.MusicVolume;
+            StreamVolume = musicVolume;
+            Console.WriteLine($"[AudioEngine] Applied music volume: {musicVolume:F2} to new stream");
 
             Console.WriteLine($"[AudioEngine] Loaded track: {Path.GetFileName(audioPath)} ({LengthMs:F0}ms)");
             return true;
@@ -298,6 +338,27 @@ namespace Nullscent.Audio
                 GlobalOffsetMs = off;
             }
 
+            // Volumen maestro
+            if (key == nameof(Core.SettingsService.MasterVolume) && value is float masterVol)
+            {
+                Volume = masterVol;
+                Console.WriteLine($"[AudioEngine] Master volume changed to {masterVol:F2} (0-1 scale)");
+            }
+
+            // Volumen de música - aplicar al stream actual
+            if (key == nameof(Core.SettingsService.MusicVolume) && value is float musicVol)
+            {
+                StreamVolume = musicVol;
+                Console.WriteLine($"[AudioEngine] Music volume changed to {musicVol:F2} (0-1 scale)");
+            }
+
+            // Volumen de hitsounds - se aplicará en HitSoundPlayer
+            if (key == nameof(Core.SettingsService.HitsoundVolume) && value is float hitVol)
+            {
+                Console.WriteLine($"[AudioEngine] Hitsound volume changed to {hitVol:F2} (0-1 scale)");
+            }
+
+            // Offset de audio (backwards compatibility)
             if (key == nameof(Core.SettingsService.Volume) && value is float vol)
             {
                 Volume = vol;

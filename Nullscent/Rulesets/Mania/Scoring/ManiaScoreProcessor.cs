@@ -135,7 +135,7 @@ namespace Nullscent.Rulesets.Mania.Scoring
             int misses = Statistics[HitResult.Miss];
 
             if (acc == 100.0) return ScoreRank.X;
-            if (acc >= 95.0 && misses == 0) return ScoreRank.S;
+            if (acc >= 95.0) return ScoreRank.S;
             if (acc >= 90.0) return ScoreRank.A;
             if (acc >= 80.0) return ScoreRank.B;
             if (acc >= 70.0) return ScoreRank.C;

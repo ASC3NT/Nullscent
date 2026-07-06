@@ -44,7 +44,7 @@ namespace Nullscent.Audio
             Console.WriteLine("[HitSoundPlayer] Initialized");
 
             // Apply volume from settings
-            _hitsoundVolume = Core.SettingsService.Instance.Volume;
+            _hitsoundVolume = Core.SettingsService.Instance.HitsoundVolume;
 
             // Subscribe to settings changes
             Core.SettingsService.Instance.SettingChanged += OnSettingChanged;
@@ -235,6 +235,14 @@ namespace Nullscent.Audio
 
         private void OnSettingChanged(string key, object? value)
         {
+            // React to hitsound volume changes
+            if (key == nameof(Core.SettingsService.HitsoundVolume) && value is float hitVol)
+            {
+                HitsoundVolume = hitVol;
+                Console.WriteLine($"[HitSoundPlayer] Hitsound volume changed to {hitVol:F2}");
+            }
+
+            // Backwards compatibility with Volume key
             if (key == nameof(Core.SettingsService.Volume) && value is float vol)
             {
                 HitsoundVolume = vol;

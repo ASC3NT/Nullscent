@@ -10,8 +10,8 @@ using System.Collections.Generic;
 namespace Nullscent.Rulesets.Mania.UI
 {
     /// <summary>
-    /// Central display for judgements and combo similar to osu!mania.
-    /// Receives judgement events and renders a single centered visual.
+    /// Gestor central para la visualización de juicios y combos (similar a osu!mania).
+    /// Recibe eventos de juicio y renderiza un único elemento visual centrado.
     /// </summary>
     public class JudgementDisplayManager : IDisposable
     {
@@ -19,16 +19,21 @@ namespace Nullscent.Rulesets.Mania.UI
         private readonly SpriteBatch _spriteBatch;
         private readonly TrueTypeFontRenderer? _fontRenderer;
 
+        // Cola para manejar los juicios pendientes de renderizado
         private readonly List<QueuedJudgement> _queue = new();
-        private readonly object _lock = new();
+        private readonly object _lock = new(); // Objeto para control de concurrencia
 
-        // Display position (center of playfield)
+        // Posición en pantalla (generalmente el centro del playfield)
         public Vector2 Position { get; set; }
 
-        // Timings
-        private const double DISPLAY_LIFETIME = 800; // ms
+        // Tiempo de vida visual de cada juicio en pantalla (en milisegundos)
+        private const double DISPLAY_LIFETIME = 800;
 
-        // Event for subscribers (e.g., HitErrorBar)
+        // =========================================================
+        // EVENTOS
+        // Evento disparado cada vez que se registra un juicio.
+        // Parámetros: HitResult (resultado), double (desfase en ms), double (tiempo actual)
+        // =========================================================
         public event Action<HitResult, double, double>? JudgementOccurred;
 
         public JudgementDisplayManager(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch, TrueTypeFontRenderer? fontRenderer)
@@ -38,6 +43,9 @@ namespace Nullscent.Rulesets.Mania.UI
             _fontRenderer = fontRenderer;
         }
 
+        /// <summary>
+        /// Encola un nuevo juicio para ser mostrado en pantalla y notifica a los suscriptores.
+        /// </summary>
         public void EnqueueJudgement(HitResult result, int column, double offsetMs, int combo, double time)
         {
             lock (_lock)
@@ -51,11 +59,11 @@ namespace Nullscent.Rulesets.Mania.UI
                     Time = time
                 });
 
-                // Keep queue size reasonable
+                // Limitar el tamaño de la cola para evitar desbordamientos
                 if (_queue.Count > 8) _queue.RemoveAt(0);
             }
 
-            // Trigger event for subscribers
+            // Notificar a los componentes externos (ej. HitErrorBar)
             JudgementOccurred?.Invoke(result, offsetMs, time);
         }
 
@@ -63,6 +71,7 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             lock (_lock)
             {
+                // Eliminar juicios cuyo tiempo de vida visual haya expirado
                 _queue.RemoveAll(j => currentTime - j.Time > DISPLAY_LIFETIME);
             }
         }
@@ -71,17 +80,20 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             if (_fontRenderer == null) return;
 
-            _spriteBatch.Begin();
+            // Nota: No llamamos a Begin/End aquí porque esta función se llama
+            // desde dentro de ManiaPlayfield.Draw() que ya tiene un Begin() activo.
+            // Solo dibujamos el contenido.
 
-            // Draw most recent judgement centered at Position
             QueuedJudgement? latest = null;
             lock (_lock)
             {
+                // Obtener el juicio más reciente para renderizarlo
                 if (_queue.Count > 0) latest = _queue[^1];
             }
 
             if (latest != null)
             {
+                // Calcular el progreso de la animación basado en la edad del juicio
                 double age = currentTime - latest.Time;
                 float progress = 1f - (float)(age / DISPLAY_LIFETIME);
                 progress = Math.Clamp(progress, 0f, 1f);
@@ -89,27 +101,28 @@ namespace Nullscent.Rulesets.Mania.UI
                 string text = latest.Result.ToString();
                 int combo = latest.Combo;
 
-                // Scale and fade
+                // Calcular escala y desvanecimiento (fade out)
                 float scale = 1.0f + 0.5f * progress;
                 float alpha = 0.6f + 0.4f * progress;
 
                 _fontRenderer.SetFontSize(48);
                 var color = GetColorForResult(latest.Result) * alpha;
 
-                // Draw judgement text centered
+                // Dibujar el texto del juicio centrado
                 _fontRenderer.DrawTextCentered(text, (int)Position.X, (int)Position.Y - 20, color, scale);
 
-                // Draw combo below judgement if > 1
+                // Dibujar el contador de combo debajo del juicio si es mayor a 1
                 if (combo > 1)
                 {
                     _fontRenderer.SetFontSize(36);
                     _fontRenderer.DrawTextCentered(combo + "x", (int)Position.X, (int)Position.Y + 30, Color.Yellow * alpha, 1.0f + 0.3f * progress);
                 }
             }
-
-            _spriteBatch.End();
         }
 
+        /// <summary>
+        /// Retorna el color correspondiente según el tipo de juicio.
+        /// </summary>
         private Color GetColorForResult(HitResult result)
         {
             return result switch
@@ -128,6 +141,7 @@ namespace Nullscent.Rulesets.Mania.UI
             _queue.Clear();
         }
 
+        // Estructura interna para almacenar datos de juicios encolados
         private class QueuedJudgement
         {
             public HitResult Result { get; set; }

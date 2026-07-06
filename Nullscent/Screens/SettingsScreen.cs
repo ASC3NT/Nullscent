@@ -67,22 +67,50 @@ namespace Nullscent.Screens
             _settingItems.Add(new SettingItem(
                 "Master Volume",
                 () => $"{(int)(_settings.MasterVolume * 100)}%",
-                () => { _settings.MasterVolume = (float)Math.Clamp(_settings.MasterVolume - 0.05, 0.0, 1.0); _settings.Save(); _game.AudioEngine.Volume = _settings.MasterVolume; },
-                () => { _settings.MasterVolume = (float)Math.Clamp(_settings.MasterVolume + 0.05, 0.0, 1.0); _settings.Save(); _game.AudioEngine.Volume = _settings.MasterVolume; }
+                () => { 
+                    _settings.MasterVolume = (float)Math.Clamp(_settings.MasterVolume - 0.05, 0.0, 1.0); 
+                    _settings.Save(); 
+                    _game.AudioEngine.Volume = _settings.MasterVolume;
+                    Core.SettingsService.Instance.MasterVolume = _settings.MasterVolume;
+                },
+                () => { 
+                    _settings.MasterVolume = (float)Math.Clamp(_settings.MasterVolume + 0.05, 0.0, 1.0); 
+                    _settings.Save(); 
+                    _game.AudioEngine.Volume = _settings.MasterVolume;
+                    Core.SettingsService.Instance.MasterVolume = _settings.MasterVolume;
+                }
             ));
 
             _settingItems.Add(new SettingItem(
                 "Music Volume",
                 () => $"{(int)(_settings.MusicVolume * 100)}%",
-                () => { _settings.MusicVolume = (float)Math.Clamp(_settings.MusicVolume - 0.05, 0.0, 1.0); _settings.Save(); },
-                () => { _settings.MusicVolume = (float)Math.Clamp(_settings.MusicVolume + 0.05, 0.0, 1.0); _settings.Save(); }
+                () => { 
+                    _settings.MusicVolume = (float)Math.Clamp(_settings.MusicVolume - 0.05, 0.0, 1.0); 
+                    _settings.Save(); 
+                    _game.AudioEngine.StreamVolume = _settings.MusicVolume;
+                    Core.SettingsService.Instance.MusicVolume = _settings.MusicVolume;
+                },
+                () => { 
+                    _settings.MusicVolume = (float)Math.Clamp(_settings.MusicVolume + 0.05, 0.0, 1.0); 
+                    _settings.Save(); 
+                    _game.AudioEngine.StreamVolume = _settings.MusicVolume;
+                    Core.SettingsService.Instance.MusicVolume = _settings.MusicVolume;
+                }
             ));
 
             _settingItems.Add(new SettingItem(
                 "Hitsound Volume",
                 () => $"{(int)(_settings.HitsoundVolume * 100)}%",
-                () => { _settings.HitsoundVolume = (float)Math.Clamp(_settings.HitsoundVolume - 0.05, 0.0, 1.0); _settings.Save(); },
-                () => { _settings.HitsoundVolume = (float)Math.Clamp(_settings.HitsoundVolume + 0.05, 0.0, 1.0); _settings.Save(); }
+                () => { 
+                    _settings.HitsoundVolume = (float)Math.Clamp(_settings.HitsoundVolume - 0.05, 0.0, 1.0); 
+                    _settings.Save(); 
+                    Core.SettingsService.Instance.HitsoundVolume = _settings.HitsoundVolume;
+                },
+                () => { 
+                    _settings.HitsoundVolume = (float)Math.Clamp(_settings.HitsoundVolume + 0.05, 0.0, 1.0); 
+                    _settings.Save(); 
+                    Core.SettingsService.Instance.HitsoundVolume = _settings.HitsoundVolume;
+                }
             ));
 
             _settingItems.Add(new SettingItem(

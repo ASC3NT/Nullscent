@@ -66,13 +66,13 @@ namespace Nullscent.Rulesets.Mania.Judgements
         {
             return result switch
             {
-                HitResult.Perfect => 1.0,      // 100%
-                HitResult.Great => 1.0,        // 100%
-                HitResult.Good => 0.6667,      // 66.67%
-                HitResult.Ok => 0.3333,        // 33.33%
-                HitResult.Meh => 0.1667,       // 16.67%
-                HitResult.Miss => 0.0,         // 0%
-                _ => 0
+                HitResult.Perfect => 305.0 / 305.0, // 100.0%
+                HitResult.Great => 300.0 / 305.0,   // ~98.36%
+                HitResult.Good => 200.0 / 305.0,    // ~65.57%
+                HitResult.Ok => 100.0 / 305.0,     // ~32.79%
+                HitResult.Meh => 50.0 / 305.0,      // ~16.39%
+                HitResult.Miss => 0.0,
+                _ => 0.0
             };
         }
 
@@ -139,7 +139,7 @@ namespace Nullscent.Rulesets.Mania.Judgements
     /// </summary>
     public class ManiaHitWindows
     {
-        private readonly Dictionary<HitResult, double> _windows = new();
+        protected readonly Dictionary<HitResult, double> _windows = new();
         private readonly double _overallDifficulty;
         private readonly bool _isForCurrentRuleset;
 
@@ -236,8 +236,8 @@ namespace Nullscent.Rulesets.Mania.Judgements
         /// </summary>
         public bool IsPastAutoMissWindow(double timeOffset)
         {
-            // Auto-miss happens after OK window passes (late side)
-            return timeOffset > _windows[HitResult.Ok];
+            // Auto-miss happens after Miss window passes (late side)
+            return timeOffset > _windows[HitResult.Miss];
         }
 
         /// <summary>
@@ -365,8 +365,7 @@ namespace Nullscent.Rulesets.Mania.Judgements
                 perfectWindow = 24.9 - 1.1 * overallDifficulty;
             }
 
-            // Update the window dictionary via reflection or recreate
-            // For now, we'll just log it
+            _windows[HitResult.Perfect] = perfectWindow;
             Console.WriteLine($"[ScoreV2] PERFECT window adjusted to: ±{perfectWindow:F1}ms");
         }
     }

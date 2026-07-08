@@ -67,9 +67,6 @@ namespace Nullscent.UI
         public string FullDisplayName => $"{DisplayArtist} - {DisplayTitle}";
     }
 
-    /// <summary>
-    /// Representa una dificultad individual dentro de un beatmap set.
-    /// </summary>
     public class BeatmapDifficulty
     {
         /// <summary>
@@ -116,6 +113,33 @@ namespace Nullscent.UI
         /// Beatmap ID único.
         /// </summary>
         public int BeatmapID { get; set; }
+
+        /// <summary>
+        /// Nombre del archivo de audio (.mp3, etc.).
+        /// </summary>
+        public string AudioFilename { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Tiempo de previsualización en ms.
+        /// </summary>
+        public int PreviewTime { get; set; } = -1;
+
+        /// <summary>
+        /// Estimación de dificultad en estrellas (Star Rating ★).
+        /// </summary>
+        public double StarRating
+        {
+            get
+            {
+                if (Length <= 0 || ObjectCount <= 0) return 0.0;
+                double seconds = Length / 1000.0;
+                double density = ObjectCount / seconds;
+                double bpmFactor = Math.Clamp(BPM / 150.0, 0.5, 2.0);
+                double stars = density * 0.45 * bpmFactor;
+                double keyFactor = 1.0 + (KeyCount - 4) * 0.05;
+                return Math.Round(Math.Clamp(stars * keyFactor, 0.5, 10.0), 2);
+            }
+        }
     }
 
     /// <summary>

@@ -117,7 +117,9 @@ namespace Nullscent.UI
                         BPM = beatmap.MostCommonBPM,
                         Length = beatmap.TotalLength,
                         ObjectCount = beatmap.HitObjects.Count,
-                        BeatmapID = beatmap.Metadata.BeatmapID
+                        BeatmapID = beatmap.Metadata.BeatmapID,
+                        AudioFilename = beatmap.Metadata.AudioFilename,
+                        PreviewTime = beatmap.Metadata.PreviewTime
                     };
 
                     set.Difficulties.Add(difficulty);

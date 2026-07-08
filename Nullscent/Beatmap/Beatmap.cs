@@ -164,5 +164,85 @@ namespace Nullscent.Beatmap
             var inheritedPoint = GetInheritedTimingPointAt(time);
             return inheritedPoint?.ScrollVelocityMultiplier ?? 1.0;
         }
+
+        private bool _isScrollPrecalculated = false;
+        private readonly List<double> _accumulatedScrolls = new();
+
+        private void PrecalculateScrolls()
+        {
+            if (_isScrollPrecalculated) return;
+
+            _accumulatedScrolls.Clear();
+            if (TimingPoints.Count == 0)
+            {
+                _isScrollPrecalculated = true;
+                return;
+            }
+
+            // Ordenar timing points por offset y tipo para que inherited (SV) sobreescriba uninherited (BPM)
+            TimingPoints.Sort((a, b) =>
+            {
+                int cmp = a.Offset.CompareTo(b.Offset);
+                if (cmp != 0) return cmp;
+                return b.Uninherited.CompareTo(a.Uninherited);
+            });
+
+            double currentAccumulated = 0.0;
+            _accumulatedScrolls.Add(0.0);
+
+            for (int i = 1; i < TimingPoints.Count; i++)
+            {
+                double duration = TimingPoints[i].Offset - TimingPoints[i - 1].Offset;
+                double multiplier = TimingPoints[i - 1].ScrollVelocityMultiplier;
+                currentAccumulated += duration * multiplier;
+                _accumulatedScrolls.Add(currentAccumulated);
+            }
+
+            _isScrollPrecalculated = true;
+        }
+
+        /// <summary>
+        /// Obtiene la posición acumulada virtual del scroll para calcular la coordenada Y física de renderizado.
+        /// </summary>
+        public double GetScrollPosition(double time)
+        {
+            if (TimingPoints.Count == 0)
+                return time;
+
+            PrecalculateScrolls();
+
+            int index = TimingPoints.BinarySearch(new TimingPoint { Offset = time }, new TimingPointOffsetComparer());
+            if (index < 0)
+            {
+                index = ~index - 1;
+            }
+
+            if (index < 0)
+            {
+                double multiplier = TimingPoints[0].ScrollVelocityMultiplier;
+                double offsetDiff = time - TimingPoints[0].Offset;
+                return _accumulatedScrolls[0] + offsetDiff * multiplier;
+            }
+
+            if (index >= TimingPoints.Count - 1)
+            {
+                double multiplier = TimingPoints[index].ScrollVelocityMultiplier;
+                double offsetDiff = time - TimingPoints[index].Offset;
+                return _accumulatedScrolls[index] + offsetDiff * multiplier;
+            }
+
+            double segmentMultiplier = TimingPoints[index].ScrollVelocityMultiplier;
+            double segmentDiff = time - TimingPoints[index].Offset;
+            return _accumulatedScrolls[index] + segmentDiff * segmentMultiplier;
+        }
+
+        private class TimingPointOffsetComparer : IComparer<TimingPoint>
+        {
+            public int Compare(TimingPoint? x, TimingPoint? y)
+            {
+                if (x == null || y == null) return 0;
+                return x.Offset.CompareTo(y.Offset);
+            }
+        }
     }
 }

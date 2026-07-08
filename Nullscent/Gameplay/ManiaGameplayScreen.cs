@@ -44,16 +44,17 @@ namespace Nullscent.Gameplay
         private ManiaPauseOverlay? _pauseOverlay;
         private TrueTypeFontRenderer? _fontRenderer;
         private HitErrorBar? _hitErrorBar;
+        private LoadingScreen? _loadingScreen;
+        private GameplayClock? _gameplayClock;
 
         // Recurso optimizado para primitivas 2D
         private Texture2D? _whitePixel;
+        private Texture2D? _bgTexture;
 
         private readonly List<ManiaMod> _activeMods = new();
         private bool _isPaused;
         private bool _isInitialized;
         private bool _wasEscapePressed;
-        private bool _hasStarted;
-        private double _startupDelayTimer;
         private double _currentTime;
         private string? _scrollNotificationText;
         private double _scrollNotificationTimer;
@@ -112,12 +113,17 @@ namespace Nullscent.Gameplay
             int totalNotes = _maniaBeatmap.Notes.Count();
             int totalLongNotes = _maniaBeatmap.HoldNotes.Count();
             _scoreProcessor = new ManiaScoreProcessor(
-                totalNotes + totalLongNotes,
+                totalNotes,
                 totalLongNotes,
                 _originalBeatmap.HPDrainRate,
                 _settings.HealthDrainEnabled,
+                _activeMods,
                 isScoreV2: true 
             );
+
+            // Initialize loading screen
+            _loadingScreen = new LoadingScreen(_graphicsDevice, _spriteBatch, _game.FontRenderer, 1200);
+            _loadingScreen.SetScreenDimensions(_game.WindowWidth, _game.WindowHeight);
 
             // ==========================================
             // PREVENCIÓN DE FUGAS DE MEMORIA: Textura global
@@ -135,6 +141,7 @@ namespace Nullscent.Gameplay
                 _game.FontRenderer, 
                 _originalBeatmap.OverallDifficulty 
             );
+            _playfield.Beatmap = _originalBeatmap;
 
             // Poblar las columnas con las notas del mapa
             foreach (var hitObject in _maniaBeatmap.HitObjects)
@@ -145,7 +152,7 @@ namespace Nullscent.Gameplay
             // Componentes de interfaz (HUD y Pausa)
             _fontRenderer = _game.FontRenderer;
             _hud = new ManiaHUD(_graphicsDevice, _spriteBatch, _fontRenderer, _maniaConfig);
-            _pauseOverlay = new ManiaPauseOverlay(_graphicsDevice, _spriteBatch, _audioEngine, _fontRenderer);
+            _pauseOverlay = new ManiaPauseOverlay(_graphicsDevice, _spriteBatch, _fontRenderer);
 
             // ==========================================
             // CONFIGURACIÓN DEL HIT ERROR BAR
@@ -167,7 +174,7 @@ namespace Nullscent.Gameplay
             SetupColumnBindings(_maniaBeatmap.KeyCount);
 
             // Configuración del track de audio relativo a la ruta del mapa
-            string audioPath = System.IO.Path.Combine(_originalBeatmap.Directory, _originalBeatmap.Metadata.AudioFilename ?? "");
+            string audioPath = System.IO.Path.Combine(_originalBeatmap!.Directory ?? "", _originalBeatmap.Metadata.AudioFilename ?? "");
             
             if (System.IO.File.Exists(audioPath))
             {
@@ -181,8 +188,16 @@ namespace Nullscent.Gameplay
                 Console.WriteLine($"[ManiaGameplayScreen] ERROR CRÍTICO: Archivo de audio no encontrado en la ruta {audioPath}");
             }
 
+            // Setup gameplay clock with lead-in (defaulting to AudioLeadIn, fallback to 1500ms)
+            double leadIn = _originalBeatmap?.Metadata?.AudioLeadIn ?? 1500;
+            _gameplayClock = new GameplayClock(_audioEngine, leadIn);
+            _gameplayClock.Start();
+
             _previousKeyboardState = Keyboard.GetState();
             Core.SettingsService.Instance.SettingChanged += OnSettingChanged; 
+
+            // Cargar fondo de pantalla del mapa
+            LoadBackgroundTexture();
             
             _isInitialized = true;
         }
@@ -305,13 +320,27 @@ namespace Nullscent.Gameplay
             if (!_isInitialized || _maniaBeatmap == null || _playfield == null || _scoreProcessor == null)
                 return;
 
-            _audioEngine.Update(_originalBeatmap?.Metadata?.AudioLeadIn ?? 0);
-            _currentTime = _audioEngine.CurrentPositionMs;
+            var keyboardState = Keyboard.GetState();
+
+            // Permitir cambio de scroll speed (F3/F4) en cualquier momento, incluso cargando
+            HandleScrollSpeedInput(keyboardState);
+
+            if (_loadingScreen != null && _loadingScreen.IsActive)
+            {
+                _loadingScreen.Update(gameTime);
+                if (!_loadingScreen.IsFadingOut)
+                {
+                    _previousKeyboardState = keyboardState;
+                    return;
+                }
+            }
+
+            _gameplayClock?.Update(gameTime.ElapsedGameTime.TotalMilliseconds);
+            _currentTime = _gameplayClock?.CurrentTime ?? 0.0;
 
             double runtimeScrollSpeed = Core.SettingsService.Instance.ScrollSpeed;
             _maniaConfig.ScrollSpeed = runtimeScrollSpeed;
 
-            var keyboardState = Keyboard.GetState();
             bool escapePressed = keyboardState.IsKeyDown(Keys.Escape);
 
             if (escapePressed && !_wasEscapePressed && !_isPaused)
@@ -333,17 +362,6 @@ namespace Nullscent.Gameplay
                 return;
             }
 
-            // Auto-inicio de audio después de un pequeño buffer de tiempo real (200ms) para transición fluida
-            if (!_hasStarted)
-            {
-                _startupDelayTimer += gameTime.ElapsedGameTime.TotalMilliseconds;
-                if (_startupDelayTimer >= 200)
-                {
-                    _audioEngine.Play();
-                    _hasStarted = true;
-                }
-            }
-
             HandleInput(keyboardState);
 
             // Fórmula base de velocidad de caída (scroll speed)
@@ -353,7 +371,7 @@ namespace Nullscent.Gameplay
 
             if (!_scoreProcessor.HasFailed)
             {
-                _scoreProcessor.UpdateHealthDrain(gameTime.ElapsedGameTime.TotalSeconds);
+                _scoreProcessor.UpdateHealthDrain(_currentTime);
             }
 
             _hitErrorBar?.Update(_currentTime);
@@ -369,10 +387,10 @@ namespace Nullscent.Gameplay
             }
 
             // Evaluar condición de fin de nivel
-            bool allObjectsJudged = _scoreProcessor.TotalJudgements >= _maniaBeatmap.TotalHitObjects;
+            bool allObjectsJudged = _scoreProcessor.TotalJudgements >= _scoreProcessor.TotalHitObjects;
             bool audioFinished = !_audioEngine.IsPlaying && _currentTime >= _audioEngine.LengthMs - 1000; 
 
-            if (audioFinished && allObjectsJudged && !_isPaused && _maniaBeatmap.TotalHitObjects > 0)
+            if (audioFinished && allObjectsJudged && !_isPaused && _scoreProcessor.TotalHitObjects > 0)
             {
                 TransitionToResults();
             }
@@ -384,6 +402,25 @@ namespace Nullscent.Gameplay
         {
             if (_playfield == null || _scoreProcessor == null) return;
 
+            foreach (var (column, key) in _columnBindings)
+            {
+                bool wasPressed = _previousKeyboardState.IsKeyDown(key);
+                bool isPressed = keyboardState.IsKeyDown(key);
+
+                if (isPressed && !wasPressed)
+                {
+                    // Sincronizar el input exactamente con el reloj de audio
+                    _playfield.HandleKeyPress(column, _currentTime, _scoreProcessor);
+                }
+                else if (!isPressed && wasPressed)
+                {
+                    _playfield.HandleKeyRelease(column, _currentTime, _scoreProcessor);
+                }
+            }
+        }
+
+        private void HandleScrollSpeedInput(KeyboardState keyboardState)
+        {
             // Ajuste de scroll speed en tiempo real (F3: disminuir, F4: aumentar)
             if (keyboardState.IsKeyDown(Keys.F3) && !_previousKeyboardState.IsKeyDown(Keys.F3))
             {
@@ -411,24 +448,6 @@ namespace Nullscent.Gameplay
                     Console.WriteLine($"[ManiaGameplayScreen] Scroll speed increased to {newSpeed}");
                 }
             }
-
-            foreach (var (column, key) in _columnBindings)
-            {
-                bool wasPressed = _previousKeyboardState.IsKeyDown(key);
-                bool isPressed = keyboardState.IsKeyDown(key);
-
-                if (isPressed && !wasPressed)
-                {
-                    // Sincronizar el input exactamente con el reloj de audio
-                    double timestamp = _audioEngine.CurrentPositionMs;
-                    _playfield.HandleKeyPress(column, timestamp, _scoreProcessor);
-                }
-                else if (!isPressed && wasPressed)
-                {
-                    double timestamp = _audioEngine.CurrentPositionMs;
-                    _playfield.HandleKeyRelease(column, timestamp, _scoreProcessor);
-                }
-            }
         }
 
         public void Draw(GameTime gameTime)
@@ -436,26 +455,41 @@ namespace Nullscent.Gameplay
             if (!_isInitialized || _playfield == null || _scoreProcessor == null || _hud == null)
                 return;
 
-            _graphicsDevice.Clear(new Color(15, 15, 20));
+            _graphicsDevice.Clear(Color.Black);
 
+            _spriteBatch.Begin();
+            if (_bgTexture != null)
+            {
+                // Dibujar el fondo del beatmap
+                _spriteBatch.Draw(_bgTexture, new Rectangle(0, 0, _game.WindowWidth, _game.WindowHeight), Color.White);
+            }
+            // Dibujar capa de oscurecimiento (dim)
+            double dimAmount = Math.Clamp(_settings.BackgroundDim / 100.0, 0.0, 1.0);
+            if (_bgTexture == null) dimAmount = 1.0; // Negro absoluto si no hay fondo
+            _spriteBatch.Draw(_whitePixel!, new Rectangle(0, 0, _game.WindowWidth, _game.WindowHeight), Color.Black * (float)dimAmount);
+            _spriteBatch.End();
+
+            // Dibujar playfield (las notas se renderizan sin oscurecer sobre el fondo)
             double scrollSpeed = (_game.WindowHeight / 1.5) * _maniaConfig.ScrollSpeed;
             _playfield.Draw(_currentTime, scrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
-            if (_settings.BackgroundDim > 0)
-            {
-                DrawBackgroundDim();
-            }
+            _hud.Draw(_scoreProcessor, _originalBeatmap!, _currentTime, _activeMods);
 
-            _hud.Draw(gameTime, _scoreProcessor, _originalBeatmap!, _currentTime, _activeMods);
-
-            // Renderizado óptimo de la barra de error usando la textura cacheada
-            if (_hitErrorBar != null && Core.SettingsService.Instance.ShowHitErrorBar && _whitePixel != null)
+            // Draw hit error bar if enabled (only when loading screen is not active)
+            if (!(_loadingScreen != null && _loadingScreen.IsActive) && _hitErrorBar != null && Core.SettingsService.Instance.ShowHitErrorBar && _whitePixel != null)
             {
                 _spriteBatch.Begin();
-                _hitErrorBar.Draw(_spriteBatch, _whitePixel, _currentTime);
+                _hitErrorBar.Draw(_spriteBatch, _whitePixel, _currentTime, _fontRenderer);
                 _spriteBatch.End();
             }
 
+            // Draw loading screen overlay on top of everything if active
+            if (_loadingScreen != null && _loadingScreen.IsActive)
+            {
+                _loadingScreen.Draw();
+            }
+
+            // Draw scroll speed notification (ALWAYS draw on top of everything!)
             if (_scrollNotificationTimer > 0 && !string.IsNullOrEmpty(_scrollNotificationText) && _fontRenderer != null)
             {
                 double progress = _scrollNotificationTimer / 1200.0;
@@ -464,7 +498,7 @@ namespace Nullscent.Gameplay
                 int panelW = 280;
                 int panelH = 50;
                 int panelX = (_game.WindowWidth - panelW) / 2;
-                int panelY = (int)(_maniaConfig.ReceptorPosition - 80);
+                int panelY = (_game.WindowHeight - panelH) / 2 - 50;
 
                 _spriteBatch.Begin();
                 _fontRenderer.SetFontSize(24);
@@ -480,28 +514,17 @@ namespace Nullscent.Gameplay
             }
         }
 
-        private void DrawBackgroundDim()
-        {
-            if (_whitePixel == null) return;
-
-            _spriteBatch.Begin();
-            double dimAmount = Math.Min(_settings.BackgroundDim / 100.0, 0.7); 
-            var fullScreenRect = new Rectangle(0, 0, _game.WindowWidth, _game.WindowHeight);
-            _spriteBatch.Draw(_whitePixel, fullScreenRect, new Color(0, 0, 0, (float)dimAmount));
-            _spriteBatch.End();
-        }
-
         private void Pause()
         {
             _isPaused = true;
-            _audioEngine.Pause();
+            _gameplayClock?.Pause();
             _pauseOverlay?.Show();
         }
 
         private void Resume()
         {
             _isPaused = false;
-            _audioEngine.Play(restart: false);
+            _gameplayClock?.Resume();
             _pauseOverlay?.Hide();
             _previousKeyboardState = Keyboard.GetState(); 
         }
@@ -572,9 +595,50 @@ namespace Nullscent.Gameplay
 
             // Liberación de recursos no administrados (Textura cacheada)
             _whitePixel?.Dispose();
+            _bgTexture?.Dispose();
+            _bgTexture = null;
             _pauseOverlay?.Dispose();
             _playfield?.Dispose();
+            _loadingScreen?.Dispose();
             _isInitialized = false;
+        }
+
+        private void LoadBackgroundTexture()
+        {
+            if (string.IsNullOrEmpty(_originalBeatmap!.Directory) || !System.IO.Directory.Exists(_originalBeatmap.Directory))
+                return;
+
+            var extensions = new[] { "*.jpg", "*.jpeg", "*.png" };
+            string? bgPath = null;
+            foreach (var ext in extensions)
+            {
+                try
+                {
+                    var files = System.IO.Directory.GetFiles(_originalBeatmap.Directory, ext);
+                    if (files.Length > 0)
+                    {
+                        bgPath = files[0];
+                        break;
+                    }
+                }
+                catch { }
+            }
+
+            if (bgPath != null && System.IO.File.Exists(bgPath))
+            {
+                try
+                {
+                    using (var stream = new System.IO.FileStream(bgPath, System.IO.FileMode.Open, System.IO.FileAccess.Read))
+                    {
+                        _bgTexture = Texture2D.FromStream(_graphicsDevice, stream);
+                    }
+                    Console.WriteLine($"[ManiaGameplayScreen] Loaded gameplay background: {System.IO.Path.GetFileName(bgPath)}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ManiaGameplayScreen] Failed to load gameplay bg: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>

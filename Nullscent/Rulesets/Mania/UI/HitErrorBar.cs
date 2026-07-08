@@ -3,6 +3,7 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Nullscent.Rulesets.Mania.Judgements;
+using Nullscent.UI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -85,19 +86,19 @@ namespace Nullscent.Rulesets.Mania.UI
         /// <summary>
         /// Draw the error bar.
         /// </summary>
-        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime)
+        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime, TrueTypeFontRenderer? fontRenderer = null)
         {
             // Draw background
             var bgRect = new Rectangle(_x, _y, _width, _height);
             spriteBatch.Draw(pixel, bgRect, new Color(0, 0, 0, 180));
 
+            // Draw hit window boundaries as colored segments
+            DrawWindowBoundaries(spriteBatch, pixel);
+
             // Draw center line (perfect timing)
             int centerX = _x + _width / 2;
             var centerLine = new Rectangle(centerX - 1, _y, 2, _height);
-            spriteBatch.Draw(pixel, centerLine, Color.White);
-
-            // Draw hit window boundaries
-            DrawWindowBoundaries(spriteBatch, pixel);
+            spriteBatch.Draw(pixel, centerLine, Color.White * 0.8f);
 
             // Draw hit markers
             foreach (var hit in _recentHits)
@@ -105,40 +106,55 @@ namespace Nullscent.Rulesets.Mania.UI
                 DrawHitMarker(spriteBatch, pixel, hit, currentTime);
             }
 
+            // Draw average offset indicator if there are recent hits
+            if (_recentHits.Count > 0)
+            {
+                double maxWindow = _hitWindows.WindowFor(HitResult.Meh);
+                if (maxWindow <= 0) maxWindow = 200.0;
+
+                double avgOffset = _recentHits.Average(h => h.Offset);
+                double ratio = Math.Clamp(avgOffset / maxWindow, -1.0, 1.0);
+                int offsetX = (int)(ratio * (_width / 2));
+                int avgX = centerX + offsetX;
+
+                // Draw average indicator (thick white tick extending slightly)
+                var avgRect = new Rectangle(avgX - 2, _y - 2, 4, _height + 4);
+                spriteBatch.Draw(pixel, avgRect, Color.White * 0.9f);
+            }
+
             // Draw early/late labels
-            DrawLabels(spriteBatch);
+            if (fontRenderer != null)
+            {
+                DrawLabels(spriteBatch, fontRenderer);
+            }
         }
 
         private void DrawWindowBoundaries(SpriteBatch spriteBatch, Texture2D pixel)
         {
             int centerX = _x + _width / 2;
             double maxWindow = _hitWindows.WindowFor(HitResult.Meh);
+            if (maxWindow <= 0) maxWindow = 200.0;
 
-            // Draw boundaries for each judgement tier
-            DrawBoundary(spriteBatch, pixel, centerX, HitResult.Perfect, maxWindow, new Color(255, 255, 100, 100));
-            DrawBoundary(spriteBatch, pixel, centerX, HitResult.Great, maxWindow, new Color(100, 255, 100, 80));
-            DrawBoundary(spriteBatch, pixel, centerX, HitResult.Good, maxWindow, new Color(100, 200, 255, 60));
-        }
+            var results = new[] { HitResult.Meh, HitResult.Ok, HitResult.Good, HitResult.Great, HitResult.Perfect };
+            var colors = new[]
+            {
+                new Color(150, 150, 150, 60),   // Meh (Dark Grey)
+                new Color(255, 150, 50, 60),    // Ok (Orange)
+                new Color(255, 255, 100, 60),   // Good (Yellow)
+                new Color(100, 255, 100, 60),   // Great (Green)
+                new Color(84, 200, 255, 100)    // Perfect (Cyan)
+            };
 
-        private void DrawBoundary(SpriteBatch spriteBatch, Texture2D pixel, int centerX, 
-            HitResult result, double maxWindow, Color color)
-        {
-            double window = _hitWindows.WindowFor(result);
-            if (window <= 0) return;
+            for (int i = 0; i < results.Length; i++)
+            {
+                double window = _hitWindows.WindowFor(results[i]);
+                if (window <= 0) continue;
 
-            // Calculate pixel position
-            double ratio = window / maxWindow;
-            int offset = (int)(ratio * (_width / 2));
-
-            // Draw left and right boundary lines
-            int leftX = centerX - offset;
-            int rightX = centerX + offset;
-
-            var leftLine = new Rectangle(leftX, _y, 1, _height);
-            var rightLine = new Rectangle(rightX, _y, 1, _height);
-
-            spriteBatch.Draw(pixel, leftLine, color);
-            spriteBatch.Draw(pixel, rightLine, color);
+                double ratio = window / maxWindow;
+                int halfWidth = (int)(ratio * (_width / 2));
+                var rect = new Rectangle(centerX - halfWidth, _y, halfWidth * 2, _height);
+                spriteBatch.Draw(pixel, rect, colors[i]);
+            }
         }
 
         private void DrawHitMarker(SpriteBatch spriteBatch, Texture2D pixel, HitErrorEntry hit, double currentTime)
@@ -150,39 +166,44 @@ namespace Nullscent.Rulesets.Mania.UI
 
             int centerX = _x + _width / 2;
             double maxWindow = _hitWindows.WindowFor(HitResult.Meh);
+            if (maxWindow <= 0) maxWindow = 200.0;
 
             // Calculate position based on offset
             double ratio = Math.Clamp(hit.Offset / maxWindow, -1.0, 1.0);
             int offsetX = (int)(ratio * (_width / 2));
             int markerX = centerX + offsetX;
 
-            // Draw marker
+            // Draw marker as a vertical tick
             Color markerColor = GetColorForResult(hit.Result) * alpha;
-            int markerSize = 4;
+            int tickWidth = 2;
             var markerRect = new Rectangle(
-                markerX - markerSize / 2,
-                _y + (_height - markerSize) / 2,
-                markerSize,
-                markerSize
+                markerX - tickWidth / 2,
+                _y,
+                tickWidth,
+                _height
             );
 
             spriteBatch.Draw(pixel, markerRect, markerColor);
         }
 
-        private void DrawLabels(SpriteBatch spriteBatch)
+        private void DrawLabels(SpriteBatch spriteBatch, TrueTypeFontRenderer fontRenderer)
         {
-            // TODO: Add "Early" and "Late" text labels using TrueTypeFontRenderer
+            fontRenderer.SetFontSize(12);
+            // Draw "Early" on the left
+            fontRenderer.DrawTextRight("Early", _x - 8, _y + (_height - 12) / 2, Color.White * 0.7f, 1.0f);
+            // Draw "Late" on the right
+            fontRenderer.DrawText("Late", _x + _width + 8, _y + (_height - 12) / 2, Color.White * 0.7f, 1.0f);
         }
 
         private Color GetColorForResult(HitResult result)
         {
             return result switch
             {
-                HitResult.Perfect => new Color(255, 255, 100),
-                HitResult.Great => new Color(100, 255, 100),
-                HitResult.Good => new Color(100, 200, 255),
-                HitResult.Ok => new Color(200, 150, 255),
-                HitResult.Meh => new Color(200, 200, 200),
+                HitResult.Perfect => new Color(84, 200, 255),  // Cyan
+                HitResult.Great => new Color(100, 255, 100),    // Green
+                HitResult.Good => new Color(255, 255, 100),     // Yellow
+                HitResult.Ok => new Color(255, 150, 50),        // Orange
+                HitResult.Meh => new Color(180, 100, 255),      // Purple
                 _ => Color.Gray
             };
         }

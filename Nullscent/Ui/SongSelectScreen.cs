@@ -44,6 +44,13 @@ namespace Nullscent.UI
         private bool _showModsOverlay;
         private readonly List<ManiaMod> _activeMods = new();
 
+        // Audio preview, background images and sorting
+        private string? _lastSelectedDifficultyPath;
+        private Texture2D? _currentBackgroundTexture;
+        private string? _currentBackgroundImagePath;
+        public enum SortMode { Artist, Title, Stars, BPM, Length }
+        private SortMode _currentSortMode = SortMode.Artist;
+
         // Colors (osu!lazer style)
         private readonly Color _backgroundColor = new(20, 20, 30);
         private readonly Color _accentColor = new(255, 102, 171); // Pink magenta
@@ -99,6 +106,7 @@ namespace Nullscent.UI
 
             _songList.LoadBeatmapSets(beatmapSets);
             _isScanning = false;
+            _game.Window.TextInput += OnTextInput;
 
             Console.WriteLine($"[SongSelectScreen] Scan complete: {beatmapSets.Count} sets loaded");
         }
@@ -110,6 +118,46 @@ namespace Nullscent.UI
 
             var currentKeyboardState = Keyboard.GetState();
             var currentMouseState = Mouse.GetState();
+
+            // Detectar cambio de selección para reproducir preview de audio y cargar fondo
+            var selectedDiff = _songList.SelectedDifficulty;
+            if (selectedDiff != null && selectedDiff.FilePath != _lastSelectedDifficultyPath)
+            {
+                _lastSelectedDifficultyPath = selectedDiff.FilePath;
+                PlaySongPreview(selectedDiff);
+                LoadBackgroundTexture(selectedDiff);
+            }
+
+            // Actualizar reloj maestro de audio para permitir bucle de preview
+            if (_audioEngine.IsPlaying)
+            {
+                _audioEngine.Update();
+                if (selectedDiff != null && _audioEngine.LengthMs > 0 && _audioEngine.CurrentPositionMs >= _audioEngine.LengthMs - 100)
+                {
+                    double previewStart = selectedDiff.PreviewTime;
+                    if (previewStart <= 0) previewStart = _audioEngine.LengthMs * 0.4;
+                    _audioEngine.Seek(previewStart);
+                }
+            }
+
+            // Tecla F2 para ciclo de ordenamiento
+            if (IsKeyPressed(currentKeyboardState, Keys.F2))
+            {
+                _currentSortMode = (SortMode)(((int)_currentSortMode + 1) % Enum.GetValues(typeof(SortMode)).Length);
+                ApplySorting();
+            }
+
+            // Soporte para rueda de scroll del mouse en el carrusel de canciones
+            int pHeight = _graphicsDevice.Viewport.Height - 120;
+            int iHeight = 60;
+            int vItems = pHeight / iHeight;
+            int mouseScrollDelta = currentMouseState.ScrollWheelValue - _prevMouseState.ScrollWheelValue;
+            if (mouseScrollDelta != 0 && _songList.FilteredBeatmapSets.Count > 0)
+            {
+                int scrollDirection = mouseScrollDelta > 0 ? -1 : 1;
+                _songList.SelectedSetIndex = Math.Clamp(_songList.SelectedSetIndex + scrollDirection, 0, _songList.FilteredBeatmapSets.Count - 1);
+                _scrollOffset = Math.Max(0, _songList.SelectedSetIndex - vItems / 2);
+            }
 
             if (_showModsOverlay)
             {
@@ -311,11 +359,20 @@ namespace Nullscent.UI
                 StartSelectedBeatmap();
             }
 
-            // Escape para volver al main menu
+            // Escape para volver al main menu o limpiar búsqueda
             if (IsKeyPressed(keyboardState, Keys.Escape))
             {
-                var mainMenu = new MainMenuScreen(_game, _inputManager, _game.FontRenderer);
-                _stateManager.ChangeState(GameState.MainMenu, mainMenu);
+                if (_searchText.Length > 0)
+                {
+                    _searchText = string.Empty;
+                    _songList.SearchQuery = _searchText;
+                }
+                else
+                {
+                    _audioEngine.Stop();
+                    var mainMenu = new MainMenuScreen(_game, _inputManager, _game.FontRenderer);
+                    _stateManager.ChangeState(GameState.MainMenu, mainMenu);
+                }
             }
 
             // Backspace para borrar búsqueda
@@ -324,31 +381,21 @@ namespace Nullscent.UI
                 _searchText = _searchText[..^1];
                 _songList.SearchQuery = _searchText;
             }
-
-            // Input de búsqueda (letras/números)
-            HandleSearchInput(keyboardState);
         }
 
-        private void HandleSearchInput(KeyboardState keyboardState)
+        private void OnTextInput(object? sender, TextInputEventArgs e)
         {
-            if (_songList == null)
+            if (_isScanning || _showModsOverlay || _songList == null)
                 return;
 
-            // Detectar teclas presionadas para búsqueda
-            var keys = keyboardState.GetPressedKeys();
+            // Ignorar teclas de control manejadas en HandleInput para evitar interferencias
+            if (e.Key == Keys.Back || e.Key == Keys.Escape || e.Key == Keys.Enter || e.Key == Keys.Tab)
+                return;
 
-            foreach (var key in keys)
+            if (!char.IsControl(e.Character))
             {
-                if (_previousKeyboardState.IsKeyUp(key))
-                {
-                    char? character = GetCharFromKey(key, keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift));
-
-                    if (character.HasValue)
-                    {
-                        _searchText += character.Value;
-                        _songList.SearchQuery = _searchText;
-                    }
-                }
+                _searchText += e.Character;
+                _songList.SearchQuery = _searchText;
             }
         }
 
@@ -436,6 +483,128 @@ namespace Nullscent.UI
             Console.WriteLine($"[SongSelectScreen] Rescan complete: {beatmapSets.Count} sets loaded");
         }
 
+        private string? FindBackgroundImage(string directory)
+        {
+            if (string.IsNullOrEmpty(directory) || !System.IO.Directory.Exists(directory))
+                return null;
+
+            var extensions = new[] { "*.jpg", "*.jpeg", "*.png" };
+            foreach (var ext in extensions)
+            {
+                try
+                {
+                    var files = System.IO.Directory.GetFiles(directory, ext);
+                    if (files.Length > 0)
+                        return files[0];
+                }
+                catch
+                {
+                    // Ignorar errores de IO
+                }
+            }
+            return null;
+        }
+
+        private void LoadBackgroundTexture(BeatmapDifficulty diff)
+        {
+            string? bgPath = FindBackgroundImage(System.IO.Path.GetDirectoryName(diff.FilePath)!);
+            if (bgPath != _currentBackgroundImagePath)
+            {
+                _currentBackgroundImagePath = bgPath;
+                _currentBackgroundTexture?.Dispose();
+                _currentBackgroundTexture = null;
+
+                if (bgPath != null && System.IO.File.Exists(bgPath))
+                {
+                    try
+                    {
+                        using (var stream = new System.IO.FileStream(bgPath, System.IO.FileMode.Open, System.IO.FileAccess.Read))
+                        {
+                            _currentBackgroundTexture = Texture2D.FromStream(_graphicsDevice, stream);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[SongSelectScreen] Failed to load bg image: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        private void PlaySongPreview(BeatmapDifficulty diff)
+        {
+            try
+            {
+                _audioEngine.Stop();
+                string audioDir = System.IO.Path.GetDirectoryName(diff.FilePath) ?? string.Empty;
+                string audioPath = System.IO.Path.Combine(audioDir, diff.AudioFilename);
+
+                if (System.IO.File.Exists(audioPath))
+                {
+                    if (_audioEngine.LoadTrack(audioPath))
+                    {
+                        double previewStart = diff.PreviewTime;
+                        if (previewStart <= 0)
+                        {
+                            previewStart = _audioEngine.LengthMs * 0.4;
+                        }
+                        
+                        _audioEngine.Seek(previewStart);
+                        _audioEngine.Play();
+                        Console.WriteLine($"[SongSelectScreen] Playing preview for: {diff.DifficultyName} starting at {previewStart:F0}ms");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SongSelectScreen] Error playing preview: {ex.Message}");
+            }
+        }
+
+        private void ApplySorting()
+        {
+            if (_songList == null) return;
+            var selectedDiffPath = _songList.SelectedDifficulty?.FilePath;
+
+            var sets = new List<BeatmapSet>(_songList.AllBeatmapSets);
+            switch (_currentSortMode)
+            {
+                case SortMode.Artist:
+                    sets.Sort((a, b) => string.Compare(a.DisplayArtist, b.DisplayArtist, StringComparison.OrdinalIgnoreCase));
+                    break;
+                case SortMode.Title:
+                    sets.Sort((a, b) => string.Compare(a.DisplayTitle, b.DisplayTitle, StringComparison.OrdinalIgnoreCase));
+                    break;
+                case SortMode.Stars:
+                    sets.Sort((a, b) => {
+                        double maxA = a.Difficulties.Count > 0 ? a.Difficulties.Max(d => d.StarRating) : 0;
+                        double maxB = b.Difficulties.Count > 0 ? b.Difficulties.Max(d => d.StarRating) : 0;
+                        return maxB.CompareTo(maxA); // Higher stars first
+                    });
+                    break;
+                case SortMode.BPM:
+                    sets.Sort((a, b) => {
+                        double maxA = a.Difficulties.Count > 0 ? a.Difficulties.Max(d => d.BPM) : 0;
+                        double maxB = b.Difficulties.Count > 0 ? b.Difficulties.Max(d => d.BPM) : 0;
+                        return maxB.CompareTo(maxA); // Faster BPM first
+                    });
+                    break;
+                case SortMode.Length:
+                    sets.Sort((a, b) => {
+                        int maxA = a.Difficulties.Count > 0 ? a.Difficulties.Max(d => d.Length) : 0;
+                        int maxB = b.Difficulties.Count > 0 ? b.Difficulties.Max(d => d.Length) : 0;
+                        return maxB.CompareTo(maxA); // Longer first
+                    });
+                    break;
+            }
+
+            _songList.LoadBeatmapSets(sets);
+            if (selectedDiffPath != null)
+            {
+                _songList.TrySelectDifficultyByPath(selectedDiffPath);
+            }
+        }
+
         private void OpenImportFileDialog()
         {
             var thread = new System.Threading.Thread(() =>
@@ -504,6 +673,12 @@ namespace Nullscent.UI
 
             int screenWidth = _graphicsDevice.Viewport.Width;
             int screenHeight = _graphicsDevice.Viewport.Height;
+
+            // Dibujar fondo de pantalla de la canción con opacidad oscura (estilo osu!)
+            if (_currentBackgroundTexture != null)
+            {
+                _spriteBatch.Draw(_currentBackgroundTexture, new Rectangle(0, 0, screenWidth, screenHeight), Color.White * 0.15f);
+            }
 
             // Panel izquierdo: Lista de beatmaps
             DrawBeatmapList(screenWidth, screenHeight);
@@ -578,7 +753,11 @@ namespace Nullscent.UI
             // Texto
             Color color = isSelected ? _textColor : _dimTextColor;
 
-            string title = TruncateString(set.DisplayTitle, 30);
+            // Calcular estrellas máximas de las dificultades del set
+            double maxStars = set.Difficulties.Count > 0 ? set.Difficulties.Max(d => d.StarRating) : 0.0;
+            string starsText = maxStars > 0 ? $" {maxStars:F2}★" : "";
+
+            string title = TruncateString(set.DisplayTitle + starsText, 30);
             string artist = TruncateString(set.DisplayArtist, 30);
             string creator = $"mapped by {set.Creator}";
 
@@ -610,15 +789,28 @@ namespace Nullscent.UI
             int x = panelX + 20;
             int y = panelY + 20;
 
+            // Renderizar miniatura del fondo si está disponible (aspecto premium)
+            if (_currentBackgroundTexture != null)
+            {
+                int imgW = panelWidth - 40;
+                int imgH = (int)(imgW * 0.5f); // 2:1 ratio
+                var destRect = new Rectangle(x, y, imgW, imgH);
+                _spriteBatch.Draw(_currentBackgroundTexture, destRect, Color.White * 0.8f);
+                _fontRenderer.DrawBoxBorder(destRect, _accentColor * 0.5f, 2);
+                y += imgH + 15;
+            }
+
             // Título y artista
-            _fontRenderer.DrawText(selectedSet.DisplayTitle, x, y, _textColor);
+            _fontRenderer.SetFontSize(22);
+            _fontRenderer.DrawText(TruncateString(selectedSet.DisplayTitle, 35), x, y, _textColor);
+            y += 26;
+            _fontRenderer.SetFontSize(18);
+            _fontRenderer.DrawText(TruncateString(selectedSet.DisplayArtist, 35), x, y, _dimTextColor);
             y += 30;
-            _fontRenderer.DrawText(selectedSet.DisplayArtist, x, y, _dimTextColor);
-            y += 40;
 
             // Dificultades
             _fontRenderer.DrawText("Difficulties:", x, y, _textColor);
-            y += 25;
+            y += 22;
 
             for (int i = 0; i < selectedSet.Difficulties.Count; i++)
             {
@@ -626,30 +818,61 @@ namespace Nullscent.UI
                 bool isSelected = i == _songList.SelectedDifficultyIndex;
                 Color diffColor = isSelected ? _accentColor : _dimTextColor;
 
-                string diffText = $"[{diff.KeyCount}K] {diff.DifficultyName} - OD{diff.OverallDifficulty:F1}";
+                string diffText = $"[{diff.KeyCount}K] {diff.DifficultyName} ({diff.StarRating:F2}★)";
                 _fontRenderer.DrawText(diffText, x + 10, y, diffColor);
-                y += 22;
+                y += 20;
             }
 
-            y += 20;
+            y += 15;
 
             // Metadata de la dificultad seleccionada
             var selectedDiff = _songList.SelectedDifficulty;
             if (selectedDiff != null)
             {
                 _fontRenderer.DrawText("Stats:", x, y, _textColor);
-                y += 25;
+                y += 22;
+
+                _fontRenderer.DrawText($"Rating: {selectedDiff.StarRating:F2}★", x + 10, y, _accentColor);
+                y += 18;
 
                 _fontRenderer.DrawText($"BPM: {selectedDiff.BPM:F0}", x + 10, y, _dimTextColor);
-                y += 20;
+                y += 18;
 
                 _fontRenderer.DrawText($"Length: {FormatTime(selectedDiff.Length)}", x + 10, y, _dimTextColor);
-                y += 20;
+                y += 18;
 
                 _fontRenderer.DrawText($"Objects: {selectedDiff.ObjectCount}", x + 10, y, _dimTextColor);
-                y += 20;
+                y += 18;
 
-                _fontRenderer.DrawText($"HP: {selectedDiff.HPDrainRate:F1}", x + 10, y, _dimTextColor);
+                _fontRenderer.DrawText($"OD: {selectedDiff.OverallDifficulty:F1} | HP: {selectedDiff.HPDrainRate:F1}", x + 10, y, _dimTextColor);
+
+                // rankings locales
+                y += 25;
+                _fontRenderer.DrawText("Local Rankings:", x, y, _textColor);
+                y += 22;
+
+                var localScores = Nullscent.Core.LocalScoreManager.GetScores(selectedDiff.FilePath);
+                if (localScores.Count == 0)
+                {
+                    _fontRenderer.DrawText("No scores set yet", x + 10, y, _dimTextColor * 0.6f);
+                }
+                else
+                {
+                    int displayCount = Math.Min(5, localScores.Count);
+                    for (int i = 0; i < displayCount; i++)
+                    {
+                        var score = localScores[i];
+                        string modsStr = score.Mods == "None" ? "" : $" +{score.Mods}";
+                        string rankingText = $"#{i + 1} {score.PlayerName} - {score.Score:N0} ({score.Accuracy:F2}%){modsStr}";
+
+                        Color gradeColor = score.Grade.Contains("SS") || score.Grade.Contains("S") ? Color.Gold : _dimTextColor;
+                        if (score.Grade.Contains("XH") || score.Grade.Contains("SH")) gradeColor = Color.LightPink;
+
+                        _fontRenderer.DrawText($"[{score.Grade}]", x + 10, y, gradeColor);
+                        _fontRenderer.DrawText(rankingText, x + 55, y, _textColor);
+                        y += 18;
+                    }
+                }
             }
         }
 
@@ -686,7 +909,8 @@ namespace Nullscent.UI
             string searchDisplay = string.IsNullOrEmpty(_searchText) ? "Type to search..." : _searchText;
             Color searchColor = string.IsNullOrEmpty(_searchText) ? _dimTextColor * 0.5f : _textColor;
 
-            int searchX = screenWidth - 400;
+            int searchX = screenWidth - 480;
+            _fontRenderer.DrawText($"Sort: [F2] {_currentSortMode}", searchX - 160, 20, _accentColor);
             _fontRenderer.DrawText("Search: ", searchX, 20, _dimTextColor);
             _fontRenderer.DrawText(searchDisplay, searchX + 80, 20, searchColor);
         }
@@ -725,6 +949,13 @@ namespace Nullscent.UI
             // Espacio
             if (key == Keys.Space)
                 return ' ';
+
+            // Símbolos comunes
+            if (key == Keys.OemMinus) return shift ? '_' : '-';
+            if (key == Keys.OemPeriod) return shift ? '>' : '.';
+            if (key == Keys.OemComma) return shift ? '<' : ',';
+            if (key == Keys.OemPlus) return shift ? '+' : '=';
+            if (key == Keys.OemQuestion) return shift ? '?' : '/';
 
             return null;
         }
@@ -840,6 +1071,10 @@ namespace Nullscent.UI
         public void Cleanup()
         {
             Console.WriteLine("[SongSelectScreen] Cleanup");
+            _game.Window.TextInput -= OnTextInput;
+            _currentBackgroundTexture?.Dispose();
+            _currentBackgroundTexture = null;
+            _audioEngine.Stop();
         }
     }
 }

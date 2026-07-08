@@ -172,7 +172,12 @@ namespace Nullscent.Screens
             _settingItems.Add(SettingItem.CreateToggle(
                 "VSync",
                 () => _settings.VSync ? "ON" : "OFF",
-                () => { _settings.VSync = !_settings.VSync; _settings.Save(); }
+                () => { 
+                    _settings.VSync = !_settings.VSync; 
+                    _settings.Save(); 
+                    _game.Graphics.SynchronizeWithVerticalRetrace = _settings.VSync;
+                    _game.Graphics.ApplyChanges();
+                }
             ));
 
             // 12. Skin seleccionada (Sólo lectura visual)

@@ -21,6 +21,11 @@ namespace Nullscent.UI
         private const double SPINNER_ROTATION_SPEED = 360.0; // degrees per second
         private double _elapsedTime;
         private double _totalDuration; // milliseconds
+        private bool _isFadingOut;
+        private double _fadeOutTime;
+        private const double FADE_OUT_DURATION = 400.0; // milliseconds
+
+        public bool IsFadingOut => _isFadingOut;
 
         // Visual properties
         private int _screenWidth;
@@ -34,10 +39,13 @@ namespace Nullscent.UI
         public bool IsActive => _isActive;
         public bool IsComplete => !_isActive;
 
-        public LoadingScreen(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch, double durationMs = 3000)
+        private readonly TrueTypeFontRenderer? _fontRenderer;
+
+        public LoadingScreen(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch, TrueTypeFontRenderer? fontRenderer, double durationMs = 3000)
         {
             _graphicsDevice = graphicsDevice;
             _spriteBatch = spriteBatch;
+            _fontRenderer = fontRenderer;
             _totalDuration = durationMs;
 
             // Create white pixel for drawing
@@ -63,18 +71,28 @@ namespace Nullscent.UI
                 return;
 
             double deltaSeconds = gameTime.ElapsedGameTime.TotalSeconds;
-            _elapsedTime += deltaSeconds * 1000; // Convert to milliseconds
+
+            if (_isFadingOut)
+            {
+                _fadeOutTime += deltaSeconds * 1000;
+                if (_fadeOutTime >= FADE_OUT_DURATION)
+                {
+                    _isActive = false;
+                }
+            }
+            else
+            {
+                _elapsedTime += deltaSeconds * 1000;
+                if (_elapsedTime >= _totalDuration)
+                {
+                    _isFadingOut = true;
+                }
+            }
 
             // Update spinner rotation
             _spinnerRotation += SPINNER_ROTATION_SPEED * deltaSeconds;
             if (_spinnerRotation >= 360)
                 _spinnerRotation -= 360;
-
-            // Check if duration complete
-            if (_elapsedTime >= _totalDuration)
-            {
-                _isActive = false;
-            }
         }
 
         public void Draw()
@@ -82,34 +100,38 @@ namespace Nullscent.UI
             if (!_isActive)
                 return;
 
-            // Calculate progress for fade effects
-            float progress = (float)(_elapsedTime / _totalDuration);
+            float fadeAlpha = 1.0f;
+            if (_isFadingOut)
+            {
+                fadeAlpha = 1.0f - (float)(_fadeOutTime / FADE_OUT_DURATION);
+                fadeAlpha = Math.Clamp(fadeAlpha, 0.0f, 1.0f);
+            }
 
             _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
 
             // Draw background (semi-transparent dark)
             var bgRect = new Rectangle(0, 0, _screenWidth, _screenHeight);
-            _spriteBatch.Draw(_pixel, bgRect, new Color(15, 15, 20, 220));
+            _spriteBatch.Draw(_pixel, bgRect, new Color(15, 15, 20, (int)(225 * fadeAlpha)));
 
             // Draw spinner circle (animated)
-            DrawSpinner(progress);
+            DrawSpinner(fadeAlpha);
 
             // Draw loading text
-            DrawLoadingText();
+            DrawLoadingText(fadeAlpha);
 
             _spriteBatch.End();
         }
 
-        private void DrawSpinner(float progress)
+        private void DrawSpinner(float fadeAlpha)
         {
             // Draw outer ring (static)
-            DrawCircleOutline(_spinnerX, _spinnerY, SPINNER_RADIUS, Color.White * 0.3f, 3);
+            DrawCircleOutline(_spinnerX, _spinnerY, SPINNER_RADIUS, Color.White * 0.3f * fadeAlpha, 3);
 
             // Draw rotating arc
-            DrawRotatingArc(_spinnerX, _spinnerY, SPINNER_RADIUS, (float)_spinnerRotation, Color.Cyan);
+            DrawRotatingArc(_spinnerX, _spinnerY, SPINNER_RADIUS, (float)_spinnerRotation, Color.Cyan * fadeAlpha);
 
             // Draw inner circle
-            DrawCircleOutline(_spinnerX, _spinnerY, SPINNER_RADIUS / 2, Color.White * 0.5f, 2);
+            DrawCircleOutline(_spinnerX, _spinnerY, SPINNER_RADIUS / 2, Color.White * 0.5f * fadeAlpha, 2);
         }
 
         private void DrawCircleOutline(int x, int y, int radius, Color color, int thickness)
@@ -164,31 +186,25 @@ namespace Nullscent.UI
                 return;
 
             float angle = (float)Math.Atan2(dy, dx);
-            var rect = new Rectangle(
-                x1,
-                y1 - thickness / 2,
-                (int)distance,
-                thickness
-            );
+            
+            // Standard line drawing with scale and origin for perfect MonoGame rotation
+            Vector2 position = new Vector2(x1, y1);
+            Vector2 scale = new Vector2(distance, thickness);
+            Vector2 origin = new Vector2(0f, 0.5f);
 
-            Matrix transform = Matrix.CreateRotationZ(angle) * 
-                              Matrix.CreateTranslation(0, 0, 0);
-
-            _spriteBatch.Draw(_pixel, rect, null, color, angle, Vector2.Zero, SpriteEffects.None, 0);
+            _spriteBatch.Draw(_pixel, position, null, color, angle, origin, scale, SpriteEffects.None, 0);
         }
 
-        private void DrawLoadingText()
+        private void DrawLoadingText(float fadeAlpha)
         {
-            // Simple loading text - would use font renderer in production
-            // For now, just draw a simple indicator
+            if (_fontRenderer == null) return;
 
-            // Draw "Loading..." text or dots animation
             string loadingText = "Loading";
             int dots = ((int)(_elapsedTime / 500) % 4);
             loadingText += new string('.', dots);
 
-            // This would need a font renderer to display properly
-            // Placeholder for now
+            _fontRenderer.SetFontSize(24);
+            _fontRenderer.DrawTextCentered(loadingText, _spinnerX, _spinnerY + SPINNER_RADIUS + 30, Color.White * fadeAlpha);
         }
 
         public void Dispose()

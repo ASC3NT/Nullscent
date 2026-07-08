@@ -12,7 +12,6 @@ namespace Nullscent.Rulesets.Mania.UI
     {
         private readonly GraphicsDevice _graphicsDevice;
         private readonly SpriteBatch _spriteBatch;
-        private readonly AudioEngine _audioEngine;
         private readonly TrueTypeFontRenderer _fontRenderer;
 
         private int _selectedIndex;
@@ -24,11 +23,10 @@ namespace Nullscent.Rulesets.Mania.UI
         public bool ShouldRetry { get; private set; }
         public bool ShouldQuit { get; private set; }
 
-        public ManiaPauseOverlay(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch, AudioEngine audioEngine, TrueTypeFontRenderer fontRenderer)
+        public ManiaPauseOverlay(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch, TrueTypeFontRenderer fontRenderer)
         {
             _graphicsDevice = graphicsDevice;
             _spriteBatch = spriteBatch;
-            _audioEngine = audioEngine;
             _fontRenderer = fontRenderer;
         }
 

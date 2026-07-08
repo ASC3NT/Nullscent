@@ -28,6 +28,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     public class DrawableLongNote : DrawableManiaHitObject
     {
         private readonly LongNote _longNote;
+        public bool IsHeadApplied { get; set; }
 
         // Visual constants
         private const int HEAD_HEIGHT = 12;
@@ -70,15 +71,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
 
             double alpha = GetAlpha();
 
-            // Calculate head and tail Y positions
-            double headTimeDiff = _longNote.StartTime - currentTime;
-            double tailTimeDiff = _longNote.EndTime - currentTime;
-
-            double headDistance = (headTimeDiff / 1000.0) * scrollSpeed;
-            double tailDistance = (tailTimeDiff / 1000.0) * scrollSpeed;
-
-            int headY = downScroll ? receptorY - (int)headDistance : receptorY + (int)headDistance;
-            int tailY = downScroll ? receptorY - (int)tailDistance : receptorY + (int)tailDistance;
+            // Calculate head and tail Y positions using shared function
+            int headY = CalculateYPosition(_longNote.StartTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
+            int tailY = CalculateYPosition(_longNote.EndTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
 
             // Clampar la cabeza de la LN al receptor si está siendo sostenida (Holding)
             if (_longNote.State == LongNoteState.Holding)

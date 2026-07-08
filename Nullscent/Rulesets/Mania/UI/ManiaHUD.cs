@@ -25,7 +25,7 @@ namespace Nullscent.Rulesets.Mania.UI
             _config = config;
         }
 
-        public void Draw(GameTime gameTime, ManiaScoreProcessor scoreProcessor, Beatmap.Beatmap beatmap, double currentTime, List<ManiaMod> activeMods)
+        public void Draw(ManiaScoreProcessor scoreProcessor, Beatmap.Beatmap beatmap, double currentTime, List<ManiaMod> activeMods)
         {
             int screenWidth = _graphicsDevice.Viewport.Width;
             int screenHeight = _graphicsDevice.Viewport.Height;

@@ -19,8 +19,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         private readonly double _duration;
         private bool _isActive;
 
-        private const double EXPLOSION_DURATION = 200; // ms
-        private const double SCALE_UP_DURATION = 50;   // ms
+        private const double EXPLOSION_DURATION = 300; // ms
+        private const double SCALE_UP_DURATION = 80;   // ms
 
         public bool IsActive => _isActive;
 
@@ -41,7 +41,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
         }
 
-        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, int columnX, int columnWidth, int receptorY, double currentTime)
+        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime)
         {
             if (!_isActive) return;
 
@@ -63,26 +63,26 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             // Get color based on result
             Color explosionColor = GetColorForResult(_result) * alpha;
 
-            // Draw explosion rectangle
-            int width = (int)((columnWidth - 8) * scale);
-            int height = (int)(60 * scale);
+            // Draw explosion radial glow (wider for beautiful bloom)
+            int width = (int)((columnWidth * 1.8f) * scale);
+            int height = (int)(width * scale);
             int x = columnX + (columnWidth - width) / 2;
             int y = receptorY - height / 2;
 
             var explosionRect = new Rectangle(x, y, width, height);
-            spriteBatch.Draw(pixel, explosionRect, explosionColor);
+            spriteBatch.Draw(glowTexture, explosionRect, explosionColor);
 
-            // Draw bright core
+            // Draw bright core (using soft radial core instead of square)
             if (elapsed < SCALE_UP_DURATION * 2)
             {
-                int coreSize = (int)(10 * scale);
+                int coreSize = (int)((columnWidth * 0.6f) * scale);
                 var coreRect = new Rectangle(
                     columnX + (columnWidth - coreSize) / 2,
                     receptorY - coreSize / 2,
                     coreSize,
                     coreSize
                 );
-                spriteBatch.Draw(pixel, coreRect, Color.White * alpha * 1.5f);
+                spriteBatch.Draw(glowTexture, coreRect, Color.White * alpha * 1.5f);
             }
         }
 
@@ -90,12 +90,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         {
             return result switch
             {
-                HitResult.Perfect => new Color(255, 255, 100), // Bright yellow
-                HitResult.Great => new Color(100, 255, 100),   // Bright green
-                HitResult.Good => new Color(100, 200, 255),    // Light blue
-                HitResult.Ok => new Color(150, 150, 255),      // Purple
-                HitResult.Meh => new Color(200, 150, 150),     // Light gray
-                _ => new Color(100, 100, 100)                   // Dark gray
+                HitResult.Perfect => new Color(255, 224, 0),    // Gold/Yellow MAX
+                HitResult.Great => new Color(255, 180, 0),      // Orange/Yellow 300
+                HitResult.Good => new Color(0, 230, 100),       // Green 200
+                HitResult.Ok => new Color(50, 150, 255),        // Blue 100
+                HitResult.Meh => new Color(180, 180, 180),      // Gray 50
+                _ => new Color(100, 100, 100)
             };
         }
     }

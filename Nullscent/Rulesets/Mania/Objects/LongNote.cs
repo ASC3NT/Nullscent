@@ -55,6 +55,10 @@ namespace Nullscent.Rulesets.Mania.Objects
         // Break tracking
         private double _breakTime;
         private double _overallDifficulty;
+        private double _totalUnholdDuration = 0;
+
+        private TailHitWindows? _tailWindows;
+        private TailHitWindows TailWindows => _tailWindows ??= new TailHitWindows(_overallDifficulty, true);
 
         public LongNote(double startTime, double endTime, int column, double overallDifficulty = 5.0)
         {
@@ -92,11 +96,10 @@ namespace Nullscent.Rulesets.Mania.Objects
             // State transition
             if (result == HitResult.Miss)
             {
-                // Head missed → entire LN fails immediately
-                State = LongNoteState.Finished;
-                TailJudged = true;
-                TailResult = HitResult.Miss;
-                Console.WriteLine($"[LN] Head missed → LN failed immediately");
+                // Head missed → transition to Broken, but don't fail tail immediately
+                State = LongNoteState.Broken;
+                _breakTime = StartTime;
+                Console.WriteLine($"[LN] Head missed → transitioned to Broken state");
             }
             else
             {
@@ -112,17 +115,44 @@ namespace Nullscent.Rulesets.Mania.Objects
         /// </summary>
         public void UpdateHold(double currentTime, bool isKeyHeld)
         {
-            if (State != LongNoteState.Holding)
-                return;
-
-            // Check if key is still held
-            if (!isKeyHeld)
+            if (State == LongNoteState.Holding && !isKeyHeld)
             {
                 // Key released early → break
                 State = LongNoteState.Broken;
                 _breakTime = currentTime;
                 Console.WriteLine($"[LN] Broken at {currentTime:F1}ms (released early)");
             }
+            else if (State == LongNoteState.Broken && isKeyHeld)
+            {
+                // Re-keying: key was pressed again during hold!
+                // Accumulate the duration the key was let go
+                double unholdDuration = currentTime - _breakTime;
+                if (unholdDuration > 0)
+                {
+                    _totalUnholdDuration += unholdDuration;
+                }
+                State = LongNoteState.Holding;
+                Console.WriteLine($"[LN] Re-holding at {currentTime:F1}ms (unhold: +{unholdDuration:F1}ms, total: {_totalUnholdDuration:F1}ms)");
+            }
+        }
+
+        private HitResult ApplyUnholdPenalty(HitResult baseResult, double totalUnhold)
+        {
+            if (baseResult == HitResult.Miss || baseResult == HitResult.None)
+                return baseResult;
+
+            if (totalUnhold <= 150)
+                return baseResult; // Generous timing for keyboard chatter or rapid re-keying
+
+            // Apply scaling cap penalty
+            if (totalUnhold <= 300)
+                return baseResult > HitResult.Great ? HitResult.Great : baseResult;
+            if (totalUnhold <= 600)
+                return baseResult > HitResult.Good ? HitResult.Good : baseResult;
+            if (totalUnhold <= 1000)
+                return baseResult > HitResult.Ok ? HitResult.Ok : baseResult;
+
+            return HitResult.Miss;
         }
 
         /// <summary>
@@ -139,32 +169,31 @@ namespace Nullscent.Rulesets.Mania.Objects
 
             TailReleaseTime = currentTime;
 
-            // If broken, tail is automatically Miss
+            // Calculate current total unhold duration including the active segment if currently broken
+            double totalUnhold = _totalUnholdDuration;
             if (State == LongNoteState.Broken)
             {
-                TailJudged = true;
-                TailResult = HitResult.Miss;
-                State = LongNoteState.Finished;
-                Console.WriteLine($"[LN] Tail: Miss (was broken at {_breakTime:F1}ms)");
-                return;
+                double finalUnhold = currentTime - _breakTime;
+                if (finalUnhold > 0)
+                {
+                    totalUnhold += finalUnhold;
+                }
             }
 
             // Judge tail timing with truncated offset (osu!mania compatibility)
             double rawOffset = currentTime - EndTime;
             int offsetMs = (int)Math.Truncate(rawOffset);
 
-            // ScoreV2: tail windows are 1.5x longer
-            var tailWindows = new TailHitWindows(_overallDifficulty, true);
-            HitResult result = tailWindows.JudgeTail(offsetMs);
+            HitResult result = TailWindows.JudgeTail(offsetMs);
 
             if (result == HitResult.None)
                 return; // Too early for tail
 
             TailJudged = true;
-            TailResult = result;
+            TailResult = ApplyUnholdPenalty(result, totalUnhold);
             State = LongNoteState.Finished;
 
-            Console.WriteLine($"[LN] Tail judged: {result} at {currentTime:F1}ms (offset: {offsetMs}ms)");
+            Console.WriteLine($"[LN] Tail judged: {TailResult} at {currentTime:F1}ms (base: {result}, unhold: {totalUnhold:F1}ms)");
         }
 
         /// <summary>
@@ -181,10 +210,10 @@ namespace Nullscent.Rulesets.Mania.Objects
             {
                 HeadJudged = true;
                 HeadResult = HitResult.Miss;
-                TailJudged = true;
-                TailResult = HitResult.Miss;
-                State = LongNoteState.Finished;
-                Console.WriteLine($"[LN] Auto-missed (head not hit in time)");
+                // Transition to Broken state so the tail is still playable (osu! behavior)
+                State = LongNoteState.Broken;
+                _breakTime = currentTime;
+                Console.WriteLine($"[LN] Head auto-missed → transitioned to Broken state");
             }
         }
 
@@ -198,12 +227,24 @@ namespace Nullscent.Rulesets.Mania.Objects
 
             double offset = currentTime - EndTime;
 
-            if (hitWindows.IsPastAutoMissWindow(offset))
+            if (TailWindows.IsPastAutoMissWindow(offset))
             {
                 TailJudged = true;
-                TailResult = HitResult.Miss;
-                State = LongNoteState.Finished;
-                Console.WriteLine($"[LN] Tail auto-missed (held too long past window)");
+                
+                // If player is holding through the end of the note, auto-judge as Perfect (osu!lazer behavior)
+                // rather than punishing them with a Miss for not releasing.
+                if (State == LongNoteState.Holding)
+                {
+                    TailResult = ApplyUnholdPenalty(HitResult.Perfect, _totalUnholdDuration);
+                    State = LongNoteState.Finished;
+                    Console.WriteLine($"[LN] Tail auto-judged: {TailResult} (held through end)");
+                }
+                else
+                {
+                    TailResult = HitResult.Miss;
+                    State = LongNoteState.Finished;
+                    Console.WriteLine($"[LN] Tail auto-missed (not holding at the end)");
+                }
             }
         }
 

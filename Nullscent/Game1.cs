@@ -39,6 +39,7 @@ namespace Nullscent
 
         // Control de volumen con scroll
         private int _previousMouseScrollValue = 0;
+        private KeyboardState _previousKeyboardState;
 
         // Transición de fundido de pantalla suave
         private double _transitionAlpha = 1.0;
@@ -57,6 +58,7 @@ namespace Nullscent
         public HitSoundPlayer HitSoundPlayer => _hitSoundPlayer!;
         public GameSettings Settings => _settings!;
         public FileDropManager FileDropManager => _fileDropManager!;
+        public GraphicsDeviceManager Graphics => _graphics;
         public int WindowWidth => _graphics.PreferredBackBufferWidth;
         public int WindowHeight => _graphics.PreferredBackBufferHeight;
 
@@ -69,6 +71,9 @@ namespace Nullscent
             // Fixed timestep a 1000Hz (1ms) para máxima precisión de input
             IsFixedTimeStep = true;
             TargetElapsedTime = TimeSpan.FromMilliseconds(1);
+
+            Window.AllowUserResizing = true;
+            Window.ClientSizeChanged += OnWindowSizeChanged;
         }
 
         protected override void Initialize()
@@ -278,6 +283,14 @@ namespace Nullscent
                 }
                 _previousMouseScrollValue = mouseState.ScrollWheelValue;
 
+                // Toggle Fullscreen with Alt+Enter
+                if ((keyboardState.IsKeyDown(Keys.LeftAlt) || keyboardState.IsKeyDown(Keys.RightAlt)) &&
+                    keyboardState.IsKeyDown(Keys.Enter) && !_previousKeyboardState.IsKeyDown(Keys.Enter))
+                {
+                    ToggleFullscreen();
+                }
+                _previousKeyboardState = keyboardState;
+
                 // Actualizar contador de FPS
                 _fpsTimer += gameTime.ElapsedGameTime.TotalSeconds;
                 _fpsCounter++;
@@ -345,6 +358,48 @@ namespace Nullscent
             }
 
             base.Draw(gameTime);
+        }
+
+        public void ToggleFullscreen()
+        {
+            _settings!.Fullscreen = !_settings.Fullscreen;
+            _graphics.IsFullScreen = _settings.Fullscreen;
+            
+            if (_settings.Fullscreen)
+            {
+                _graphics.PreferredBackBufferWidth = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
+                _graphics.PreferredBackBufferHeight = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Height;
+            }
+            else
+            {
+                _graphics.PreferredBackBufferWidth = 1280;
+                _graphics.PreferredBackBufferHeight = 720;
+            }
+            
+            _graphics.ApplyChanges();
+            _settings.WindowWidth = _graphics.PreferredBackBufferWidth;
+            _settings.WindowHeight = _graphics.PreferredBackBufferHeight;
+            _settings.Save();
+            
+            Console.WriteLine($"[Game1] Fullscreen toggled to {_settings.Fullscreen} ({_graphics.PreferredBackBufferWidth}x{_graphics.PreferredBackBufferHeight})");
+        }
+
+        private void OnWindowSizeChanged(object? sender, EventArgs e)
+        {
+            // Evitar recursión infinita
+            if (_graphics.PreferredBackBufferWidth == Window.ClientBounds.Width &&
+                _graphics.PreferredBackBufferHeight == Window.ClientBounds.Height)
+                return;
+
+            _graphics.PreferredBackBufferWidth = Window.ClientBounds.Width;
+            _graphics.PreferredBackBufferHeight = Window.ClientBounds.Height;
+            _graphics.ApplyChanges();
+
+            _settings!.WindowWidth = _graphics.PreferredBackBufferWidth;
+            _settings.WindowHeight = _graphics.PreferredBackBufferHeight;
+            _settings.Save();
+
+            Console.WriteLine($"[Game1] Window size changed to {_graphics.PreferredBackBufferWidth}x{_graphics.PreferredBackBufferHeight}");
         }
 
         protected override void Dispose(bool disposing)

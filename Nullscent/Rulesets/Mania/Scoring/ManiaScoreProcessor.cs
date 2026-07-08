@@ -1,6 +1,7 @@
 #nullable enable
 
 using Nullscent.Rulesets.Mania.Judgements;
+using Nullscent.Rulesets.Mania.Mods;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,10 +29,12 @@ namespace Nullscent.Rulesets.Mania.Scoring
         public ScoreRank Rank => CalculateRank();
         public double AccuracyPercent => CalculateAccuracy() * 100.0;
         public bool HasFailed => Health <= 0.0;
+        public int TotalHitObjects => _totalHitObjects;
 
         private readonly int _totalHitObjects;
         private readonly ManiaJudgement _judgement = new();
         private readonly ManiaHealthProcessor _healthProcessor;
+        private readonly List<ManiaMod> _activeMods;
 
         /// <summary>
         /// Creates a score processor.
@@ -40,14 +43,17 @@ namespace Nullscent.Rulesets.Mania.Scoring
         /// <param name="totalHoldNotes">Number of hold notes (each counts as 1 in standard, 2 in ScoreV2)</param>
         /// <param name="hpDrainRate">HP drain rate</param>
         /// <param name="healthDrainEnabled">Enable passive health drain</param>
+        /// <param name="activeMods">List of active mods during the play</param>
         /// <param name="isScoreV2">If true, hold notes count as 2 objects (head + tail)</param>
         public ManiaScoreProcessor(
             int totalNotes, 
             int totalHoldNotes, 
             double hpDrainRate, 
             bool healthDrainEnabled,
+            List<ManiaMod> activeMods,
             bool isScoreV2 = false)
         {
+            _activeMods = activeMods ?? new List<ManiaMod>();
             // In ScoreV2, each LN = 2 judgements (head + tail)
             _totalHitObjects = isScoreV2 
                 ? totalNotes + (totalHoldNotes * 2) 
@@ -79,24 +85,63 @@ namespace Nullscent.Rulesets.Mania.Scoring
                 Combo = 0;
             }
 
-            // Add score
-            Score += CalculateScoreFor(result);
+            // Recalculate score (ScoreV2 style, capped at 1,000,000 × modMultiplier)
+            Score = CalculateCurrentScore();
 
             // Update health
             double healthChange = _judgement.HealthIncreaseFor(result);
             Health = Math.Clamp(Health + healthChange, 0.0, 1.0);
         }
 
-        public void UpdateHealthDrain(double deltaSeconds)
+        private double _lastHealthUpdateTimeMs = -1;
+
+        public void UpdateHealthDrain(double currentTimeMs)
         {
-            Health = Math.Clamp(Health - _healthProcessor.GetDrainFor(deltaSeconds), 0.0, 1.0);
+            if (_lastHealthUpdateTimeMs < 0)
+            {
+                _lastHealthUpdateTimeMs = currentTimeMs;
+                return;
+            }
+
+            double deltaMs = currentTimeMs - _lastHealthUpdateTimeMs;
+
+            // Evitar drenajes masivos debido a lag spikes o transiciones bruscas
+            if (deltaMs > 500)
+            {
+                deltaMs = 500;
+            }
+
+            if (deltaMs > 0)
+            {
+                double deltaSeconds = deltaMs / 1000.0;
+                Health = Math.Clamp(Health - _healthProcessor.GetDrainFor(deltaSeconds), 0.0, 1.0);
+            }
+
+            _lastHealthUpdateTimeMs = currentTimeMs;
         }
 
-        private long CalculateScoreFor(HitResult result)
+        private long CalculateCurrentScore()
         {
-            int baseScore = _judgement.NumericResultFor(result);
-            double comboMultiplier = 1.0 + Math.Log10(1.0 + Combo) * 0.1;
-            return (long)(baseScore * comboMultiplier);
+            if (_totalHitObjects == 0 || TotalJudgements == 0) return 0;
+
+            double maxPossibleWeight = _totalHitObjects * 320.0;
+            double currentWeight = 0.0;
+
+            foreach (var (result, count) in Statistics)
+            {
+                currentWeight += _judgement.NumericResultFor(result) * count;
+            }
+
+            double modMultiplier = 1.0;
+            if (_activeMods != null)
+            {
+                foreach (var mod in _activeMods)
+                {
+                    modMultiplier *= mod.ScoreMultiplier;
+                }
+            }
+
+            return (long)Math.Round(1_000_000.0 * modMultiplier * (currentWeight / maxPossibleWeight));
         }
 
         /// <summary>
@@ -132,10 +177,13 @@ namespace Nullscent.Rulesets.Mania.Scoring
         private ScoreRank CalculateRank()
         {
             double acc = AccuracyPercent;
-            int misses = Statistics[HitResult.Miss];
 
-            if (acc == 100.0) return ScoreRank.X;
-            if (acc >= 95.0) return ScoreRank.S;
+            bool isSilver = _activeMods != null && _activeMods.Any(m => 
+                m.Acronym == "HD" || m.Acronym == "FL" || 
+                m.Name == "Hidden" || m.Name == "Flashlight");
+
+            if (acc == 100.0) return isSilver ? ScoreRank.XH : ScoreRank.X;
+            if (acc >= 95.0) return isSilver ? ScoreRank.SH : ScoreRank.S;
             if (acc >= 90.0) return ScoreRank.A;
             if (acc >= 80.0) return ScoreRank.B;
             if (acc >= 70.0) return ScoreRank.C;

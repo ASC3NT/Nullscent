@@ -2,6 +2,7 @@
 
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Nullscent.Beatmap;
 using Nullscent.Rulesets.Mania.Judgements;
 using Nullscent.Rulesets.Mania.Objects;
 using System;
@@ -19,6 +20,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         public bool IsJudged { get; set; }
         public HitResult? Result { get; protected set; }
         public bool HasResult => Result.HasValue;
+        public Nullscent.Beatmap.Beatmap? Beatmap { get; set; }
 
         protected double TimePreempt { get; set; } = 1000; // 1 second preempt
         protected double TimeFadeIn { get; set; } = 200;    // 200ms fade in
@@ -34,8 +36,15 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         /// <summary>
         /// Updates the drawable state based on current time.
         /// </summary>
-        public virtual void Update(double currentTime, double scrollSpeed, float receptorPosition, bool downScroll, int screenHeight)
+        public virtual void Update(double currentTime, double scrollSpeedSetting, float receptorPosition, bool downScroll, int screenHeight)
         {
+            // Map scrollSpeedSetting (1-40) to scrollTime in milliseconds (preempt time)
+            double scrollTime = 2000.0 - (scrollSpeedSetting - 1.0) * 45.0;
+            scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
+
+            TimePreempt = scrollTime;
+            TimeFadeIn = Math.Min(200.0, scrollTime * 0.2); // Fade in over 20% of scroll time, max 200ms
+
             // Calculate if object should be visible
             double timeUntilHit = HitObject.StartTime - currentTime;
 
@@ -94,11 +103,31 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         /// <summary>
         /// Calculates the Y position of the hit object based on current time and scroll settings.
         /// </summary>
-        protected int CalculateYPosition(double currentTime, double scrollSpeed, int receptorY, bool downScroll)
+        protected int CalculateYPosition(double objectTime, double currentTime, double scrollSpeedSetting, int receptorY, bool downScroll, int screenHeight)
         {
-            double timeDiff = HitObject.StartTime - currentTime;
-            double distance = (timeDiff / 1000.0) * scrollSpeed;
-            return downScroll ? receptorY - (int)distance : receptorY + (int)distance;
+            double scrollTime = 2000.0 - (scrollSpeedSetting - 1.0) * 45.0;
+            scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
+
+            double timeDiff;
+            if (Beatmap != null)
+            {
+                timeDiff = Beatmap.GetScrollPosition(objectTime) - Beatmap.GetScrollPosition(currentTime);
+            }
+            else
+            {
+                timeDiff = objectTime - currentTime;
+            }
+
+            if (downScroll)
+            {
+                double ratio = timeDiff / scrollTime;
+                return receptorY - (int)(ratio * receptorY);
+            }
+            else
+            {
+                double ratio = timeDiff / scrollTime;
+                return receptorY + (int)(ratio * (screenHeight - receptorY));
+            }
         }
 
         public virtual void Dispose()
@@ -124,15 +153,13 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         {
             if (!IsVisible() || IsJudged) return;
 
-            int y = CalculateYPosition(currentTime, scrollSpeed, receptorY, downScroll);
+            int y = CalculateYPosition(HitObject.StartTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
 
             // Culling check
             if (y < -50 || y > screenHeight + 50) return;
 
             double alpha = GetAlpha();
             int padding = 4;
-            int columnX = 0; // Will be set by column
-
             // Draw note body
             var noteRect = new Rectangle(
                 padding, 
@@ -205,14 +232,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             int padding = 4;
 
             // Calculate head and tail positions
-            double headTimeDiff = _holdNote.StartTime - currentTime;
-            double tailTimeDiff = _holdNote.EndTime - currentTime;
-
-            double headDistance = (headTimeDiff / 1000.0) * scrollSpeed;
-            double tailDistance = (tailTimeDiff / 1000.0) * scrollSpeed;
-
-            int headY = downScroll ? receptorY - (int)headDistance : receptorY + (int)headDistance;
-            int tailY = downScroll ? receptorY - (int)tailDistance : receptorY + (int)tailDistance;
+            int headY = CalculateYPosition(_holdNote.StartTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
+            int tailY = CalculateYPosition(_holdNote.EndTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
 
             int topY = Math.Min(headY, tailY);
             int bottomY = Math.Max(headY, tailY);

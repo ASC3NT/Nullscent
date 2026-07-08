@@ -369,8 +369,8 @@ namespace Nullscent.Beatmap
                 {
                     currentSection = line[1..^1];
 
-                    // Parar early si ya pasamos las secciones que necesitamos
-                    if (currentSection == "TimingPoints")
+                    // Parar early si ya pasamos las secciones que necesitamos (HitObjects es la pesada)
+                    if (currentSection == "Colours" || currentSection == "HitObjects")
                         break;
 
                     continue;
@@ -388,6 +388,25 @@ namespace Nullscent.Beatmap
 
                     case "Difficulty":
                         ParseDifficultyLine(line, beatmap);
+                        break;
+
+                    case "TimingPoints":
+                        var parts = line.Split(',');
+                        if (parts.Length >= 2)
+                        {
+                            var tp = new TimingPoint
+                            {
+                                Offset = ParseDouble(parts[0]),
+                                BeatLength = ParseDouble(parts[1]),
+                                Meter = parts.Length > 2 ? ParseInt(parts[2]) : 4,
+                                SampleSet = parts.Length > 3 ? ParseInt(parts[3]) : 0,
+                                SampleIndex = parts.Length > 4 ? ParseInt(parts[4]) : 0,
+                                Volume = parts.Length > 5 ? ParseInt(parts[5]) : 100,
+                                Uninherited = parts.Length > 6 ? ParseInt(parts[6]) == 1 : true,
+                                Effects = parts.Length > 7 ? ParseInt(parts[7]) : 0
+                            };
+                            beatmap.TimingPoints.Add(tp);
+                        }
                         break;
                 }
             }

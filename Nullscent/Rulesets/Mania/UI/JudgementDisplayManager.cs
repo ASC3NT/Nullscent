@@ -23,6 +23,7 @@ namespace Nullscent.Rulesets.Mania.UI
         private readonly List<QueuedJudgement> _queue = new();
         private readonly object _lock = new(); // Objeto para control de concurrencia
         private int _currentCombo;
+        private double _lastJudgementTime;
 
         // Posición en pantalla (generalmente el centro del playfield)
         public Vector2 Position { get; set; }
@@ -52,6 +53,7 @@ namespace Nullscent.Rulesets.Mania.UI
             lock (_lock)
             {
                 _currentCombo = combo;
+                _lastJudgementTime = time;
                 _queue.Add(new QueuedJudgement
                 {
                     Result = result,
@@ -82,55 +84,92 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             if (_fontRenderer == null) return;
 
-            // Nota: No llamamos a Begin/End aquí porque esta función se llama
-            // desde dentro de ManiaPlayfield.Draw() que ya tiene un Begin() activo.
-            // Solo dibujamos el contenido.
-
-            QueuedJudgement? latest = null;
+            // Dibujar todos los juicios de la cola en cascada
             lock (_lock)
             {
-                // Obtener el juicio más reciente para renderizarlo
-                if (_queue.Count > 0) latest = _queue[^1];
+                foreach (var judgement in _queue)
+                {
+                    double age = currentTime - judgement.Time;
+                    if (age < 0 || age > DISPLAY_LIFETIME) continue;
+
+                    float scale = 1.0f;
+                    float alpha = 1.0f;
+
+                    // Animación de pop-up con rebote
+                    if (age < 80)
+                    {
+                        float t = (float)(age / 80.0);
+                        scale = MathHelper.Lerp(0.7f, 1.3f, t);
+                    }
+                    else if (age < 150)
+                    {
+                        float t = (float)((age - 80.0) / 70.0);
+                        scale = MathHelper.Lerp(1.3f, 1.0f, t);
+                    }
+                    else if (age < 500)
+                    {
+                        scale = 1.0f;
+                    }
+                    else
+                    {
+                        float t = (float)((age - 500.0) / (DISPLAY_LIFETIME - 500.0));
+                        scale = MathHelper.Lerp(1.0f, 0.9f, t);
+                        alpha = MathHelper.Lerp(1.0f, 0.0f, t);
+                    }
+
+                    // Desplazamiento vertical hacia arriba (drift de 40px)
+                    float driftY = (float)(age / DISPLAY_LIFETIME) * 40.0f;
+                    int textY = (int)(Position.Y + 15 - driftY);
+
+                    string text = GetTextForResult(judgement.Result);
+                    _fontRenderer.SetFontSize(48);
+                    Color color = GetColorForResult(judgement.Result) * alpha;
+
+                    _fontRenderer.DrawTextCentered(text, (int)Position.X, textY, color, scale);
+                }
             }
 
-            if (latest != null)
-            {
-                // Calcular el progreso de la animación basado en la edad del juicio
-                double age = currentTime - latest.Time;
-                float progress = 1f - (float)(age / DISPLAY_LIFETIME);
-                progress = Math.Clamp(progress, 0f, 1f);
-
-                string text = latest.Result.ToString();
-
-                // Calcular escala y desvanecimiento (fade out)
-                float scale = 1.0f + 0.5f * progress;
-                float alpha = 0.6f + 0.4f * progress;
-
-                _fontRenderer.SetFontSize(48);
-                var color = GetColorForResult(latest.Result) * alpha;
-
-                // Dibujar el texto del juicio centrado
-                _fontRenderer.DrawTextCentered(text, (int)Position.X, (int)Position.Y - 20, color, scale);
-            }
-
-            // Dibujar el contador de combo siempre visible (si combo > 1)
+            // Dibujar el contador de combo (si combo > 1)
             if (_currentCombo > 1)
             {
-                float comboAlpha = 0.8f;
+                double timeSinceLastHit = currentTime - _lastJudgementTime;
+                float comboAlpha = 1.0f;
                 float comboScale = 1.0f;
 
-                if (latest != null)
+                // Animación de rebote de escala en combo
+                if (timeSinceLastHit < 100)
                 {
-                    double age = currentTime - latest.Time;
-                    float progress = 1f - (float)(age / DISPLAY_LIFETIME);
-                    progress = Math.Clamp(progress, 0f, 1f);
-                    comboAlpha = 0.6f + 0.4f * progress;
-                    comboScale = 1.0f + 0.3f * progress;
+                    float t = (float)(timeSinceLastHit / 100.0);
+                    comboScale = MathHelper.Lerp(1.3f, 1.0f, t);
                 }
 
-                _fontRenderer.SetFontSize(36);
-                _fontRenderer.DrawTextCentered(_currentCombo + "x", (int)Position.X, (int)Position.Y + 30, Color.Yellow * comboAlpha, comboScale);
+                // Desvanecer combo suave tras 1 segundo de inactividad
+                if (timeSinceLastHit > 1000)
+                {
+                    float t = (float)((timeSinceLastHit - 1000.0) / 1000.0);
+                    comboAlpha = MathHelper.Lerp(1.0f, 0.0f, Math.Clamp(t, 0.0f, 1.0f));
+                }
+
+                if (comboAlpha > 0f)
+                {
+                    _fontRenderer.SetFontSize(36);
+                    _fontRenderer.DrawTextCentered(_currentCombo.ToString(), (int)Position.X, (int)Position.Y - 30, Color.White * comboAlpha, comboScale);
+                }
             }
+        }
+
+        private string GetTextForResult(HitResult result)
+        {
+            return result switch
+            {
+                HitResult.Perfect => "MAX",
+                HitResult.Great => "300",
+                HitResult.Good => "200",
+                HitResult.Ok => "100",
+                HitResult.Meh => "50",
+                HitResult.Miss => "Miss",
+                _ => ""
+            };
         }
 
         /// <summary>
@@ -140,11 +179,12 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             return result switch
             {
-                HitResult.Perfect => new Color(255, 215, 100),
-                HitResult.Great => new Color(150, 255, 150),
-                HitResult.Good => new Color(150, 200, 255),
-                HitResult.Ok => new Color(200, 150, 255),
-                HitResult.Meh => new Color(200, 200, 200),
+                HitResult.Perfect => new Color(84, 200, 255),   // Cyan / Celeste MAX
+                HitResult.Great => new Color(255, 220, 0),      // Yellow / Gold 300
+                HitResult.Good => new Color(100, 255, 100),     // Green 200
+                HitResult.Ok => new Color(255, 150, 50),        // Orange 100
+                HitResult.Meh => new Color(180, 100, 255),      // Purple 50
+                HitResult.Miss => new Color(255, 50, 50),       // Red Miss
                 _ => Color.White
             };
         }

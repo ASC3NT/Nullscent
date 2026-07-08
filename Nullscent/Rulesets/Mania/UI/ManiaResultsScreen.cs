@@ -13,6 +13,7 @@ using Nullscent.Rulesets.Mania.Scoring;
 using Nullscent.Screens;
 using Nullscent.UI;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Nullscent.Rulesets.Mania.UI
 {
@@ -64,6 +65,26 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             _fontRenderer = _game.FontRenderer;
             _previousKeyboardState = Keyboard.GetState();
+
+            // Guardar puntuación localmente
+            string modsText = "None";
+            if (_activeMods != null && _activeMods.Count > 0)
+            {
+                modsText = string.Join(",", _activeMods.Select(m => m.Acronym));
+            }
+
+            var localScore = new LocalScore
+            {
+                PlayerName = "Guest",
+                Score = (int)_scoreProcessor.Score,
+                MaxCombo = _scoreProcessor.MaxCombo,
+                Accuracy = _scoreProcessor.AccuracyPercent,
+                Grade = _scoreProcessor.Rank.ToString(),
+                Mods = modsText,
+                Date = System.DateTime.Now
+            };
+
+            LocalScoreManager.AddScore(_beatmap.FilePath, localScore);
         }
 
         public void Update(GameTime gameTime)

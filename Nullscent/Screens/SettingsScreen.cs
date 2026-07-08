@@ -201,6 +201,13 @@ namespace Nullscent.Screens
             var currentKeyState = Keyboard.GetState();
             var currentMouseState = Mouse.GetState();
 
+            if (!_game.IsActive)
+            {
+                _previousKeyState = currentKeyState;
+                _prevMouseState = currentMouseState;
+                return;
+            }
+
             // 0. Actualizar transiciones de hover/selección (LERP a 60fps)
             float elapsed = (float)gameTime.ElapsedGameTime.TotalSeconds;
             if (_hoverProgressArray.Length != _settingItems.Count)

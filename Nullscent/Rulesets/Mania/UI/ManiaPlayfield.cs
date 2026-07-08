@@ -380,7 +380,7 @@ namespace Nullscent.Rulesets.Mania.UI
                         }
 
                         // Check if tail was judged but not yet applied
-                        if (ln.TailJudged && !drawableLN.IsJudged)
+                        if (ln.TailJudged && !drawableLN.IsTailApplied)
                         {
                             scoreProcessor.ApplyResult(ln.TailResult);
                             
@@ -392,7 +392,12 @@ namespace Nullscent.Rulesets.Mania.UI
                             int tailOffset = (int)Math.Truncate(ln.TailReleaseTime - ln.EndTime);
                             _judgementDisplayManager?.EnqueueJudgement(ln.TailResult, _index, tailOffset, scoreProcessor.Combo, currentTime);
 
-                            drawableLN.IsJudged = true;
+                            drawableLN.IsTailApplied = true;
+                        }
+
+                        // Remove and dispose only when drawableLN.IsJudged is true (after scrolling past)
+                        if (drawableLN.IsJudged)
+                        {
                             _drawableHitObjects.Remove(drawable);
                             drawable.Dispose();
                         }
@@ -430,57 +435,77 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             _isPressed = true;
 
-            // Localizar el objeto interactuable más cercano a la zona de impacto
-            DrawableManiaHitObject? closest = null;
-            double closestDistance = double.MaxValue;
-
+            // Encontrar la primera nota pendiente (o candidata válida para LN)
+            DrawableManiaHitObject? candidate = null;
             foreach (var drawable in _drawableHitObjects)
             {
                 if (drawable.HasResult) continue;
 
-                double distance = Math.Abs(currentTime - drawable.HitObject.StartTime);
-                if (distance < closestDistance)
+                if (drawable is DrawableLongNote drawableLN)
                 {
-                    closestDistance = distance;
-                    closest = drawable;
-                }
-            }
-
-            if (closest != null)
-            {
-                if (closest is DrawableLongNote drawableLN)
-                {
-                    closest.CheckForResult(currentTime, _hitWindows);
-
-                    if (drawableLN.HitObject is LongNote ln && ln.HeadJudged && ln.HeadResult != HitResult.Miss)
+                    if (drawableLN.HitObject is LongNote ln && !ln.HeadJudged)
                     {
-                        // Activar iluminación de la columna al acertar la cabeza de la LN
-                        _lightingEndTime = currentTime + 150;
+                        candidate = drawable;
+                        break;
                     }
                 }
                 else
                 {
-                    // Lógica para notas normales
-                    double offset = currentTime - closest.HitObject.StartTime;
-                    var result = _hitWindows.JudgeHit(offset);
+                    candidate = drawable;
+                    break;
+                }
+            }
 
-                    // Descartar inputs fuera de la ventana de tiempo válida
-                    if (result != HitResult.None && result != HitResult.Miss)
+            // Si hay una nota candidata, intentar juzgarla
+            if (candidate != null)
+            {
+                if (candidate is DrawableLongNote drawableLN)
+                {
+                    if (drawableLN.HitObject is LongNote ln)
                     {
-                        closest.CheckForResult(currentTime, _hitWindows);
+                        double offset = currentTime - ln.StartTime;
+                        var result = _hitWindows.JudgeHit(offset);
 
-                        if (closest.HasResult)
+                        // Si aún no ha entrado en la ventana de juicio, la pulsación no hace nada (se ignora)
+                        if (result == HitResult.None)
                         {
-                            if (closest.Result.HasValue)
-                            {
-                                _judgementDisplayManager?.EnqueueJudgement(closest.Result.Value, _index, (int)Math.Truncate(currentTime - closest.HitObject.StartTime), scoreProcessor.Combo, currentTime);
-                            }
+                            return;
+                        }
 
-                            OnHitObjectJudged(closest, currentTime, scoreProcessor);
-                            _drawableHitObjects.Remove(closest);
+                        // Procesar la pulsación de la cabeza de la LN
+                        drawableLN.CheckForResult(currentTime, _hitWindows);
 
+                        if (ln.HeadJudged && ln.HeadResult != HitResult.Miss)
+                        {
                             _lightingEndTime = currentTime + 150;
                         }
+                    }
+                }
+                else
+                {
+                    double offset = currentTime - candidate.HitObject.StartTime;
+                    var result = _hitWindows.JudgeHit(offset);
+
+                    // Si aún no ha entrado en la ventana de juicio, la pulsación no hace nada (se ignora)
+                    if (result == HitResult.None)
+                    {
+                        return;
+                    }
+
+                    // Consumir el juicio de la nota normal
+                    candidate.OnJudged(result);
+
+                    if (candidate.HasResult)
+                    {
+                        if (candidate.Result.HasValue)
+                        {
+                            _judgementDisplayManager?.EnqueueJudgement(candidate.Result.Value, _index, (int)Math.Truncate(currentTime - candidate.HitObject.StartTime), scoreProcessor.Combo, currentTime);
+                        }
+
+                        OnHitObjectJudged(candidate, currentTime, scoreProcessor);
+                        _drawableHitObjects.Remove(candidate);
+
+                        _lightingEndTime = currentTime + 150;
                     }
                 }
             }

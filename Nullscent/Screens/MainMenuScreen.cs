@@ -39,32 +39,11 @@ namespace Nullscent.Screens
         {
             Console.WriteLine("[MainMenuScreen] Initializing main menu...");
 
-            // Configurar botones del menú
-            int buttonWidth = 400;
-            int buttonHeight = 80;
-            int buttonSpacing = 20;
-            int startY = _game.WindowHeight / 2 - 100;
-            int centerX = _game.WindowWidth / 2;
-
             _buttons.Clear();
 
-            _buttons.Add(new MenuButton(
-                "PLAY",
-                new Rectangle(centerX - buttonWidth / 2, startY, buttonWidth, buttonHeight),
-                OnPlayClicked
-            ));
-
-            _buttons.Add(new MenuButton(
-                "SETTINGS",
-                new Rectangle(centerX - buttonWidth / 2, startY + buttonHeight + buttonSpacing, buttonWidth, buttonHeight),
-                OnSettingsClicked
-            ));
-
-            _buttons.Add(new MenuButton(
-                "EXIT",
-                new Rectangle(centerX - buttonWidth / 2, startY + (buttonHeight + buttonSpacing) * 2, buttonWidth, buttonHeight),
-                OnExitClicked
-            ));
+            _buttons.Add(new MenuButton("PLAY", Rectangle.Empty, OnPlayClicked));
+            _buttons.Add(new MenuButton("SETTINGS", Rectangle.Empty, OnSettingsClicked));
+            _buttons.Add(new MenuButton("EXIT", Rectangle.Empty, OnExitClicked));
 
             _buttonHoverProgress.Clear();
             for (int i = 0; i < _buttons.Count; i++)
@@ -83,6 +62,26 @@ namespace Nullscent.Screens
         {
             var currentKeyState = Keyboard.GetState();
             var currentMouseState = Mouse.GetState();
+
+            if (!_game.IsActive)
+            {
+                _previousKeyState = currentKeyState;
+                _prevMouseState = currentMouseState;
+                return;
+            }
+
+            // Actualizar dimensiones dinámicamente según la escala de la ventana
+            double scale = _game.WindowHeight / 720.0;
+            int buttonWidth = (int)(400 * scale);
+            int buttonHeight = (int)(80 * scale);
+            int buttonSpacing = (int)(20 * scale);
+            int startY = _game.WindowHeight / 2 - (int)(100 * scale);
+            int centerX = _game.WindowWidth / 2;
+
+            for (int i = 0; i < _buttons.Count; i++)
+            {
+                _buttons[i].Bounds = new Rectangle(centerX - buttonWidth / 2, startY + (buttonHeight + buttonSpacing) * i, buttonWidth, buttonHeight);
+            }
 
             // Interactividad del mouse (hover y clic)
             for (int i = 0; i < _buttons.Count; i++)
@@ -250,7 +249,7 @@ namespace Nullscent.Screens
     internal class MenuButton
     {
         public string Text { get; }
-        public Rectangle Bounds { get; }
+        public Rectangle Bounds { get; set; }
         public Action? OnClick { get; }
 
         public MenuButton(string text, Rectangle bounds, Action? onClick = null)

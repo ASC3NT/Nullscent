@@ -194,15 +194,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         {
             if (IsJudged) return;
 
+            // Only check for auto-miss during frame updates
             double offset = currentTime - HitObject.StartTime;
-            var result = hitWindows.JudgeHit(offset);
-
-            if (result != HitResult.None && result != HitResult.Miss)
-            {
-                OnJudged(result);
-            }
-            // Auto-miss check
-            else if (currentTime > HitObject.StartTime + hitWindows.WindowFor(HitResult.Miss))
+            if (offset > hitWindows.WindowFor(HitResult.Miss))
             {
                 OnJudged(HitResult.Miss);
             }
@@ -292,19 +286,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         {
             if (IsJudged) return;
 
-            // For hold notes, check if we're past the end time
+            // Only check for auto-miss during frame updates
             double offset = currentTime - _holdNote.StartTime;
-
-            // Simplified: judge based on head timing for now
-            // TODO: Implement proper LN judging (hold duration check)
-            var result = hitWindows.JudgeHit(offset);
-
-            if (result != HitResult.None && result != HitResult.Miss)
-            {
-                OnJudged(result);
-            }
-            // Auto-miss check
-            else if (currentTime > _holdNote.StartTime + hitWindows.WindowFor(HitResult.Miss))
+            if (offset > hitWindows.WindowFor(HitResult.Miss))
             {
                 OnJudged(HitResult.Miss);
             }

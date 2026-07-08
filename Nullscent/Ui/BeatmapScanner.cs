@@ -116,7 +116,7 @@ namespace Nullscent.UI
                         HPDrainRate = beatmap.HPDrainRate,
                         BPM = beatmap.MostCommonBPM,
                         Length = beatmap.TotalLength,
-                        ObjectCount = beatmap.HitObjects.Count,
+                        ObjectCount = beatmap.QuickObjectCount ?? beatmap.HitObjects.Count,
                         BeatmapID = beatmap.Metadata.BeatmapID,
                         AudioFilename = beatmap.Metadata.AudioFilename,
                         PreviewTime = beatmap.Metadata.PreviewTime

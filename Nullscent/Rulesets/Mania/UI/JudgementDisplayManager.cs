@@ -19,8 +19,8 @@ namespace Nullscent.Rulesets.Mania.UI
         private readonly SpriteBatch _spriteBatch;
         private readonly TrueTypeFontRenderer? _fontRenderer;
 
-        // Cola para manejar los juicios pendientes de renderizado
-        private readonly List<QueuedJudgement> _queue = new();
+        // Juicio activo actualmente (se muestra un único juicio a la vez, estilo osu!stable)
+        private QueuedJudgement? _activeJudgement;
         private readonly object _lock = new(); // Objeto para control de concurrencia
         private int _currentCombo;
         private double _lastJudgementTime;
@@ -54,17 +54,14 @@ namespace Nullscent.Rulesets.Mania.UI
             {
                 _currentCombo = combo;
                 _lastJudgementTime = time;
-                _queue.Add(new QueuedJudgement
+                _activeJudgement = new QueuedJudgement
                 {
                     Result = result,
                     Column = column,
                     Offset = offsetMs,
                     Combo = combo,
                     Time = time
-                });
-
-                // Limitar el tamaño de la cola para evitar desbordamientos
-                if (_queue.Count > 8) _queue.RemoveAt(0);
+                };
             }
 
             // Notificar a los componentes externos (ej. HitErrorBar)
@@ -75,8 +72,10 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             lock (_lock)
             {
-                // Eliminar juicios cuyo tiempo de vida visual haya expirado
-                _queue.RemoveAll(j => currentTime - j.Time > DISPLAY_LIFETIME);
+                if (_activeJudgement != null && currentTime - _activeJudgement.Time > DISPLAY_LIFETIME)
+                {
+                    _activeJudgement = null;
+                }
             }
         }
 
@@ -84,48 +83,49 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             if (_fontRenderer == null) return;
 
-            // Dibujar todos los juicios de la cola en cascada
+            // Dibujar el juicio activo
             lock (_lock)
             {
-                foreach (var judgement in _queue)
+                if (_activeJudgement != null)
                 {
-                    double age = currentTime - judgement.Time;
-                    if (age < 0 || age > DISPLAY_LIFETIME) continue;
-
-                    float scale = 1.0f;
-                    float alpha = 1.0f;
-
-                    // Animación de pop-up con rebote
-                    if (age < 80)
+                    double age = currentTime - _activeJudgement.Time;
+                    if (age >= 0 && age <= DISPLAY_LIFETIME)
                     {
-                        float t = (float)(age / 80.0);
-                        scale = MathHelper.Lerp(0.7f, 1.3f, t);
-                    }
-                    else if (age < 150)
-                    {
-                        float t = (float)((age - 80.0) / 70.0);
-                        scale = MathHelper.Lerp(1.3f, 1.0f, t);
-                    }
-                    else if (age < 500)
-                    {
-                        scale = 1.0f;
-                    }
-                    else
-                    {
-                        float t = (float)((age - 500.0) / (DISPLAY_LIFETIME - 500.0));
-                        scale = MathHelper.Lerp(1.0f, 0.9f, t);
-                        alpha = MathHelper.Lerp(1.0f, 0.0f, t);
-                    }
+                        float scale = 1.0f;
+                        float alpha = 1.0f;
 
-                    // Desplazamiento vertical hacia arriba (drift de 40px)
-                    float driftY = (float)(age / DISPLAY_LIFETIME) * 40.0f;
-                    int textY = (int)(Position.Y + 15 - driftY);
+                        // Animación de pop-up con rebote
+                        if (age < 80)
+                        {
+                            float t = (float)(age / 80.0);
+                            scale = MathHelper.Lerp(0.7f, 1.3f, t);
+                        }
+                        else if (age < 150)
+                        {
+                            float t = (float)((age - 80.0) / 70.0);
+                            scale = MathHelper.Lerp(1.3f, 1.0f, t);
+                        }
+                        else if (age < 500)
+                        {
+                            scale = 1.0f;
+                        }
+                        else
+                        {
+                            float t = (float)((age - 500.0) / (DISPLAY_LIFETIME - 500.0));
+                            scale = MathHelper.Lerp(1.0f, 0.9f, t);
+                            alpha = MathHelper.Lerp(1.0f, 0.0f, t);
+                        }
 
-                    string text = GetTextForResult(judgement.Result);
-                    _fontRenderer.SetFontSize(48);
-                    Color color = GetColorForResult(judgement.Result) * alpha;
+                        // Desplazamiento vertical hacia arriba (drift de 40px)
+                        float driftY = (float)(age / DISPLAY_LIFETIME) * 40.0f;
+                        int textY = (int)(Position.Y + 15 - driftY);
 
-                    _fontRenderer.DrawTextCentered(text, (int)Position.X, textY, color, scale);
+                        string text = GetTextForResult(_activeJudgement.Result);
+                        _fontRenderer.SetFontSize(48);
+                        Color color = GetColorForResult(_activeJudgement.Result) * alpha;
+
+                        _fontRenderer.DrawTextCentered(text, (int)Position.X, textY, color, scale);
+                    }
                 }
             }
 
@@ -191,7 +191,7 @@ namespace Nullscent.Rulesets.Mania.UI
 
         public void Dispose()
         {
-            _queue.Clear();
+            _activeJudgement = null;
         }
 
         // Estructura interna para almacenar datos de juicios encolados

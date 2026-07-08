@@ -133,6 +133,11 @@ namespace Nullscent.Config
         public bool ShowHitLighting { get; set; } = true;
 
         /// <summary>
+        /// Mostrar barra de error de golpes (Hit Error Bar).
+        /// </summary>
+        public bool ShowHitErrorBar { get; set; } = true;
+
+        /// <summary>
         /// Mostrar divisores de lanes.
         /// </summary>
         public bool ShowLaneDividers { get; set; } = true;
@@ -291,6 +296,7 @@ namespace Nullscent.Config
             BackgroundDim = defaults.BackgroundDim;
             ShowApproachCircles = defaults.ShowApproachCircles;
             ShowHitLighting = defaults.ShowHitLighting;
+            ShowHitErrorBar = defaults.ShowHitErrorBar;
             ShowLaneDividers = defaults.ShowLaneDividers;
             NoteSpeedMultiplier = defaults.NoteSpeedMultiplier;
             IgnoreBeatmapSamples = defaults.IgnoreBeatmapSamples;

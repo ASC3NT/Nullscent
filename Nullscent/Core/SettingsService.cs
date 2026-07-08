@@ -1,52 +1,50 @@
 #nullable enable
 
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.IO;
-using System.Text.Json;
+using Nullscent.Config;
 
 namespace Nullscent.Core
 {
     /// <summary>
-    /// Simple settings service for runtime configuration.
-    /// Exposes observables and a generic setting-changed event.
-    /// Supports persistence to JSON file.
-    /// Singleton pattern for ease of access across the app.
+    /// Singleton wrapper service that provides runtime observabilidad for settings changes.
+    /// Redirects all getters/setters to the unified GameSettings instance to prevent settings loss.
     /// </summary>
     public sealed class SettingsService : INotifyPropertyChanged
     {
         private static readonly Lazy<SettingsService> _instance = new(() => new SettingsService());
         public static SettingsService Instance => _instance.Value;
 
-        private const string SETTINGS_FILE = "settings.json";
-
         public event PropertyChangedEventHandler? PropertyChanged;
-
         public event Action<string, object?>? SettingChanged;
 
-        private readonly Dictionary<string, object?> _store = new();
+        private GameSettings? _settings;
 
         private SettingsService() 
         {
-            LoadSettings();
-
-            // Apply fallback defaults if not loaded from file
-            EnsureDefault(nameof(ScrollSpeed), 1.0);
-            EnsureDefault(nameof(ReceptorPosition), 0.8f);
-            EnsureDefault(nameof(DownScroll), false);
-            EnsureDefault(nameof(GlobalOffsetMs), 0);
-            EnsureDefault(nameof(Volume), 1.0f);
-            EnsureDefault(nameof(HitsoundVolume), 1.0f);
-            EnsureDefault(nameof(MusicVolume), 1.0f);
-            EnsureDefault(nameof(MasterVolume), 1.0f);
-            EnsureDefault(nameof(ShowHitErrorBar), true);
         }
 
-        private void EnsureDefault<T>(string key, T defaultValue)
+        /// <summary>
+        /// Initializes the SettingsService with the active GameSettings instance.
+        /// </summary>
+        public void Initialize(GameSettings settings)
         {
-            if (!_store.ContainsKey(key))
-                _store[key] = defaultValue;
+            _settings = settings;
+            Console.WriteLine("[SettingsService] Initialized with active GameSettings instance");
+        }
+
+        private GameSettings Settings
+        {
+            get
+            {
+                if (_settings == null)
+                {
+                    // Fallback to loading default settings if not initialized
+                    _settings = GameSettings.Load();
+                    _settings.Validate();
+                }
+                return _settings;
+            }
         }
 
         private void RaisePropertyChanged(string propName)
@@ -62,159 +60,150 @@ namespace Nullscent.Core
         // Gameplay settings
         public double ScrollSpeed
         {
-            get => Get<double>(nameof(ScrollSpeed));
-            set => Set(nameof(ScrollSpeed), value);
+            get => Settings.ScrollSpeed;
+            set
+            {
+                int intVal = (int)Math.Round(value);
+                if (Settings.ScrollSpeed != intVal)
+                {
+                    Settings.ScrollSpeed = intVal;
+                    RaisePropertyChanged(nameof(ScrollSpeed));
+                    RaiseSettingChanged(nameof(ScrollSpeed), (double)intVal);
+                }
+            }
         }
 
         public float ReceptorPosition
         {
-            get => Get<float>(nameof(ReceptorPosition));
-            set => Set(nameof(ReceptorPosition), value);
+            get => Settings.ReceptorPosition;
+            set
+            {
+                if (Settings.ReceptorPosition != value)
+                {
+                    Settings.ReceptorPosition = value;
+                    RaisePropertyChanged(nameof(ReceptorPosition));
+                    RaiseSettingChanged(nameof(ReceptorPosition), value);
+                }
+            }
         }
 
         public bool DownScroll
         {
-            get => Get<bool>(nameof(DownScroll));
-            set => Set(nameof(DownScroll), value);
+            get => Settings.DownScroll;
+            set
+            {
+                if (Settings.DownScroll != value)
+                {
+                    Settings.DownScroll = value;
+                    RaisePropertyChanged(nameof(DownScroll));
+                    RaiseSettingChanged(nameof(DownScroll), value);
+                }
+            }
         }
 
         public int GlobalOffsetMs
         {
-            get
-            {
-                if (_store.TryGetValue("GlobalAudioOffset", out var o))
-                {
-                    if (o is double d) return Convert.ToInt32(d);
-                    if (o is float f) return (int)f;
-                    if (o is int i) return i;
-                }
-                return Get<int>(nameof(GlobalOffsetMs));
-            }
+            get => (int)Settings.GlobalAudioOffset;
             set
             {
-                Set(nameof(GlobalOffsetMs), value);
-                _store["GlobalAudioOffset"] = (double)value;
+                if ((int)Settings.GlobalAudioOffset != value)
+                {
+                    Settings.GlobalAudioOffset = value;
+                    RaisePropertyChanged(nameof(GlobalOffsetMs));
+                    RaiseSettingChanged(nameof(GlobalOffsetMs), value);
+                    RaiseSettingChanged("GlobalAudioOffset", (double)value); // Compatibility mapping
+                }
             }
         }
 
         // Audio settings
         public float Volume
         {
-            get => Get<float>(nameof(Volume));
-            set => Set(nameof(Volume), value);
+            get => Settings.MasterVolume;
+            set
+            {
+                if (Settings.MasterVolume != value)
+                {
+                    Settings.MasterVolume = value;
+                    RaisePropertyChanged(nameof(Volume));
+                    RaiseSettingChanged(nameof(Volume), value);
+                }
+            }
         }
 
         public float HitsoundVolume
         {
-            get => Get<float>(nameof(HitsoundVolume));
-            set => Set(nameof(HitsoundVolume), value);
+            get => Settings.HitsoundVolume;
+            set
+            {
+                if (Settings.HitsoundVolume != value)
+                {
+                    Settings.HitsoundVolume = value;
+                    RaisePropertyChanged(nameof(HitsoundVolume));
+                    RaiseSettingChanged(nameof(HitsoundVolume), value);
+                }
+            }
         }
 
         public float MusicVolume
         {
-            get => Get<float>(nameof(MusicVolume));
-            set => Set(nameof(MusicVolume), value);
+            get => Settings.MusicVolume;
+            set
+            {
+                if (Settings.MusicVolume != value)
+                {
+                    Settings.MusicVolume = value;
+                    RaisePropertyChanged(nameof(MusicVolume));
+                    RaiseSettingChanged(nameof(MusicVolume), value);
+                }
+            }
         }
 
         public float MasterVolume
         {
-            get => Get<float>(nameof(MasterVolume));
-            set => Set(nameof(MasterVolume), value);
+            get => Settings.MasterVolume;
+            set
+            {
+                if (Settings.MasterVolume != value)
+                {
+                    Settings.MasterVolume = value;
+                    RaisePropertyChanged(nameof(MasterVolume));
+                    RaiseSettingChanged(nameof(MasterVolume), value);
+                }
+            }
         }
 
         // Visual settings
         public bool ShowHitErrorBar
         {
-            get => Get<bool>(nameof(ShowHitErrorBar));
-            set => Set(nameof(ShowHitErrorBar), value);
-        }
-
-        // Generic getter/setter backed by dictionary
-        private T Get<T>(string key)
-        {
-            if (_store.TryGetValue(key, out var o))
+            get => Settings.ShowHitErrorBar;
+            set
             {
-                if (o is T t) return t;
-
-                // Handle conversions from double (System.Text.Json number default) to float or int
-                if (o is double d)
+                if (Settings.ShowHitErrorBar != value)
                 {
-                    if (typeof(T) == typeof(int)) return (T)(object)Convert.ToInt32(d);
-                    if (typeof(T) == typeof(float)) return (T)(object)Convert.ToSingle(d);
+                    Settings.ShowHitErrorBar = value;
+                    RaisePropertyChanged(nameof(ShowHitErrorBar));
+                    RaiseSettingChanged(nameof(ShowHitErrorBar), value);
                 }
-            }
-
-            // fallback defaults for simple types
-            return typeof(T) == typeof(bool) ? (T)(object)false : default!;
-        }
-
-        private void Set<T>(string key, T value)
-        {
-            _store[key] = value;
-            RaisePropertyChanged(key);
-            RaiseSettingChanged(key, value);
-        }
-
-        /// <summary>
-        /// Load settings from JSON file.
-        /// </summary>
-        public void LoadSettings()
-        {
-            try
-            {
-                if (File.Exists(SETTINGS_FILE))
-                {
-                    string json = File.ReadAllText(SETTINGS_FILE);
-                    var options = new JsonSerializerOptions { WriteIndented = true };
-                    var data = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json, options);
-
-                    if (data != null)
-                    {
-                        foreach (var kvp in data)
-                        {
-                            _store[kvp.Key] = DeserializeJsonElement(kvp.Value);
-                        }
-                    }
-
-                    Console.WriteLine($"[SettingsService] Loaded settings from {SETTINGS_FILE}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[SettingsService] Error loading settings: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Save settings to JSON file.
+        /// Saves settings via the unified GameSettings.
         /// </summary>
         public void SaveSettings()
         {
-            try
-            {
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                string json = JsonSerializer.Serialize(_store, options);
-                File.WriteAllText(SETTINGS_FILE, json);
-                Console.WriteLine($"[SettingsService] Saved settings to {SETTINGS_FILE}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[SettingsService] Error saving settings: {ex.Message}");
-            }
+            Settings.Save();
         }
 
-        private object? DeserializeJsonElement(JsonElement element)
+        /// <summary>
+        /// Loads settings via the unified GameSettings.
+        /// </summary>
+        public void LoadSettings()
         {
-            return element.ValueKind switch
-            {
-                JsonValueKind.String => element.GetString(),
-                JsonValueKind.Number => element.GetDouble(),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                JsonValueKind.Null => null,
-                _ => element.GetRawText()
-            };
+            _settings = GameSettings.Load();
+            _settings.Validate();
+            Console.WriteLine("[SettingsService] Settings loaded and validated via GameSettings");
         }
     }
 }
-

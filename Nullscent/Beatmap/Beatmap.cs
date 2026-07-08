@@ -76,7 +76,13 @@ namespace Nullscent.Beatmap
         /// <summary>
         /// Duración total de la canción en milisegundos (tiempo del último objeto + ventana de miss).
         /// </summary>
-        public int TotalLength => HitObjects.Count > 0 ? HitObjects[^1].EndTime + 188 : 0;
+        public int TotalLength => QuickTotalLength ?? (HitObjects.Count > 0 ? HitObjects[^1].EndTime + 188 : 0);
+
+        /// <summary>
+        /// Propiedades opcionales para soporte de escaneo rápido de metadatos (sin poblar HitObjects).
+        /// </summary>
+        public int? QuickTotalLength { get; set; }
+        public int? QuickObjectCount { get; set; }
 
         /// <summary>
         /// Obtiene el BPM más común del beatmap (para display en UI).

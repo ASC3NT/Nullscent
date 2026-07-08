@@ -134,10 +134,13 @@ namespace Nullscent.UI
                 if (Length <= 0 || ObjectCount <= 0) return 0.0;
                 double seconds = Length / 1000.0;
                 double density = ObjectCount / seconds;
-                double bpmFactor = Math.Clamp(BPM / 150.0, 0.5, 2.0);
-                double stars = density * 0.45 * bpmFactor;
-                double keyFactor = 1.0 + (KeyCount - 4) * 0.05;
-                return Math.Round(Math.Clamp(stars * keyFactor, 0.5, 10.0), 2);
+
+                // Power-based scaling for realistic star ratings (curves fitted to osu!mania standards)
+                double stars = Math.Pow(density, 0.65) * 0.65 
+                    * Math.Pow(BPM / 150.0, 0.4) 
+                    * Math.Pow(4.0 / KeyCount, 0.3);
+
+                return Math.Round(Math.Clamp(stars, 0.5, 10.0), 2);
             }
         }
     }

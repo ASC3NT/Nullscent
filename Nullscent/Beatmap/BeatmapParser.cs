@@ -358,6 +358,9 @@ namespace Nullscent.Beatmap
             var lines = File.ReadAllLines(filePath, Encoding.UTF8);
             string currentSection = string.Empty;
 
+            int hitObjectCount = 0;
+            string? lastHitObjectLine = null;
+
             foreach (var rawLine in lines)
             {
                 var line = rawLine.Trim();
@@ -368,11 +371,6 @@ namespace Nullscent.Beatmap
                 if (line.StartsWith("[") && line.EndsWith("]"))
                 {
                     currentSection = line[1..^1];
-
-                    // Parar early si ya pasamos las secciones que necesitamos (HitObjects es la pesada)
-                    if (currentSection == "Colours" || currentSection == "HitObjects")
-                        break;
-
                     continue;
                 }
 
@@ -408,7 +406,37 @@ namespace Nullscent.Beatmap
                             beatmap.TimingPoints.Add(tp);
                         }
                         break;
+
+                    case "HitObjects":
+                        hitObjectCount++;
+                        lastHitObjectLine = line;
+                        break;
                 }
+            }
+
+            // Ordenar los timing points para el cálculo correcto de BPM ponderado
+            beatmap.TimingPoints.Sort((a, b) => a.Offset.CompareTo(b.Offset));
+
+            // Extraer metadatos rápidos de objetos sin instanciar la lista completa de HitObjects
+            if (hitObjectCount > 0 && lastHitObjectLine != null)
+            {
+                var lastParts = lastHitObjectLine.Split(',');
+                if (lastParts.Length >= 5)
+                {
+                    int lastTime = ParseInt(lastParts[2]);
+                    int lastType = ParseInt(lastParts[3]);
+                    int lastEndTime = lastTime;
+
+                    bool isLN = (lastType & 128) != 0;
+                    if (isLN && lastParts.Length > 5)
+                    {
+                        var endTimeParts = lastParts[5].Split(':');
+                        lastEndTime = ParseInt(endTimeParts[0]);
+                    }
+
+                    beatmap.QuickTotalLength = lastEndTime + 188;
+                }
+                beatmap.QuickObjectCount = hitObjectCount;
             }
 
             return beatmap;

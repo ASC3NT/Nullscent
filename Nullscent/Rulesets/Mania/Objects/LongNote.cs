@@ -51,6 +51,7 @@ namespace Nullscent.Rulesets.Mania.Objects
         public bool IsHolding => State == LongNoteState.Holding;
         public bool IsBroken => State == LongNoteState.Broken;
         public bool IsFinished => State == LongNoteState.Finished;
+        public bool HasHeldContinuously => _totalUnholdDuration == 0 && State != LongNoteState.Broken;
 
         // Break tracking
         private double _breakTime;
@@ -117,22 +118,12 @@ namespace Nullscent.Rulesets.Mania.Objects
         {
             if (State == LongNoteState.Holding && !isKeyHeld)
             {
-                // Key released early → break
+                // Key released early → Miss immediately (no recovery, like osu!stable), transition to Broken (keeps rendering)
                 State = LongNoteState.Broken;
-                _breakTime = currentTime;
-                Console.WriteLine($"[LN] Broken at {currentTime:F1}ms (released early)");
-            }
-            else if (State == LongNoteState.Broken && isKeyHeld)
-            {
-                // Re-keying: key was pressed again during hold!
-                // Accumulate the duration the key was let go
-                double unholdDuration = currentTime - _breakTime;
-                if (unholdDuration > 0)
-                {
-                    _totalUnholdDuration += unholdDuration;
-                }
-                State = LongNoteState.Holding;
-                Console.WriteLine($"[LN] Re-holding at {currentTime:F1}ms (unhold: +{unholdDuration:F1}ms, total: {_totalUnholdDuration:F1}ms)");
+                TailJudged = true;
+                TailResult = HitResult.Miss;
+                TailReleaseTime = currentTime;
+                Console.WriteLine($"[LN] Released early → Tail Miss registered immediately, state: Broken");
             }
         }
 

@@ -135,14 +135,15 @@ namespace Nullscent.Rulesets.Mania.UI
             double maxWindow = _hitWindows.WindowFor(HitResult.Meh);
             if (maxWindow <= 0) maxWindow = 200.0;
 
+            // Ordenados desde el más grande (Meh) al más pequeño (Perfect)
             var results = new[] { HitResult.Meh, HitResult.Ok, HitResult.Good, HitResult.Great, HitResult.Perfect };
             var colors = new[]
             {
-                new Color(150, 150, 150, 60),   // Meh (Dark Grey)
-                new Color(255, 150, 50, 60),    // Ok (Orange)
-                new Color(255, 255, 100, 60),   // Good (Yellow)
-                new Color(100, 255, 100, 60),   // Great (Green)
-                new Color(84, 200, 255, 100)    // Perfect (Cyan)
+                new Color(60, 60, 60, 180),     // Meh (Dark Grey)
+                new Color(200, 100, 0, 180),    // Ok (Orange)
+                new Color(200, 200, 0, 180),    // Good (Yellow)
+                new Color(0, 180, 0, 180),      // Great (Green)
+                new Color(0, 150, 255, 180)     // Perfect (Cyan)
             };
 
             for (int i = 0; i < results.Length; i++)
@@ -150,10 +151,31 @@ namespace Nullscent.Rulesets.Mania.UI
                 double window = _hitWindows.WindowFor(results[i]);
                 if (window <= 0) continue;
 
-                double ratio = window / maxWindow;
-                int halfWidth = (int)(ratio * (_width / 2));
-                var rect = new Rectangle(centerX - halfWidth, _y, halfWidth * 2, _height);
-                spriteBatch.Draw(pixel, rect, colors[i]);
+                // Para el segmento, el límite interno es la ventana de la siguiente prioridad (más pequeña)
+                double innerWindow = (i + 1 < results.Length) ? _hitWindows.WindowFor(results[i + 1]) : 0.0;
+
+                double ratioOuter = window / maxWindow;
+                double ratioInner = innerWindow / maxWindow;
+
+                int outerHalfWidth = (int)(ratioOuter * (_width / 2));
+                int innerHalfWidth = (int)(ratioInner * (_width / 2));
+
+                if (innerWindow > 0)
+                {
+                    // Dibujar el segmento izquierdo
+                    var leftRect = new Rectangle(centerX - outerHalfWidth, _y, outerHalfWidth - innerHalfWidth, _height);
+                    spriteBatch.Draw(pixel, leftRect, colors[i]);
+
+                    // Dibujar el segmento derecho
+                    var rightRect = new Rectangle(centerX + innerHalfWidth, _y, outerHalfWidth - innerHalfWidth, _height);
+                    spriteBatch.Draw(pixel, rightRect, colors[i]);
+                }
+                else
+                {
+                    // Para el elemento central (Perfect), dibujamos el bloque completo
+                    var centerRect = new Rectangle(centerX - outerHalfWidth, _y, outerHalfWidth * 2, _height);
+                    spriteBatch.Draw(pixel, centerRect, colors[i]);
+                }
             }
         }
 

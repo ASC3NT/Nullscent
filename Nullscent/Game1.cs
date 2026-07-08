@@ -40,6 +40,7 @@ namespace Nullscent
         // Control de volumen con scroll
         private int _previousMouseScrollValue = 0;
         private KeyboardState _previousKeyboardState;
+        private double _volumeOverlayTimer = 0.0;
 
         // Transición de fundido de pantalla suave
         private double _transitionAlpha = 1.0;
@@ -87,6 +88,9 @@ namespace Nullscent
             // Cargar configuración
             _settings = GameSettings.Load();
             _settings.Validate();
+
+            // Sincronizar SettingsService con la configuración cargada
+            SettingsService.Instance.Initialize(_settings);
 
             // Aplicar configuración de ventana
             _graphics.PreferredBackBufferWidth = _settings.WindowWidth;
@@ -264,7 +268,7 @@ namespace Nullscent
 
                 // Control de volumen con Alt + Rueda del mouse (estilo osu!)
                 var mouseState = Mouse.GetState();
-                if (keyboardState.IsKeyDown(Keys.LeftAlt) || keyboardState.IsKeyDown(Keys.RightAlt))
+                if (IsActive && (keyboardState.IsKeyDown(Keys.LeftAlt) || keyboardState.IsKeyDown(Keys.RightAlt)))
                 {
                     if (mouseState.ScrollWheelValue != _previousMouseScrollValue)
                     {
@@ -277,6 +281,7 @@ namespace Nullscent
 
                         _audioEngine!.Volume = newVolume;
                         Core.SettingsService.Instance.MasterVolume = newVolume;
+                        _volumeOverlayTimer = 2.0;
 
                         Console.WriteLine($"[Game1] Volume changed to {(int)(newVolume * 100)}% (Alt+Scroll)");
                     }
@@ -284,7 +289,7 @@ namespace Nullscent
                 _previousMouseScrollValue = mouseState.ScrollWheelValue;
 
                 // Toggle Fullscreen with Alt+Enter
-                if ((keyboardState.IsKeyDown(Keys.LeftAlt) || keyboardState.IsKeyDown(Keys.RightAlt)) &&
+                if (IsActive && (keyboardState.IsKeyDown(Keys.LeftAlt) || keyboardState.IsKeyDown(Keys.RightAlt)) &&
                     keyboardState.IsKeyDown(Keys.Enter) && !_previousKeyboardState.IsKeyDown(Keys.Enter))
                 {
                     ToggleFullscreen();
@@ -299,6 +304,12 @@ namespace Nullscent
                     _currentFps = _fpsCounter;
                     _fpsCounter = 0;
                     _fpsTimer -= 1.0;
+                }
+
+                // Actualizar temporizador de overlay de volumen
+                if (_volumeOverlayTimer > 0)
+                {
+                    _volumeOverlayTimer = Math.Max(0.0, _volumeOverlayTimer - gameTime.ElapsedGameTime.TotalSeconds);
                 }
 
                 // Actualizar transición de fundido
@@ -346,6 +357,44 @@ namespace Nullscent
                     string fpsText = $"{_currentFps} FPS";
                     var textSize = _fontRenderer.MeasureText(fpsText, 1.0f);
                     _fontRenderer.DrawText(fpsText, new Vector2(WindowWidth - textSize.X - 10, WindowHeight - textSize.Y - 10), Color.LimeGreen, 1.0f);
+                    _spriteBatch.End();
+                }
+
+                // Dibujar volumen si está activo el overlay
+                if (_volumeOverlayTimer > 0 && _fontRenderer != null && _spriteBatch != null && _settings != null)
+                {
+                    float alpha = Math.Min(1.0f, (float)(_volumeOverlayTimer * 2.0));
+                    
+                    int width = 240;
+                    int height = 45;
+                    int x = WindowWidth - width - 20;
+                    int y = 20;
+                    
+                    _spriteBatch.Begin();
+                    
+                    var bgRect = new Rectangle(x, y, width, height);
+                    _fontRenderer.DrawBox(bgRect, new Color(20, 20, 25, 200) * alpha);
+                    _fontRenderer.DrawBoxBorder(bgRect, Color.HotPink * alpha, 2);
+                    
+                    _fontRenderer.SetFontSize(14);
+                    string volText = $"VOL: {(int)(_settings.MasterVolume * 100)}%";
+                    _fontRenderer.DrawText(volText, new Vector2(x + 12, y + 14), Color.White * alpha);
+                    
+                    int barX = x + 90;
+                    int barY = y + 18;
+                    int barW = 130;
+                    int barH = 8;
+                    
+                    var barBgRect = new Rectangle(barX, barY, barW, barH);
+                    _fontRenderer.DrawBox(barBgRect, new Color(50, 50, 60, 255) * alpha);
+                    
+                    int fillW = (int)(_settings.MasterVolume * barW);
+                    if (fillW > 0)
+                    {
+                        var barFillRect = new Rectangle(barX, barY, fillW, barH);
+                        _fontRenderer.DrawBox(barFillRect, Color.HotPink * alpha);
+                    }
+                    
                     _spriteBatch.End();
                 }
             }

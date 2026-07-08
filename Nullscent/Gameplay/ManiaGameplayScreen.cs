@@ -42,6 +42,8 @@ namespace Nullscent.Gameplay
         private ManiaScoreProcessor? _scoreProcessor;
         private ManiaHUD? _hud;
         private ManiaPauseOverlay? _pauseOverlay;
+        private ManiaFailOverlay? _failOverlay;
+        private bool _isFailed;
         private TrueTypeFontRenderer? _fontRenderer;
         private HitErrorBar? _hitErrorBar;
         private LoadingScreen? _loadingScreen;
@@ -56,6 +58,7 @@ namespace Nullscent.Gameplay
         private bool _isInitialized;
         private bool _wasEscapePressed;
         private double _currentTime;
+        private double? _endDelayTimer;
         private string? _scrollNotificationText;
         private double _scrollNotificationTimer;
 
@@ -149,10 +152,11 @@ namespace Nullscent.Gameplay
                 _playfield.AddHitObject(hitObject);
             }
 
-            // Componentes de interfaz (HUD y Pausa)
+            // Componentes de interfaz (HUD, Pausa y Fallo)
             _fontRenderer = _game.FontRenderer;
             _hud = new ManiaHUD(_graphicsDevice, _spriteBatch, _fontRenderer, _maniaConfig);
             _pauseOverlay = new ManiaPauseOverlay(_graphicsDevice, _spriteBatch, _fontRenderer);
+            _failOverlay = new ManiaFailOverlay(_graphicsDevice, _spriteBatch, _fontRenderer);
 
             // ==========================================
             // CONFIGURACIÓN DEL HIT ERROR BAR
@@ -180,7 +184,7 @@ namespace Nullscent.Gameplay
             {
                 _audioEngine.LoadTrack(audioPath);
                 _audioEngine.GlobalOffsetMs = Core.SettingsService.Instance.GlobalOffsetMs;
-                _audioEngine.Volume = Core.SettingsService.Instance.Volume;
+                _audioEngine.Volume = Core.SettingsService.Instance.MasterVolume;
                 ApplyRateMods();
             }
             else
@@ -198,6 +202,9 @@ namespace Nullscent.Gameplay
 
             // Cargar fondo de pantalla del mapa
             LoadBackgroundTexture();
+            
+            // Ocultar el cursor del mouse durante el gameplay
+            _game.IsMouseVisible = false;
             
             _isInitialized = true;
         }
@@ -362,17 +369,22 @@ namespace Nullscent.Gameplay
                 return;
             }
 
+            if (_isFailed && _failOverlay != null)
+            {
+                _failOverlay.Update(gameTime);
+
+                if (_failOverlay.ShouldRetry) { Retry(); return; }
+                else if (_failOverlay.ShouldQuit) { QuitToSongSelect(); return; }
+
+                _previousKeyboardState = keyboardState;
+                return;
+            }
+
             HandleInput(keyboardState);
 
-            // Fórmula base de velocidad de caída (scroll speed)
-            double scrollSpeed = (_game.WindowHeight / 1.5) * _maniaConfig.ScrollSpeed;
+            _playfield.Update(_currentTime, _scoreProcessor, _maniaConfig.ScrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
-            _playfield.Update(_currentTime, _scoreProcessor, scrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
-            if (!_scoreProcessor.HasFailed)
-            {
-                _scoreProcessor.UpdateHealthDrain(_currentTime);
-            }
 
             _hitErrorBar?.Update(_currentTime);
 
@@ -386,13 +398,24 @@ namespace Nullscent.Gameplay
                 HandleFail();
             }
 
-            // Evaluar condición de fin de nivel
+            // Evaluar condición de fin de nivel: audio terminado y todas las notas juzgadas
             bool allObjectsJudged = _scoreProcessor.TotalJudgements >= _scoreProcessor.TotalHitObjects;
-            bool audioFinished = !_audioEngine.IsPlaying && _currentTime >= _audioEngine.LengthMs - 1000; 
+            bool audioFinished = !_audioEngine.IsPlaying && _currentTime >= _audioEngine.LengthMs - 300;
 
             if (audioFinished && allObjectsJudged && !_isPaused && _scoreProcessor.TotalHitObjects > 0)
             {
-                TransitionToResults();
+                if (_endDelayTimer == null)
+                {
+                    _endDelayTimer = 1500.0; // 1.5 segundos de retraso tras la última nota
+                }
+                else
+                {
+                    _endDelayTimer -= gameTime.ElapsedGameTime.TotalMilliseconds;
+                    if (_endDelayTimer <= 0)
+                    {
+                        TransitionToResults();
+                    }
+                }
             }
 
             _previousKeyboardState = keyboardState;
@@ -464,14 +487,12 @@ namespace Nullscent.Gameplay
                 _spriteBatch.Draw(_bgTexture, new Rectangle(0, 0, _game.WindowWidth, _game.WindowHeight), Color.White);
             }
             // Dibujar capa de oscurecimiento (dim)
-            double dimAmount = Math.Clamp(_settings.BackgroundDim / 100.0, 0.0, 1.0);
+            double dimAmount = Math.Clamp((double)_settings.BackgroundDim, 0.0, 1.0);
             if (_bgTexture == null) dimAmount = 1.0; // Negro absoluto si no hay fondo
             _spriteBatch.Draw(_whitePixel!, new Rectangle(0, 0, _game.WindowWidth, _game.WindowHeight), Color.Black * (float)dimAmount);
             _spriteBatch.End();
 
-            // Dibujar playfield (las notas se renderizan sin oscurecer sobre el fondo)
-            double scrollSpeed = (_game.WindowHeight / 1.5) * _maniaConfig.ScrollSpeed;
-            _playfield.Draw(_currentTime, scrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
+            _playfield.Draw(_currentTime, _maniaConfig.ScrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
             _hud.Draw(_scoreProcessor, _originalBeatmap!, _currentTime, _activeMods);
 
@@ -512,6 +533,11 @@ namespace Nullscent.Gameplay
             {
                 _pauseOverlay.Draw(gameTime);
             }
+
+            if (_isFailed && _failOverlay != null)
+            {
+                _failOverlay.Draw(gameTime);
+            }
         }
 
         private void Pause()
@@ -549,7 +575,12 @@ namespace Nullscent.Gameplay
 
         private void HandleFail()
         {
-            Console.WriteLine("[ManiaGameplayScreen] Jugador eliminido (Failed)");
+            if (_isFailed) return;
+
+            _isFailed = true;
+            _failOverlay?.Show();
+            _audioEngine.Pause(); // Pause the music on failure
+            Console.WriteLine("[ManiaGameplayScreen] Jugador eliminado (Failed)");
         }
 
         private void TransitionToResults()
@@ -582,6 +613,8 @@ namespace Nullscent.Gameplay
 
         public void Cleanup()
         {
+            _game.IsMouseVisible = true;
+            _audioEngine.RateMultiplier = 1.0;
             _audioEngine.Stop();
             _inputManager.ClearEventListeners();
 
@@ -665,8 +698,8 @@ namespace Nullscent.Gameplay
                 case nameof(Core.SettingsService.GlobalOffsetMs):
                     _audioEngine.GlobalOffsetMs = Core.SettingsService.Instance.GlobalOffsetMs;
                     break;
-                case nameof(Core.SettingsService.Volume):
-                    _audioEngine.Volume = Core.SettingsService.Instance.Volume;
+                case nameof(Core.SettingsService.MasterVolume):
+                    _audioEngine.Volume = Core.SettingsService.Instance.MasterVolume;
                     break;
             }
         }

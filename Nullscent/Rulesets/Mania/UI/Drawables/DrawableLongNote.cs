@@ -29,6 +29,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     {
         private readonly LongNote _longNote;
         public bool IsHeadApplied { get; set; }
+        public bool IsTailApplied { get; set; }
 
         // Visual constants
         private const int HEAD_HEIGHT = 12;
@@ -53,13 +54,16 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             // Base visibility update
             base.Update(currentTime, scrollSpeed, receptorPosition, downScroll, screenHeight);
 
-            // LN is finished when both head and tail are judged
-            if (_longNote.IsFullyJudged)
+            // Si la cola fue juzgada con éxito, la LN desaparece inmediatamente (evitando glitches visuales)
+            if (_longNote.TailJudged && _longNote.TailResult != HitResult.None && _longNote.TailResult != HitResult.Miss)
             {
                 IsJudged = true;
-
-                // Set result based on head+tail average (for effects)
-                // In actual scoring, head and tail are counted separately
+                Result = CombineResults(_longNote.HeadResult, _longNote.TailResult);
+            }
+            // Si la cola fue un Miss (Early Release o Auto-Miss), la dejamos correr por 200ms en pantalla antes de borrarla
+            else if (_longNote.TailJudged && currentTime > _longNote.EndTime + 200)
+            {
+                IsJudged = true;
                 Result = CombineResults(_longNote.HeadResult, _longNote.TailResult);
             }
         }
@@ -71,14 +75,27 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
 
             double alpha = GetAlpha();
 
-            // Calculate head and tail Y positions using shared function
-            int headY = CalculateYPosition(_longNote.StartTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
+            // Calculate head and tail Y positions (use release time to prevent jumping/teleporting when released early)
+            double bottomTime = (_longNote.TailReleaseTime > 0) ? _longNote.TailReleaseTime : _longNote.StartTime;
+            int headY = CalculateYPosition(bottomTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
             int tailY = CalculateYPosition(_longNote.EndTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
 
-            // Clampar la cabeza de la LN al receptor si está siendo sostenida (Holding)
-            if (_longNote.State == LongNoteState.Holding)
+            // Clampar la cabeza de la LN al receptor si está siendo sostenida (Holding) y no se ha soltado antes
+            if (_longNote.State == LongNoteState.Holding && _longNote.HasHeldContinuously)
             {
                 headY = receptorY;
+
+                // Capping: prevent drawing the note past the receptor in the direction of scroll when holding past EndTime
+                if (downScroll)
+                {
+                    headY = Math.Min(headY, receptorY);
+                    tailY = Math.Min(tailY, receptorY);
+                }
+                else
+                {
+                    headY = Math.Max(headY, receptorY);
+                    tailY = Math.Max(tailY, receptorY);
+                }
             }
 
             int topY = Math.Min(headY, tailY);

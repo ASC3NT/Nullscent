@@ -140,6 +140,13 @@ namespace Nullscent.UI
                 }
             }
 
+            if (!_game.IsActive)
+            {
+                _prevMouseState = currentMouseState;
+                _previousKeyboardState = currentKeyboardState;
+                return;
+            }
+
             // Tecla F2 para ciclo de ordenamiento
             if (IsKeyPressed(currentKeyboardState, Keys.F2))
             {
@@ -147,16 +154,33 @@ namespace Nullscent.UI
                 ApplySorting();
             }
 
-            // Soporte para rueda de scroll del mouse en el carrusel de canciones
+            // Soporte para rueda de scroll del mouse dependiente de la posición del cursor
             int pHeight = _graphicsDevice.Viewport.Height - 120;
             int iHeight = 60;
             int vItems = pHeight / iHeight;
             int mouseScrollDelta = currentMouseState.ScrollWheelValue - _prevMouseState.ScrollWheelValue;
-            if (mouseScrollDelta != 0 && _songList.FilteredBeatmapSets.Count > 0)
+            if (mouseScrollDelta != 0)
             {
                 int scrollDirection = mouseScrollDelta > 0 ? -1 : 1;
-                _songList.SelectedSetIndex = Math.Clamp(_songList.SelectedSetIndex + scrollDirection, 0, _songList.FilteredBeatmapSets.Count - 1);
-                _scrollOffset = Math.Max(0, _songList.SelectedSetIndex - vItems / 2);
+                
+                // Si el puntero está en el panel izquierdo (carrusel de canciones)
+                if (currentMouseState.X < _graphicsDevice.Viewport.Width * 0.48f)
+                {
+                    if (_songList.FilteredBeatmapSets.Count > 0)
+                    {
+                        _songList.SelectedSetIndex = Math.Clamp(_songList.SelectedSetIndex + scrollDirection, 0, _songList.FilteredBeatmapSets.Count - 1);
+                        _scrollOffset = Math.Max(0, _songList.SelectedSetIndex - vItems / 2);
+                    }
+                }
+                // Si el puntero está en el panel derecho (dificultades)
+                else
+                {
+                    var selectedSet = _songList.SelectedBeatmapSet;
+                    if (selectedSet != null && selectedSet.Difficulties.Count > 0)
+                    {
+                        _songList.SelectedDifficultyIndex = Math.Clamp(_songList.SelectedDifficultyIndex + scrollDirection, 0, selectedSet.Difficulties.Count - 1);
+                    }
+                }
             }
 
             if (_showModsOverlay)
@@ -288,11 +312,21 @@ namespace Nullscent.UI
                 if (selectedSet != null)
                 {
                     int panelX = (int)(_graphicsDevice.Viewport.Width * 0.5f);
+                    int panelWidthRight = _graphicsDevice.Viewport.Width - panelX;
                     int xDiff = panelX + 20;
-                    int currentY = panelY + 115;
+                    
+                    int currentY = panelY + 20;
+                    if (_currentBackgroundTexture != null)
+                    {
+                        int imgW = panelWidthRight - 40;
+                        int imgH = (int)(imgW * 0.5f);
+                        currentY += imgH + 15;
+                    }
+                    currentY += 26 + 30 + 22; // Título, artista y cabecera "Difficulties:"
+
                     for (int i = 0; i < selectedSet.Difficulties.Count; i++)
                     {
-                        var diffRect = new Rectangle(xDiff + 10, currentY - 2, panelWidth - 40, 20);
+                        var diffRect = new Rectangle(xDiff + 10, currentY - 2, panelWidthRight - 40, 18);
                         if (diffRect.Contains(currentMouseState.X, currentMouseState.Y))
                         {
                             if (currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
@@ -308,7 +342,7 @@ namespace Nullscent.UI
                                 break;
                             }
                         }
-                        currentY += 22;
+                        currentY += 20;
                     }
                 }
 
@@ -905,14 +939,18 @@ namespace Nullscent.UI
             _fontRenderer.DrawBox(modsButtonRect, modsBtnColor);
             _fontRenderer.DrawTextCentered(modsText, modsButtonRect.X + modsButtonRect.Width / 2, modsButtonRect.Y + modsButtonRect.Height / 2, Color.White);
 
-            // Búsqueda
+            // Búsqueda con tamaño de fuente controlado para evitar desbordes
+            _fontRenderer.SetFontSize(16);
             string searchDisplay = string.IsNullOrEmpty(_searchText) ? "Type to search..." : _searchText;
             Color searchColor = string.IsNullOrEmpty(_searchText) ? _dimTextColor * 0.5f : _textColor;
 
-            int searchX = screenWidth - 480;
-            _fontRenderer.DrawText($"Sort: [F2] {_currentSortMode}", searchX - 160, 20, _accentColor);
+            int sortX = Math.Max(420, screenWidth - 460);
+            int searchX = Math.Max(660, screenWidth - 260);
+
+            _fontRenderer.DrawText($"Sort: [F2] {_currentSortMode}", sortX, 20, _accentColor);
             _fontRenderer.DrawText("Search: ", searchX, 20, _dimTextColor);
-            _fontRenderer.DrawText(searchDisplay, searchX + 80, 20, searchColor);
+            string truncatedSearch = TruncateString(searchDisplay, 16);
+            _fontRenderer.DrawText(truncatedSearch, searchX + 70, 20, searchColor);
         }
 
         private void DrawFooter(int screenWidth, int screenHeight)

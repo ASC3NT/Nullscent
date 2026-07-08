@@ -33,7 +33,6 @@ namespace Nullscent.Rulesets.Mania.Scoring
 
         private readonly int _totalHitObjects;
         private readonly ManiaJudgement _judgement = new();
-        private readonly ManiaHealthProcessor _healthProcessor;
         private readonly List<ManiaMod> _activeMods;
 
         /// <summary>
@@ -58,8 +57,6 @@ namespace Nullscent.Rulesets.Mania.Scoring
             _totalHitObjects = isScoreV2 
                 ? totalNotes + (totalHoldNotes * 2) 
                 : totalNotes + totalHoldNotes;
-
-            _healthProcessor = new ManiaHealthProcessor(hpDrainRate, healthDrainEnabled);
 
             foreach (HitResult result in Enum.GetValues(typeof(HitResult)))
                 Statistics[result] = 0;
@@ -93,32 +90,7 @@ namespace Nullscent.Rulesets.Mania.Scoring
             Health = Math.Clamp(Health + healthChange, 0.0, 1.0);
         }
 
-        private double _lastHealthUpdateTimeMs = -1;
 
-        public void UpdateHealthDrain(double currentTimeMs)
-        {
-            if (_lastHealthUpdateTimeMs < 0)
-            {
-                _lastHealthUpdateTimeMs = currentTimeMs;
-                return;
-            }
-
-            double deltaMs = currentTimeMs - _lastHealthUpdateTimeMs;
-
-            // Evitar drenajes masivos debido a lag spikes o transiciones bruscas
-            if (deltaMs > 500)
-            {
-                deltaMs = 500;
-            }
-
-            if (deltaMs > 0)
-            {
-                double deltaSeconds = deltaMs / 1000.0;
-                Health = Math.Clamp(Health - _healthProcessor.GetDrainFor(deltaSeconds), 0.0, 1.0);
-            }
-
-            _lastHealthUpdateTimeMs = currentTimeMs;
-        }
 
         private long CalculateCurrentScore()
         {
@@ -191,21 +163,4 @@ namespace Nullscent.Rulesets.Mania.Scoring
         }
     }
 
-    public class ManiaHealthProcessor
-    {
-        private readonly double _drainRate;
-        private readonly bool _enabled;
-
-        public ManiaHealthProcessor(double hpDrainRate, bool enabled)
-        {
-            _drainRate = hpDrainRate;
-            _enabled = enabled;
-        }
-
-        public double GetDrainFor(double deltaSeconds)
-        {
-            if (!_enabled) return 0.0;
-            return _drainRate * 0.01 * deltaSeconds;
-        }
-    }
 }

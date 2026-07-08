@@ -17,6 +17,7 @@ namespace Nullscent.Gameplay
         private bool _isPlaying;
         private bool _hasStartedAudio;
         private bool _allowBackwardSeek;
+        private int _updateCount = 0;
 
         public double CurrentTime => _currentTimeMs;
         public double Rate => _rateMultiplier;
@@ -29,12 +30,14 @@ namespace Nullscent.Gameplay
             _isPlaying = false;
             _hasStartedAudio = false;
             _allowBackwardSeek = false;
+            System.Console.WriteLine($"[GameplayClock] Created. LeadIn={leadInTimeMs}");
         }
 
         public void Start()
         {
             _isPlaying = true;
             _rateMultiplier = _audioEngine.RateMultiplier;
+            System.Console.WriteLine($"[GameplayClock] Start() LeadIn={_currentTimeMs}");
         }
 
         public void Pause()
@@ -82,32 +85,61 @@ namespace Nullscent.Gameplay
                 return;
 
             _rateMultiplier = _audioEngine.RateMultiplier;
+            _updateCount++;
 
+            if (_updateCount % 120 == 0)
+            {
+                System.Console.WriteLine(
+                    $"[GameplayClock] " +
+                    $"CurrentTime={_currentTimeMs:F1} | " +
+                    $"IsPlaying={_isPlaying} | " +
+                    $"HasStartedAudio={_hasStartedAudio} | " +
+                    $"Rate={_rateMultiplier:F2} | " +
+                    $"AudioPlaying={_audioEngine.IsPlaying} | " +
+                    $"AudioPosition={_audioEngine.CurrentPositionMs:F1}");
+            }
+
+            // 1. Virtual Lead-In phase: advance using frame delta scaled by playback rate
             if (_currentTimeMs < 0)
             {
-                // Virtual Lead-In phase: advance using frame delta scaled by playback rate
                 _currentTimeMs += deltaMs * _rateMultiplier;
-
-                if (_currentTimeMs >= 0)
-                {
-                    // Transition to authoritative audio playback
-                    _audioEngine.Play();
-                    _audioEngine.Seek(0);
-                    _hasStartedAudio = true;
-                    _currentTimeMs = _audioEngine.CurrentPositionMs;
-                }
             }
-            else
-            {
-                // Authoritative audio engine playback position
-                _audioEngine.Update();
-                double newTime = _audioEngine.CurrentPositionMs;
 
-                // Enforce clock monotonicity (prevent backward time jitter during normal playback)
-                if (_allowBackwardSeek || newTime >= _currentTimeMs)
+            // 2. Transition or authoritative audio engine phase (unified condition)
+            if (_currentTimeMs >= 0)
+            {
+                if (!_hasStartedAudio)
                 {
-                    _currentTimeMs = newTime;
-                    _allowBackwardSeek = false;
+                    System.Console.WriteLine("[GameplayClock] Transition -> Audio phase");
+                    System.Console.WriteLine("[GameplayClock] Calling AudioEngine.Play()");
+                    _audioEngine.Play();
+                    System.Console.WriteLine($"[GameplayClock] After Play() IsPlaying={_audioEngine.IsPlaying}");
+                    _audioEngine.Seek(_currentTimeMs);
+                    _hasStartedAudio = true;
+                }
+                else
+                {
+                    _audioEngine.Update();
+                }
+
+                // Check if the audio has ended or is not playing near the end of the song (generous threshold of 2 seconds to avoid BASS buffer congelation)
+                bool audioFinished = _hasStartedAudio && !_audioEngine.IsPlaying && _currentTimeMs >= _audioEngine.LengthMs - 2000;
+
+                if (audioFinished)
+                {
+                    // CPU-based fallback timing at the end of the song so the clock keeps ticking
+                    _currentTimeMs += deltaMs * _rateMultiplier;
+                }
+                else
+                {
+                    double newTime = _audioEngine.CurrentPositionMs;
+
+                    // Enforce clock monotonicity (prevent backward time jitter during normal playback)
+                    if (_allowBackwardSeek || newTime >= _currentTimeMs)
+                    {
+                        _currentTimeMs = newTime;
+                        _allowBackwardSeek = false;
+                    }
                 }
             }
         }

@@ -73,8 +73,6 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         {
             if (IsJudged) return;
 
-            double alpha = GetAlpha();
-
             // Calculate head and tail Y positions (use release time to prevent jumping/teleporting when released early)
             double bottomTime = (_longNote.TailReleaseTime > 0) ? _longNote.TailReleaseTime : _longNote.StartTime;
             int headY = CalculateYPosition(bottomTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
@@ -106,53 +104,69 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 return;
 
             // Clamp to screen
-            topY = Math.Max(-50, topY);
-            bottomY = Math.Min(screenHeight + 50, bottomY);
-            int bodyHeight = bottomY - topY;
+            int clampedTopY = Math.Max(-50, topY);
+            int clampedBottomY = Math.Min(screenHeight + 50, bottomY);
+            int bodyHeight = clampedBottomY - clampedTopY;
 
-            if (bodyHeight <= 0) return;
+            if (bodyHeight > 0)
+            {
+                // Draw body in segments to allow gradual fade out for Hidden
+                int segmentHeight = 8;
+                Color baseBodyColor = GetBodyColor();
 
-            // Determine body color based on state
-            Color bodyColor = GetBodyColor() * (float)(alpha * 0.7f);
+                for (int currY = clampedTopY; currY < clampedBottomY; currY += segmentHeight)
+                {
+                    int h = Math.Min(segmentHeight, clampedBottomY - currY);
+                    double bodyAlpha = GetHiddenAlpha(currY + h / 2, downScroll, receptorY, screenHeight, CurrentCombo);
+                    if (bodyAlpha <= 0.0) continue;
 
-            // Draw body
-            var bodyRect = new Rectangle(PADDING, topY, columnWidth - PADDING * 2, bodyHeight);
-            spriteBatch.Draw(pixel, bodyRect, bodyColor);
+                    var bodyRect = new Rectangle(PADDING, currY, columnWidth - PADDING * 2, h);
+                    spriteBatch.Draw(pixel, bodyRect, baseBodyColor * (float)(bodyAlpha * 0.7f));
 
-            // Draw left border
-            var leftBorder = new Rectangle(PADDING, topY, 2, bodyHeight);
-            spriteBatch.Draw(pixel, leftBorder, COLOR_BORDER * (float)alpha);
+                    // Draw left border segment
+                    var leftBorder = new Rectangle(PADDING, currY, 2, h);
+                    spriteBatch.Draw(pixel, leftBorder, COLOR_BORDER * (float)bodyAlpha);
 
-            // Draw right border
-            var rightBorder = new Rectangle(columnWidth - PADDING - 2, topY, 2, bodyHeight);
-            spriteBatch.Draw(pixel, rightBorder, COLOR_BORDER * (float)alpha);
+                    // Draw right border segment
+                    var rightBorder = new Rectangle(columnWidth - PADDING - 2, currY, 2, h);
+                    spriteBatch.Draw(pixel, rightBorder, COLOR_BORDER * (float)bodyAlpha);
+                }
+            }
 
             // Draw head (if not judged yet)
             if (!_longNote.HeadJudged && headY >= -50 && headY <= screenHeight + 50)
             {
-                var headRect = new Rectangle(
-                    PADDING,
-                    headY - HEAD_HEIGHT / 2,
-                    columnWidth - PADDING * 2,
-                    HEAD_HEIGHT
-                );
-                spriteBatch.Draw(pixel, headRect, COLOR_HEAD * (float)alpha);
+                double headAlpha = GetHiddenAlpha(headY, downScroll, receptorY, screenHeight, CurrentCombo);
+                if (headAlpha > 0.0)
+                {
+                    var headRect = new Rectangle(
+                        PADDING,
+                        headY - HEAD_HEIGHT / 2,
+                        columnWidth - PADDING * 2,
+                        HEAD_HEIGHT
+                    );
+                    spriteBatch.Draw(pixel, headRect, COLOR_HEAD * (float)headAlpha);
 
-                // Head border
-                var headBorder = new Rectangle(PADDING, headY - HEAD_HEIGHT / 2, columnWidth - PADDING * 2, 2);
-                spriteBatch.Draw(pixel, headBorder, COLOR_BORDER * (float)alpha);
+                    // Head border
+                    var headBorder = new Rectangle(PADDING, headY - HEAD_HEIGHT / 2, columnWidth - PADDING * 2, 2);
+                    spriteBatch.Draw(pixel, headBorder, COLOR_BORDER * (float)headAlpha);
+                }
             }
 
             // Draw tail (if not judged yet)
             if (!_longNote.TailJudged && tailY >= -50 && tailY <= screenHeight + 50)
             {
-                var tailRect = new Rectangle(
-                    PADDING,
-                    tailY - TAIL_HEIGHT / 2,
-                    columnWidth - PADDING * 2,
-                    TAIL_HEIGHT
-                );
-                spriteBatch.Draw(pixel, tailRect, COLOR_TAIL * (float)alpha);
+                double tailAlpha = GetHiddenAlpha(tailY, downScroll, receptorY, screenHeight, CurrentCombo);
+                if (tailAlpha > 0.0)
+                {
+                    var tailRect = new Rectangle(
+                        PADDING,
+                        tailY - TAIL_HEIGHT / 2,
+                        columnWidth - PADDING * 2,
+                        TAIL_HEIGHT
+                    );
+                    spriteBatch.Draw(pixel, tailRect, COLOR_TAIL * (float)tailAlpha);
+                }
             }
         }
 

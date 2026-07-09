@@ -101,9 +101,33 @@ namespace Nullscent
 
             Console.WriteLine($"[Game1] Window: {_settings.WindowWidth}x{_settings.WindowHeight} (Fullscreen: {_settings.Fullscreen})");
 
-            // Crear directorios necesarios
-            Directory.CreateDirectory(_settings.SongsDirectory);
-            Directory.CreateDirectory(_settings.SkinDirectory);
+            // Crear directorios necesarios con salvaguardas para permisos de escritura
+            try
+            {
+                Directory.CreateDirectory(_settings.SongsDirectory);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] Warning: Failed to create Songs directory at {_settings.SongsDirectory}: {ex.Message}");
+                string appDataSongs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Nullscent", "Songs");
+                _settings.SongsDirectory = appDataSongs;
+                Directory.CreateDirectory(appDataSongs);
+                _settings.Save();
+            }
+
+            try
+            {
+                Directory.CreateDirectory(_settings.SkinDirectory);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] Warning: Failed to create Skin directory at {_settings.SkinDirectory}: {ex.Message}");
+                string appDataSkin = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Nullscent", "Skin");
+                _settings.SkinDirectory = appDataSkin;
+                Directory.CreateDirectory(appDataSkin);
+                _settings.Save();
+            }
+
             Console.WriteLine($"[Game1] Songs: {Path.GetFullPath(_settings.SongsDirectory)}");
             Console.WriteLine($"[Game1] Skins: {Path.GetFullPath(_settings.SkinDirectory)}");
 
@@ -295,17 +319,7 @@ namespace Nullscent
                     ToggleFullscreen();
                 }
                 _previousKeyboardState = keyboardState;
-
-                // Actualizar contador de FPS
-                _fpsTimer += gameTime.ElapsedGameTime.TotalSeconds;
-                _fpsCounter++;
-                if (_fpsTimer >= 1.0)
-                {
-                    _currentFps = _fpsCounter;
-                    _fpsCounter = 0;
-                    _fpsTimer -= 1.0;
-                }
-
+                
                 // Actualizar temporizador de overlay de volumen
                 if (_volumeOverlayTimer > 0)
                 {
@@ -334,6 +348,16 @@ namespace Nullscent
 
         protected override void Draw(GameTime gameTime)
         {
+            // Actualizar contador de FPS en Draw para reflejar los frames reales renderizados
+            _fpsTimer += gameTime.ElapsedGameTime.TotalSeconds;
+            _fpsCounter++;
+            if (_fpsTimer >= 1.0)
+            {
+                _currentFps = _fpsCounter;
+                _fpsCounter = 0;
+                _fpsTimer -= 1.0;
+            }
+
             try
             {
                 GraphicsDevice.Clear(Color.Black);

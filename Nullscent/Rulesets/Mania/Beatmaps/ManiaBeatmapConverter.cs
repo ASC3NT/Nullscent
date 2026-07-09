@@ -37,7 +37,9 @@ namespace Nullscent.Rulesets.Mania.Beatmaps
                         StartTime = hitObject.Time,
                         EndTime = hitObject.EndTime,
                         Column = column,
-                        Samples = samples
+                        Samples = samples,
+                        HitSound = hitObject.HitSound,
+                        SampleFileName = hitObject.SampleFileName
                     });
                 }
                 else
@@ -46,7 +48,9 @@ namespace Nullscent.Rulesets.Mania.Beatmaps
                     {
                         StartTime = hitObject.Time,
                         Column = column,
-                        Samples = samples
+                        Samples = samples,
+                        HitSound = hitObject.HitSound,
+                        SampleFileName = hitObject.SampleFileName
                     });
                 }
             }

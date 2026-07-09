@@ -40,6 +40,7 @@ namespace Nullscent.UI
         private KeyboardState _previousKeyboardState;
         private MouseState _prevMouseState;
         private bool _needsRescan;
+        private bool _isDisposed;
         private string? _pendingImportedPath;
         private bool _showModsOverlay;
         private readonly List<ManiaMod> _activeMods = new();
@@ -103,6 +104,12 @@ namespace Nullscent.UI
                     // Progress callback (opcional: actualizar UI)
                 }
             );
+
+            if (_isDisposed)
+            {
+                Console.WriteLine("[SongSelectScreen] Initialize completed after screen was disposed. Aborting setup.");
+                return;
+            }
 
             _songList.LoadBeatmapSets(beatmapSets);
             _isScanning = false;
@@ -351,7 +358,7 @@ namespace Nullscent.UI
             }
 
             // Procesar re-escaneo asíncrono desde el hilo principal
-            if (_needsRescan)
+            if (_needsRescan && !_isScanning)
             {
                 _needsRescan = false;
                 string? pathToSelect = _pendingImportedPath;
@@ -479,7 +486,7 @@ namespace Nullscent.UI
 
         public async void RescanBeatmaps(string? newDirectoryToSelect = null)
         {
-            if (_songList == null) return;
+            if (_songList == null || _isScanning) return;
 
             string? selectedDifficultyPath = _songList.SelectedDifficulty?.FilePath;
 
@@ -490,6 +497,12 @@ namespace Nullscent.UI
                 _settings.SongsDirectory,
                 null
             );
+
+            if (_isDisposed)
+            {
+                Console.WriteLine("[SongSelectScreen] Rescan completed after screen was disposed. Aborting.");
+                return;
+            }
 
             _songList.LoadBeatmapSets(beatmapSets);
 
@@ -610,11 +623,7 @@ namespace Nullscent.UI
                     sets.Sort((a, b) => string.Compare(a.DisplayTitle, b.DisplayTitle, StringComparison.OrdinalIgnoreCase));
                     break;
                 case SortMode.Stars:
-                    sets.Sort((a, b) => {
-                        double maxA = a.Difficulties.Count > 0 ? a.Difficulties.Max(d => d.StarRating) : 0;
-                        double maxB = b.Difficulties.Count > 0 ? b.Difficulties.Max(d => d.StarRating) : 0;
-                        return maxB.CompareTo(maxA); // Higher stars first
-                    });
+                    sets.Sort((a, b) => b.MaxStars.CompareTo(a.MaxStars)); // Higher stars first
                     break;
                 case SortMode.BPM:
                     sets.Sort((a, b) => {
@@ -756,6 +765,16 @@ namespace Nullscent.UI
                 DrawBeatmapSetItem(set, 10, y, panelWidth - 20, itemHeight, isSelected);
             }
 
+            if (filteredSets.Count == 0)
+            {
+                _fontRenderer.SetFontSize(16);
+                int listCenterX = panelWidth / 2;
+                int listCenterY = panelY + panelHeight / 2;
+                _fontRenderer.DrawTextCentered("No beatmaps found.", listCenterX, listCenterY - 15, _textColor);
+                _fontRenderer.DrawTextCentered("Drag & drop a .osz beatmap file here", listCenterX, listCenterY + 10, _dimTextColor * 0.8f);
+                _fontRenderer.DrawTextCentered("or click 'Import .osz' to load one!", listCenterX, listCenterY + 30, _dimTextColor * 0.8f);
+            }
+
             // Scrollbar indicador
             if (filteredSets.Count > visibleItems)
             {
@@ -788,7 +807,7 @@ namespace Nullscent.UI
             Color color = isSelected ? _textColor : _dimTextColor;
 
             // Calcular estrellas máximas de las dificultades del set
-            double maxStars = set.Difficulties.Count > 0 ? set.Difficulties.Max(d => d.StarRating) : 0.0;
+            double maxStars = set.MaxStars;
             string starsText = maxStars > 0 ? $" {maxStars:F2}★" : "";
 
             string title = TruncateString(set.DisplayTitle + starsText, 30);
@@ -1109,6 +1128,7 @@ namespace Nullscent.UI
         public void Cleanup()
         {
             Console.WriteLine("[SongSelectScreen] Cleanup");
+            _isDisposed = true;
             _game.Window.TextInput -= OnTextInput;
             _currentBackgroundTexture?.Dispose();
             _currentBackgroundTexture = null;

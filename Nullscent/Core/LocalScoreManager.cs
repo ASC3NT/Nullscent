@@ -21,7 +21,27 @@ namespace Nullscent.Core
 
     public static class LocalScoreManager
     {
-        private const string SCORES_FILE = "scores.json";
+        private static string GetScoresPath(string fileName)
+        {
+            // 1. Intentar usar la ruta local (directorio del ejecutable) para mantener portabilidad
+            string localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+            try
+            {
+                // Verificar si tenemos permisos de escritura en la carpeta del ejecutable
+                string testFile = localPath + ".tmp";
+                File.WriteAllText(testFile, "test");
+                File.Delete(testFile);
+                return localPath;
+            }
+            catch
+            {
+                // 2. Si no hay permisos (ej. instalado en Program Files), usar AppData
+                string appDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Nullscent");
+                return Path.Combine(appDataFolder, fileName);
+            }
+        }
+
+        private static readonly string ScoresFilePath = GetScoresPath("scores.json");
         private static Dictionary<string, List<LocalScore>> _scoreDb = new();
 
         static LocalScoreManager()
@@ -33,9 +53,9 @@ namespace Nullscent.Core
         {
             try
             {
-                if (File.Exists(SCORES_FILE))
+                if (File.Exists(ScoresFilePath))
                 {
-                    string json = File.ReadAllText(SCORES_FILE);
+                    string json = File.ReadAllText(ScoresFilePath);
                     var db = JsonSerializer.Deserialize<Dictionary<string, List<LocalScore>>>(json);
                     if (db != null)
                     {
@@ -53,8 +73,15 @@ namespace Nullscent.Core
         {
             try
             {
+                // Asegurar que el directorio de destino exista (especialmente para AppData)
+                string? directory = Path.GetDirectoryName(ScoresFilePath);
+                if (directory != null)
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
                 string json = JsonSerializer.Serialize(_scoreDb, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(SCORES_FILE, json);
+                File.WriteAllText(ScoresFilePath, json);
             }
             catch (Exception ex)
             {
@@ -83,14 +110,17 @@ namespace Nullscent.Core
             Console.WriteLine($"[LocalScoreManager] Added score for {key}: {score.Score} (Rank: {score.Grade})");
         }
 
+        private static readonly List<LocalScore> _emptyList = new();
+
         public static List<LocalScore> GetScores(string beatmapPath)
         {
+            if (string.IsNullOrEmpty(beatmapPath)) return _emptyList;
             string key = Path.GetFileName(beatmapPath).ToLowerInvariant();
             if (_scoreDb.TryGetValue(key, out var scores))
             {
                 return scores;
             }
-            return new List<LocalScore>();
+            return _emptyList;
         }
     }
 }

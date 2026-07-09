@@ -8,6 +8,8 @@ using Nullscent.Rulesets.Mania.Scoring;
 using Nullscent.Rulesets.Mania.UI.Drawables;
 using Nullscent.Beatmap;
 using Nullscent.UI;
+using Nullscent.Audio;
+using Nullscent.Rulesets.Mania.Mods;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -40,6 +42,9 @@ namespace Nullscent.Rulesets.Mania.UI
         private readonly List<Column> _columns;
         private readonly int _columnCount;
         private double _overallDifficulty = 5.0;
+        private readonly bool _isHiddenActive;
+        private readonly bool _isFlashlightActive;
+        private int _currentCombo;
 
         // Propiedades visuales de la pista (stage)
         private int _stageX;
@@ -110,7 +115,10 @@ namespace Nullscent.Rulesets.Mania.UI
             int screenWidth,
             int screenHeight,
             TrueTypeFontRenderer? fontRenderer = null,
-            double overallDifficulty = 5.0)
+            double overallDifficulty = 5.0,
+            HitSoundPlayer? hitSoundPlayer = null,
+            bool isScoreV2 = false,
+            List<ManiaMod>? activeMods = null)
         {
             _graphicsDevice = graphicsDevice;
             _spriteBatch = spriteBatch;
@@ -118,6 +126,9 @@ namespace Nullscent.Rulesets.Mania.UI
             _screenHeight = screenHeight;
             _fontRenderer = fontRenderer;
             _overallDifficulty = overallDifficulty;
+
+            _isHiddenActive = activeMods != null && activeMods.Any(m => m is ManiaModHidden);
+            _isFlashlightActive = activeMods != null && activeMods.Any(m => m is ManiaModFlashlight);
 
             // Calcular dimensiones de la pista (centrada en pantalla)
             int columnWidth = 80;
@@ -135,7 +146,9 @@ namespace Nullscent.Rulesets.Mania.UI
             for (int i = 0; i < columnCount; i++)
             {
                 int x = _stageX + (i * columnWidth);
-                _columns.Add(new Column(i, x, columnWidth, screenHeight, _whitePixel, overallDifficulty, columnCount));
+                var col = new Column(i, x, columnWidth, screenHeight, _whitePixel, overallDifficulty, hitSoundPlayer, isScoreV2, columnCount);
+                col.IsHiddenActive = _isHiddenActive;
+                _columns.Add(col);
             }
 
             // Crear el gestor central de juicios y posicionarlo cerca de la zona de impacto
@@ -158,7 +171,9 @@ namespace Nullscent.Rulesets.Mania.UI
             {
                 hitObject = new LongNote(holdNote.StartTime, holdNote.EndTime, holdNote.Column, _overallDifficulty)
                 {
-                    Samples = holdNote.Samples
+                    Samples = holdNote.Samples,
+                    HitSound = holdNote.HitSound,
+                    SampleFileName = holdNote.SampleFileName
                 };
             }
 
@@ -171,6 +186,7 @@ namespace Nullscent.Rulesets.Mania.UI
 
         public void Update(double currentTime, ManiaScoreProcessor scoreProcessor, double scrollSpeed, float receptorPosition, bool downScroll)
         {
+            _currentCombo = scoreProcessor.Combo;
             int currentWidth = _graphicsDevice.Viewport.Width;
             int currentHeight = _graphicsDevice.Viewport.Height;
 
@@ -237,10 +253,83 @@ namespace Nullscent.Rulesets.Mania.UI
                 column.Draw(_spriteBatch, _whitePixel, _radialGlow, _linearGradient, _fontRenderer, currentTime, scrollSpeed, receptorPosition, downScroll, ReceptorY);
             }
 
+            // Dibujar el desvanecimiento de Flashlight si está activo
+            if (_isFlashlightActive)
+            {
+                DrawFlashlightMask(downScroll);
+            }
+
             // Dibujar el gestor de juicios por encima de la pista
             _judgementDisplayManager?.Draw(currentTime);
 
             _spriteBatch.End();
+        }
+
+        private void DrawFlashlightMask(bool downScroll)
+        {
+            if (_whitePixel == null || _linearGradient == null) return;
+
+            // Calcular el radio visible escalando con el combo (más pequeño a mayor combo, de 240px a 140px)
+            double comboFactor = Math.Min(1.0, _currentCombo / 200.0);
+            int visibleRadius = (int)(240 - comboFactor * 100);
+            int gradientHeight = 150;
+
+            if (downScroll)
+            {
+                // Rectángulo superior completamente negro
+                int topBlackHeight = Math.Max(0, ReceptorY - visibleRadius);
+                if (topBlackHeight > 0)
+                {
+                    var topRect = new Rectangle(_stageX, 0, _stageWidth, topBlackHeight);
+                    _spriteBatch.Draw(_whitePixel, topRect, Color.Black);
+                }
+
+                // Degradado superior (de negro a transparente)
+                int topGradientY = topBlackHeight;
+                if (gradientHeight > 0)
+                {
+                    var gradRect = new Rectangle(_stageX, topGradientY, _stageWidth, gradientHeight);
+                    _spriteBatch.Draw(_linearGradient, gradRect, Color.Black);
+                }
+
+                // Rectángulo inferior completamente negro (debajo del receptor)
+                int bottomBlackY = ReceptorY + 60;
+                int bottomBlackHeight = _screenHeight - bottomBlackY;
+                if (bottomBlackHeight > 0)
+                {
+                    var bottomRect = new Rectangle(_stageX, bottomBlackY, _stageWidth, bottomBlackHeight);
+                    _spriteBatch.Draw(_whitePixel, bottomRect, Color.Black);
+                }
+            }
+            else
+            {
+                // upScroll: las notas vienen desde abajo hacia ReceptorY (arriba).
+                
+                // Rectángulo inferior completamente negro
+                int bottomBlackY = ReceptorY + visibleRadius;
+                int bottomBlackHeight = _screenHeight - bottomBlackY;
+                if (bottomBlackHeight > 0)
+                {
+                    var bottomRect = new Rectangle(_stageX, bottomBlackY, _stageWidth, bottomBlackHeight);
+                    _spriteBatch.Draw(_whitePixel, bottomRect, Color.Black);
+                }
+
+                // Degradado inferior (de negro a transparente al subir)
+                int bottomGradientY = bottomBlackY - gradientHeight;
+                if (gradientHeight > 0)
+                {
+                    var gradRect = new Rectangle(_stageX, bottomGradientY, _stageWidth, gradientHeight);
+                    _spriteBatch.Draw(_linearGradient, gradRect, null, Color.Black, 0f, Vector2.Zero, SpriteEffects.FlipVertically, 0f);
+                }
+
+                // Rectángulo superior completamente negro (encima del receptor)
+                int topBlackHeight = ReceptorY - 60;
+                if (topBlackHeight > 0)
+                {
+                    var topRect = new Rectangle(_stageX, 0, _stageWidth, topBlackHeight);
+                    _spriteBatch.Draw(_whitePixel, topRect, Color.Black);
+                }
+            }
         }
 
         private void DrawStageBackground()
@@ -303,19 +392,24 @@ namespace Nullscent.Rulesets.Mania.UI
         private bool _isPressed;
         private double _lightingEndTime;
         private int _totalColumnCount;
+        private readonly HitSoundPlayer? _hitSoundPlayer;
 
         public int X { get => _x; set => _x = value; }
         public int ScreenHeight { get => _screenHeight; set => _screenHeight = value; }
+        public bool IsHiddenActive { get; set; }
 
-        public Column(int index, int x, int width, int screenHeight, Texture2D pixel, double overallDifficulty, int totalColumnCount = 4)
+        public Column(int index, int x, int width, int screenHeight, Texture2D pixel, double overallDifficulty, HitSoundPlayer? hitSoundPlayer = null, bool isScoreV2 = false, int totalColumnCount = 4)
         {
             _index = index;
             _x = x;
             _width = width;
             _screenHeight = screenHeight;
             _pixel = pixel;
-            _hitWindows = new ManiaHitWindows(overallDifficulty);
+            _hitWindows = isScoreV2
+                ? new ScoreV2HitWindows(overallDifficulty)
+                : new ManiaHitWindows(overallDifficulty);
             _totalColumnCount = totalColumnCount;
+            _hitSoundPlayer = hitSoundPlayer;
         }
 
         public void SetJudgementDisplayManager(JudgementDisplayManager? manager)
@@ -344,14 +438,26 @@ namespace Nullscent.Rulesets.Mania.UI
             if (drawable != null)
             {
                 drawable.Beatmap = this.Beatmap;
+                drawable.IsHiddenActive = this.IsHiddenActive;
                 _drawableHitObjects.Add(drawable);
             }
         }
 
         public void Update(double currentTime, ManiaScoreProcessor scoreProcessor, double scrollSpeed, float receptorPosition, bool downScroll, int receptorY)
         {
-            foreach (var drawable in _drawableHitObjects.ToList())
+            double scrollTime = 2000.0 - (scrollSpeed - 1.0) * 45.0;
+            scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
+            double limitTime = currentTime + scrollTime + 1000;
+
+            for (int i = 0; i < _drawableHitObjects.Count; i++)
             {
+                var drawable = _drawableHitObjects[i];
+                if (drawable.HitObject.StartTime > limitTime)
+                {
+                    break;
+                }
+
+                drawable.CurrentCombo = scoreProcessor.Combo;
                 drawable.Update(currentTime, scrollSpeed, receptorPosition, downScroll, _screenHeight);
 
                 // Manejo especial para el estado de presión de las notas largas (LN)
@@ -398,8 +504,10 @@ namespace Nullscent.Rulesets.Mania.UI
                         // Remove and dispose only when drawableLN.IsJudged is true (after scrolling past)
                         if (drawableLN.IsJudged)
                         {
-                            _drawableHitObjects.Remove(drawable);
+                            _drawableHitObjects.RemoveAt(i);
                             drawable.Dispose();
+                            i--;
+                            continue;
                         }
                     }
                 }
@@ -416,29 +524,59 @@ namespace Nullscent.Rulesets.Mania.UI
                         }
 
                         OnHitObjectJudged(drawable, currentTime, scoreProcessor);
-                        _drawableHitObjects.Remove(drawable);
+                        _drawableHitObjects.RemoveAt(i);
                         drawable.Dispose();
+                        i--;
+                        continue;
                     }
                 }
             }
 
-            // Actualizar ciclo de vida de explosiones visuales
-            foreach (var explosion in _explosions.ToList())
+            // Actualizar ciclo de vida de explosiones visuales sin usar .ToList() para evitar recolector de basura (GC)
+            for (int i = 0; i < _explosions.Count; i++)
             {
+                var explosion = _explosions[i];
                 explosion.Update(currentTime);
                 if (!explosion.IsActive)
-                    _explosions.Remove(explosion);
+                {
+                    _explosions.RemoveAt(i);
+                    i--;
+                }
+            }
+        }
+
+        private void PlayNoteHitsound(ManiaHitObject hitObject)
+        {
+            if (_hitSoundPlayer == null) return;
+
+            if (hitObject.Samples != null && hitObject.Samples.Length > 0)
+            {
+                foreach (var sample in hitObject.Samples)
+                {
+                    string fileName = $"{sample.Bank}-{sample.Name}";
+                    _hitSoundPlayer.Play(fileName);
+                }
+            }
+            else
+            {
+                _hitSoundPlayer.PlayHitsound(hitObject.HitSound, hitObject.SampleFileName);
             }
         }
 
         public void OnKeyPress(double currentTime, ManiaScoreProcessor scoreProcessor)
         {
             _isPressed = true;
+            bool hitSuccess = false;
 
             // Encontrar la primera nota pendiente (o candidata válida para LN)
             DrawableManiaHitObject? candidate = null;
             foreach (var drawable in _drawableHitObjects)
             {
+                if (drawable.HitObject.StartTime > currentTime + 500)
+                {
+                    break;
+                }
+
                 if (drawable.HasResult) continue;
 
                 if (drawable is DrawableLongNote drawableLN)
@@ -469,6 +607,7 @@ namespace Nullscent.Rulesets.Mania.UI
                         // Si aún no ha entrado en la ventana de juicio, la pulsación no hace nada (se ignora)
                         if (result == HitResult.None)
                         {
+                            _hitSoundPlayer?.Play("normal-hitnormal");
                             return;
                         }
 
@@ -478,6 +617,8 @@ namespace Nullscent.Rulesets.Mania.UI
                         if (ln.HeadJudged && ln.HeadResult != HitResult.Miss)
                         {
                             _lightingEndTime = currentTime + 150;
+                            PlayNoteHitsound(ln);
+                            hitSuccess = true;
                         }
                     }
                 }
@@ -489,6 +630,7 @@ namespace Nullscent.Rulesets.Mania.UI
                     // Si aún no ha entrado en la ventana de juicio, la pulsación no hace nada (se ignora)
                     if (result == HitResult.None)
                     {
+                        _hitSoundPlayer?.Play("normal-hitnormal");
                         return;
                     }
 
@@ -503,11 +645,23 @@ namespace Nullscent.Rulesets.Mania.UI
                         }
 
                         OnHitObjectJudged(candidate, currentTime, scoreProcessor);
-                        _drawableHitObjects.Remove(candidate);
 
+                        if (candidate.Result != HitResult.Miss)
+                        {
+                            PlayNoteHitsound(candidate.HitObject);
+                            hitSuccess = true;
+                        }
+
+                        _drawableHitObjects.Remove(candidate);
                         _lightingEndTime = currentTime + 150;
                     }
                 }
+            }
+
+            // Si no se golpeó ninguna nota con éxito, reproducir hitsound de feedback por defecto
+            if (!hitSuccess)
+            {
+                _hitSoundPlayer?.Play("normal-hitnormal");
             }
         }
 
@@ -516,11 +670,24 @@ namespace Nullscent.Rulesets.Mania.UI
             _isPressed = false;
 
             // Evaluar los resultados de soltar el teclado para las colas de las LN
-            foreach (var drawable in _drawableHitObjects.ToList())
+            for (int i = 0; i < _drawableHitObjects.Count; i++)
             {
+                var drawable = _drawableHitObjects[i];
+                if (drawable.HitObject.StartTime > currentTime + 500)
+                {
+                    break;
+                }
+
                 if (drawable is DrawableLongNote drawableLN)
                 {
-                    drawableLN.OnKeyRelease(currentTime, _hitWindows);
+                    if (drawableLN.HitObject is LongNote ln && !ln.TailJudged)
+                    {
+                        drawableLN.OnKeyRelease(currentTime, _hitWindows);
+                        if (ln.TailJudged && ln.TailResult != HitResult.Miss)
+                        {
+                            PlayNoteHitsound(ln);
+                        }
+                    }
                 }
             }
         }
@@ -572,8 +739,16 @@ namespace Nullscent.Rulesets.Mania.UI
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied,
                 transformMatrix: Matrix.CreateTranslation(_x, 0, 0));
 
+            double scrollTime = 2000.0 - (scrollSpeed - 1.0) * 45.0;
+            scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
+            double limitTime = currentTime + scrollTime + 1000;
+
             foreach (var drawable in _drawableHitObjects)
             {
+                if (drawable.HitObject.StartTime > limitTime)
+                {
+                    break;
+                }
                 drawable.Draw(spriteBatch, pixel, currentTime, scrollSpeed, receptorY, downScroll, _screenHeight, _width);
             }
 

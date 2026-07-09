@@ -207,9 +207,6 @@ namespace Nullscent.Beatmap
             _isScrollPrecalculated = true;
         }
 
-        /// <summary>
-        /// Obtiene la posición acumulada virtual del scroll para calcular la coordenada Y física de renderizado.
-        /// </summary>
         public double GetScrollPosition(double time)
         {
             if (TimingPoints.Count == 0)
@@ -217,10 +214,34 @@ namespace Nullscent.Beatmap
 
             PrecalculateScrolls();
 
-            int index = TimingPoints.BinarySearch(new TimingPoint { Offset = time }, new TimingPointOffsetComparer());
+            // Búsqueda binaria personalizada libre de asignación de memoria (GC friendly)
+            int low = 0;
+            int high = TimingPoints.Count - 1;
+            int index = -1;
+
+            while (low <= high)
+            {
+                int mid = low + ((high - low) >> 1);
+                double midOffset = TimingPoints[mid].Offset;
+
+                if (midOffset == time)
+                {
+                    index = mid;
+                    break;
+                }
+                else if (midOffset < time)
+                {
+                    low = mid + 1;
+                }
+                else
+                {
+                    high = mid - 1;
+                }
+            }
+
             if (index < 0)
             {
-                index = ~index - 1;
+                index = low - 1;
             }
 
             if (index < 0)

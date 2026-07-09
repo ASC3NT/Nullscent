@@ -21,6 +21,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         public HitResult? Result { get; protected set; }
         public bool HasResult => Result.HasValue;
         public Nullscent.Beatmap.Beatmap? Beatmap { get; set; }
+        public bool IsHiddenActive { get; set; }
+        public int CurrentCombo { get; set; }
 
         protected double TimePreempt { get; set; } = 1000; // 1 second preempt
         protected double TimeFadeIn { get; set; } = 200;    // 200ms fade in
@@ -38,34 +40,85 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         /// </summary>
         public virtual void Update(double currentTime, double scrollSpeedSetting, float receptorPosition, bool downScroll, int screenHeight)
         {
-            // Map scrollSpeedSetting (1-40) to scrollTime in milliseconds (preempt time)
             double scrollTime = 2000.0 - (scrollSpeedSetting - 1.0) * 45.0;
             scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
 
             TimePreempt = scrollTime;
-            TimeFadeIn = Math.Min(200.0, scrollTime * 0.2); // Fade in over 20% of scroll time, max 200ms
+            TimeFadeIn = Math.Min(200.0, scrollTime * 0.2);
 
-            // Calculate if object should be visible
-            double timeUntilHit = HitObject.StartTime - currentTime;
+            int receptorY = (int)(screenHeight * receptorPosition);
+            if (!downScroll)
+            {
+                receptorY = (int)(screenHeight * (1 - receptorPosition));
+            }
 
-            if (timeUntilHit <= TimePreempt && timeUntilHit >= -500)
+            int y = CalculateYPosition(HitObject.StartTime, currentTime, scrollSpeedSetting, receptorY, downScroll, screenHeight);
+
+            // Determinar visibilidad basada en si el objeto (o parte de él) está en pantalla
+            bool visible = false;
+            if (HitObject is LongNote ln)
+            {
+                int tailY = CalculateYPosition(ln.EndTime, currentTime, scrollSpeedSetting, receptorY, downScroll, screenHeight);
+                int topY = Math.Min(y, tailY);
+                int bottomY = Math.Max(y, tailY);
+                visible = bottomY >= -100 && topY <= screenHeight + 100;
+            }
+            else if (HitObject is HoldNote hn)
+            {
+                int tailY = CalculateYPosition(hn.EndTime, currentTime, scrollSpeedSetting, receptorY, downScroll, screenHeight);
+                int topY = Math.Min(y, tailY);
+                int bottomY = Math.Max(y, tailY);
+                visible = bottomY >= -100 && topY <= screenHeight + 100;
+            }
+            else
+            {
+                visible = y >= -100 && y <= screenHeight + 100;
+            }
+
+            if (IsJudged)
+            {
+                visible = false;
+            }
+
+            if (visible)
             {
                 _isVisible = true;
-
-                // Calculate fade in alpha
-                if (timeUntilHit > TimePreempt - TimeFadeIn)
-                {
-                    double fadeProgress = 1.0 - ((timeUntilHit - (TimePreempt - TimeFadeIn)) / TimeFadeIn);
-                    _alpha = Math.Clamp(fadeProgress, 0, 1);
-                }
-                else
-                {
-                    _alpha = 1.0;
-                }
+                _alpha = 1.0;
             }
             else
             {
                 _isVisible = false;
+                _alpha = 0.0;
+            }
+        }
+
+        protected double GetHiddenAlpha(int y, bool downScroll, int receptorY, int screenHeight, int combo)
+        {
+            if (!IsHiddenActive) return 1.0;
+
+            double comboFactor = Math.Min(1.0, combo / 200.0);
+
+            if (downScroll)
+            {
+                // Con downScroll, las notas caen de y=0 hacia y=receptorY.
+                // Ocultamos las notas antes de que alcancen el receptor.
+                double startFadeY = receptorY * (0.5 - comboFactor * 0.15); // A mayor combo, desvanece antes (más arriba)
+                double endFadeY = receptorY * (0.75 - comboFactor * 0.15);
+
+                if (y <= startFadeY) return 1.0;
+                if (y >= endFadeY) return 0.0;
+                return 1.0 - (y - startFadeY) / (endFadeY - startFadeY);
+            }
+            else
+            {
+                // Con upScroll, las notas suben de y=screenHeight hacia y=receptorY.
+                // Ocultamos las notas antes de que alcancen el receptor (que está arriba).
+                double startFadeY = receptorY + (screenHeight - receptorY) * (0.5 + comboFactor * 0.15); // A mayor combo, desvanece antes (más abajo)
+                double endFadeY = receptorY + (screenHeight - receptorY) * (0.25 + comboFactor * 0.15);
+
+                if (y >= startFadeY) return 1.0;
+                if (y <= endFadeY) return 0.0;
+                return (y - endFadeY) / (startFadeY - endFadeY);
             }
         }
 
@@ -158,7 +211,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             // Culling check
             if (y < -50 || y > screenHeight + 50) return;
 
-            double alpha = GetAlpha();
+            double alpha = GetHiddenAlpha(y, downScroll, receptorY, screenHeight, CurrentCombo);
+            if (alpha <= 0.0) return;
+
             int padding = 4;
             // Draw note body
             var noteRect = new Rectangle(
@@ -222,7 +277,6 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         {
             if (!IsVisible() || IsJudged) return;
 
-            double alpha = GetAlpha();
             int padding = 4;
 
             // Calculate head and tail positions
@@ -236,49 +290,67 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             if (bottomY < -50 || topY > screenHeight + 50) return;
 
             // Clamp to screen
-            topY = Math.Max(-50, topY);
-            bottomY = Math.Min(screenHeight + 50, bottomY);
-            int bodyHeight = bottomY - topY;
+            int clampedTopY = Math.Max(-50, topY);
+            int clampedBottomY = Math.Min(screenHeight + 50, bottomY);
+            int bodyHeight = clampedBottomY - clampedTopY;
 
-            if (bodyHeight <= 0) return;
+            if (bodyHeight > 0)
+            {
+                // Draw body in segments to allow gradual fade out for Hidden
+                int segmentHeight = 8;
+                Color baseBodyColor = new Color(255, 180, 100);
 
-            // Draw body
-            var bodyRect = new Rectangle(padding, topY, columnWidth - padding * 2, bodyHeight);
-            Color bodyColor = new Color(255, 180, 100) * (float)(alpha * 0.7f);
-            spriteBatch.Draw(pixel, bodyRect, bodyColor);
+                for (int currY = clampedTopY; currY < clampedBottomY; currY += segmentHeight)
+                {
+                    int h = Math.Min(segmentHeight, clampedBottomY - currY);
+                    double bodyAlpha = GetHiddenAlpha(currY + h / 2, downScroll, receptorY, screenHeight, CurrentCombo);
+                    if (bodyAlpha <= 0.0) continue;
 
-            // Draw left border
-            var leftBorder = new Rectangle(padding, topY, 2, bodyHeight);
-            spriteBatch.Draw(pixel, leftBorder, Color.White * (float)alpha);
+                    var bodyRect = new Rectangle(padding, currY, columnWidth - padding * 2, h);
+                    spriteBatch.Draw(pixel, bodyRect, baseBodyColor * (float)(bodyAlpha * 0.7f));
 
-            // Draw right border
-            var rightBorder = new Rectangle(columnWidth - padding - 2, topY, 2, bodyHeight);
-            spriteBatch.Draw(pixel, rightBorder, Color.White * (float)alpha);
+                    // Draw left border segment
+                    var leftBorder = new Rectangle(padding, currY, 2, h);
+                    spriteBatch.Draw(pixel, leftBorder, Color.White * (float)bodyAlpha);
+
+                    // Draw right border segment
+                    var rightBorder = new Rectangle(columnWidth - padding - 2, currY, 2, h);
+                    spriteBatch.Draw(pixel, rightBorder, Color.White * (float)bodyAlpha);
+                }
+            }
 
             // Draw head if visible
             if (headY >= -50 && headY <= screenHeight + 50)
             {
-                var headRect = new Rectangle(
-                    padding,
-                    headY - HEAD_HEIGHT / 2,
-                    columnWidth - padding * 2,
-                    HEAD_HEIGHT
-                );
-                Color headColor = new Color(255, 200, 100) * (float)alpha;
-                spriteBatch.Draw(pixel, headRect, headColor);
+                double headAlpha = GetHiddenAlpha(headY, downScroll, receptorY, screenHeight, CurrentCombo);
+                if (headAlpha > 0.0)
+                {
+                    var headRect = new Rectangle(
+                        padding,
+                        headY - HEAD_HEIGHT / 2,
+                        columnWidth - padding * 2,
+                        HEAD_HEIGHT
+                    );
+                    Color headColor = new Color(255, 200, 100) * (float)headAlpha;
+                    spriteBatch.Draw(pixel, headRect, headColor);
+                }
             }
 
             // Draw tail if visible
             if (tailY >= -50 && tailY <= screenHeight + 50)
             {
-                var tailRect = new Rectangle(
-                    padding,
-                    tailY - TAIL_HEIGHT / 2,
-                    columnWidth - padding * 2,
-                    TAIL_HEIGHT
-                );
-                Color tailColor = new Color(255, 160, 80) * (float)alpha;
-                spriteBatch.Draw(pixel, tailRect, tailColor);
+                double tailAlpha = GetHiddenAlpha(tailY, downScroll, receptorY, screenHeight, CurrentCombo);
+                if (tailAlpha > 0.0)
+                {
+                    var tailRect = new Rectangle(
+                        padding,
+                        tailY - TAIL_HEIGHT / 2,
+                        columnWidth - padding * 2,
+                        TAIL_HEIGHT
+                    );
+                    Color tailColor = new Color(255, 160, 80) * (float)tailAlpha;
+                    spriteBatch.Draw(pixel, tailRect, tailColor);
+                }
             }
         }
 

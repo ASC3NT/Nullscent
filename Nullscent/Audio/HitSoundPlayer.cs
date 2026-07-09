@@ -67,26 +67,30 @@ namespace Nullscent.Audio
             if (_sampleCache.TryGetValue(fileName, out int existingSample))
                 return existingSample;
 
-            // Construir ruta completa
-            string fullPath = Path.Combine(BaseDirectory, fileName);
+            // 1. Intentar cargar desde el directorio base (si está establecido)
+            string fullPath = string.IsNullOrEmpty(BaseDirectory) ? fileName : Path.Combine(BaseDirectory, fileName);
+            if (!fullPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+            {
+                fullPath += ".wav";
+            }
 
             if (!File.Exists(fullPath))
             {
-                // Intentar con extensión .wav si no se especificó
-                if (!fullPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+                // 2. Fallback: Intentar cargar desde la carpeta del ejecutable
+                if (!string.IsNullOrEmpty(BaseDirectory))
                 {
-                    fullPath += ".wav";
-                    if (!File.Exists(fullPath))
+                    fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+                    if (!fullPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
                     {
-                        Console.WriteLine($"[HitSoundPlayer] Sample not found: {fileName}");
-                        return 0;
+                        fullPath += ".wav";
                     }
                 }
-                else
-                {
-                    Console.WriteLine($"[HitSoundPlayer] Sample not found: {fileName}");
-                    return 0;
-                }
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                Console.WriteLine($"[HitSoundPlayer] Sample not found: {fileName}");
+                return 0;
             }
 
             // Cargar sample en memoria para playback de baja latencia

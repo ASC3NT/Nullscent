@@ -65,6 +65,26 @@ namespace Nullscent.UI
         /// String completo para display: "Artist - Title".
         /// </summary>
         public string FullDisplayName => $"{DisplayArtist} - {DisplayTitle}";
+
+        // Caché de strings en minúsculas para optimizar búsquedas (evitar asignaciones de memoria repetitivas en cada frame/tecla)
+        private string? _titleLower;
+        public string TitleLower => _titleLower ??= Title.ToLowerInvariant();
+
+        private string? _titleUnicodeLower;
+        public string TitleUnicodeLower => _titleUnicodeLower ??= TitleUnicode.ToLowerInvariant();
+
+        private string? _artistLower;
+        public string ArtistLower => _artistLower ??= Artist.ToLowerInvariant();
+
+        private string? _artistUnicodeLower;
+        public string ArtistUnicodeLower => _artistUnicodeLower ??= ArtistUnicode.ToLowerInvariant();
+
+        private string? _creatorLower;
+        public string CreatorLower => _creatorLower ??= Creator.ToLowerInvariant();
+
+        // Caché de la estrella máxima para no re-calcular con LINQ Max() cada frame
+        private double? _maxStars;
+        public double MaxStars => _maxStars ??= (Difficulties.Count > 0 ? Difficulties.Max(d => d.StarRating) : 0.0);
     }
 
     public class BeatmapDifficulty
@@ -124,6 +144,9 @@ namespace Nullscent.UI
         /// </summary>
         public int PreviewTime { get; set; } = -1;
 
+        // Caché de Star Rating para evitar Math.Pow recurrentes en cada frame
+        private double? _cachedStarRating;
+
         /// <summary>
         /// Estimación de dificultad en estrellas (Star Rating ★).
         /// </summary>
@@ -131,6 +154,7 @@ namespace Nullscent.UI
         {
             get
             {
+                if (_cachedStarRating.HasValue) return _cachedStarRating.Value;
                 if (Length <= 0 || ObjectCount <= 0) return 0.0;
                 double seconds = Length / 1000.0;
                 double density = ObjectCount / seconds;
@@ -140,7 +164,8 @@ namespace Nullscent.UI
                     * Math.Pow(BPM / 150.0, 0.4) 
                     * Math.Pow(4.0 / KeyCount, 0.3);
 
-                return Math.Round(Math.Clamp(stars, 0.5, 10.0), 2);
+                _cachedStarRating = Math.Round(Math.Clamp(stars, 0.5, 10.0), 2);
+                return _cachedStarRating.Value;
             }
         }
     }
@@ -253,11 +278,11 @@ namespace Nullscent.UI
                 string query = _searchQuery.ToLowerInvariant();
                 _filteredBeatmapSets = _allBeatmapSets
                     .Where(set =>
-                        set.Title.ToLowerInvariant().Contains(query) ||
-                        set.TitleUnicode.ToLowerInvariant().Contains(query) ||
-                        set.Artist.ToLowerInvariant().Contains(query) ||
-                        set.ArtistUnicode.ToLowerInvariant().Contains(query) ||
-                        set.Creator.ToLowerInvariant().Contains(query))
+                        set.TitleLower.Contains(query) ||
+                        set.TitleUnicodeLower.Contains(query) ||
+                        set.ArtistLower.Contains(query) ||
+                        set.ArtistUnicodeLower.Contains(query) ||
+                        set.CreatorLower.Contains(query))
                     .ToList();
             }
 

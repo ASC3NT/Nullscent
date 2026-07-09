@@ -156,7 +156,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 _stateManager,
                 _audioEngine,
                 _inputManager,
-                new HitSoundPlayer(),
+                _game.HitSoundPlayer,
                 _settings
             );
 
@@ -172,7 +172,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 _stateManager,
                 _audioEngine,
                 _inputManager,
-                new HitSoundPlayer(),
+                _game.HitSoundPlayer,
                 _settings,
                 _beatmap,
                 _activeMods

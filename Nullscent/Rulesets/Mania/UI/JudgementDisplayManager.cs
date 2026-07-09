@@ -23,6 +23,8 @@ namespace Nullscent.Rulesets.Mania.UI
         private QueuedJudgement? _activeJudgement;
         private readonly object _lock = new(); // Objeto para control de concurrencia
         private int _currentCombo;
+        private int _cachedComboValue = -1;
+        private string _cachedComboString = "";
         private double _lastJudgementTime;
 
         // Posición en pantalla (generalmente el centro del playfield)
@@ -152,8 +154,14 @@ namespace Nullscent.Rulesets.Mania.UI
 
                 if (comboAlpha > 0f)
                 {
+                    if (_cachedComboValue != _currentCombo)
+                    {
+                        _cachedComboValue = _currentCombo;
+                        _cachedComboString = _currentCombo.ToString();
+                    }
+
                     _fontRenderer.SetFontSize(36);
-                    _fontRenderer.DrawTextCentered(_currentCombo.ToString(), (int)Position.X, (int)Position.Y - 30, Color.White * comboAlpha, comboScale);
+                    _fontRenderer.DrawTextCentered(_cachedComboString, (int)Position.X, (int)Position.Y - 30, Color.White * comboAlpha, comboScale);
                 }
             }
         }

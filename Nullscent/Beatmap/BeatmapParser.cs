@@ -45,8 +45,15 @@ namespace Nullscent.Beatmap
             {
                 var line = rawLine.Trim();
 
+                // Eliminar comentarios inline si existen
+                int commentIndex = line.IndexOf("//");
+                if (commentIndex >= 0)
+                {
+                    line = line.Substring(0, commentIndex).Trim();
+                }
+
                 // Ignorar líneas vacías y comentarios
-                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("//"))
+                if (string.IsNullOrWhiteSpace(line))
                     continue;
 
                 // Detectar cambio de sección
@@ -365,7 +372,14 @@ namespace Nullscent.Beatmap
             {
                 var line = rawLine.Trim();
 
-                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("//"))
+                // Eliminar comentarios inline si existen
+                int commentIndex = line.IndexOf("//");
+                if (commentIndex >= 0)
+                {
+                    line = line.Substring(0, commentIndex).Trim();
+                }
+
+                if (string.IsNullOrWhiteSpace(line))
                     continue;
 
                 if (line.StartsWith("[") && line.EndsWith("]"))

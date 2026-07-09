@@ -104,6 +104,9 @@ namespace Nullscent.Gameplay
                 return;
             }
 
+            // Establecer el directorio base para los hitsounds
+            _hitSoundPlayer.BaseDirectory = _originalBeatmap.Directory;
+
             Console.WriteLine($"[ManiaGameplayScreen] Iniciando mapa: {_originalBeatmap.Metadata.Title} [{_originalBeatmap.Metadata.Version}]");
 
             // Convertir el formato del mapa base al formato nativo de Mania
@@ -134,6 +137,17 @@ namespace Nullscent.Gameplay
             _whitePixel = new Texture2D(_graphicsDevice, 1, 1);
             _whitePixel.SetData(new[] { Color.White });
 
+            // Aplicar modificaciones de dificultad según los mods activos (EZ/HR)
+            double adjustedDifficulty = _originalBeatmap.OverallDifficulty;
+            if (_activeMods.Any(m => m is ManiaModEasy))
+            {
+                adjustedDifficulty *= 0.5;
+            }
+            else if (_activeMods.Any(m => m is ManiaModHardRock))
+            {
+                adjustedDifficulty = Math.Min(10.0, adjustedDifficulty * 1.4);
+            }
+
             // Inicialización del entorno de juego (Playfield)
             _playfield = new ManiaPlayfield(
                 _graphicsDevice,
@@ -142,7 +156,10 @@ namespace Nullscent.Gameplay
                 _game.WindowWidth,
                 _game.WindowHeight,
                 _game.FontRenderer, 
-                _originalBeatmap.OverallDifficulty 
+                adjustedDifficulty,
+                _hitSoundPlayer,
+                isScoreV2: true,
+                activeMods: _activeMods
             );
             _playfield.Beatmap = _originalBeatmap;
 
@@ -168,7 +185,7 @@ namespace Nullscent.Gameplay
                     y: _game.WindowHeight / 2 + 100,
                     width: 300,
                     height: 50,
-                    hitWindows: new Rulesets.Mania.Judgements.ManiaHitWindows(_originalBeatmap?.OverallDifficulty ?? 5.0)
+                    hitWindows: new Rulesets.Mania.Judgements.ScoreV2HitWindows(adjustedDifficulty)
                 );
 
                 // Suscripción al evento para capturar los desvíos temporales
@@ -393,7 +410,8 @@ namespace Nullscent.Gameplay
                 _scrollNotificationTimer -= gameTime.ElapsedGameTime.TotalMilliseconds;
             }
 
-            if (_scoreProcessor.HasFailed)
+            // Nota: Solo fallamos si el modo NoFail no está activo
+            if (_scoreProcessor.HasFailed && !_activeMods.Any(m => m is ManiaModNoFail))
             {
                 HandleFail();
             }
@@ -626,12 +644,15 @@ namespace Nullscent.Gameplay
                 _playfield.JudgementDisplayManager.JudgementOccurred -= OnJudgementOccurred;
             }
 
+            _hitSoundPlayer.BaseDirectory = string.Empty;
+
             // Liberación de recursos no administrados (Textura cacheada)
             _whitePixel?.Dispose();
             _bgTexture?.Dispose();
             _bgTexture = null;
             _pauseOverlay?.Dispose();
             _playfield?.Dispose();
+            _hud?.Dispose();
             _loadingScreen?.Dispose();
             _isInitialized = false;
         }

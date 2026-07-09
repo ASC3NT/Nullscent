@@ -157,9 +157,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             // Get color
             Color color = GetColorForResult(_result) * alpha;
 
-            // Draw text centered above receptor
-            int fontSize = (int)(24 * scale);
-            fontRenderer.SetFontSize(fontSize);
+            // Draw text centered above receptor (usar tamaño de fuente fijo de 24 y escala de SpriteBatch para evitar re-generar el atlas de texturas)
+            fontRenderer.SetFontSize(24);
 
             int textX = columnX + columnWidth / 2;
             int textY = (int)(receptorY - 60 - yOffset);

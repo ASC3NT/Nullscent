@@ -1,21 +1,21 @@
-#nullable enable
-
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Nullscent.Rulesets.Mania.Configuration;
 using Nullscent.Rulesets.Mania.Mods;
 using Nullscent.Rulesets.Mania.Scoring;
 using Nullscent.UI;
+using System;
 using System.Collections.Generic;
 
 namespace Nullscent.Rulesets.Mania.UI
 {
-    public class ManiaHUD
+    public class ManiaHUD : IDisposable
     {
         private readonly GraphicsDevice _graphicsDevice;
         private readonly SpriteBatch _spriteBatch;
         private readonly TrueTypeFontRenderer _fontRenderer;
         private readonly ManiaConfig _config;
+        private readonly Texture2D _pixel;
 
         public ManiaHUD(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch, TrueTypeFontRenderer fontRenderer, ManiaConfig config)
         {
@@ -23,6 +23,9 @@ namespace Nullscent.Rulesets.Mania.UI
             _spriteBatch = spriteBatch;
             _fontRenderer = fontRenderer;
             _config = config;
+
+            _pixel = new Texture2D(graphicsDevice, 1, 1);
+            _pixel.SetData(new[] { Color.White });
         }
 
         public void Draw(ManiaScoreProcessor scoreProcessor, Beatmap.Beatmap beatmap, double currentTime, List<ManiaMod> activeMods)
@@ -59,20 +62,22 @@ namespace Nullscent.Rulesets.Mania.UI
 
         private void DrawHealthBar(int screenWidth, int screenHeight, double health)
         {
-            var pixel = new Texture2D(_graphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
-
             int barWidth = 200;
             int barHeight = 20;
             int x = screenWidth - barWidth - 20;
             int y = screenHeight - 40;
 
             var bgRect = new Rectangle(x, y, barWidth, barHeight);
-            _spriteBatch.Draw(pixel, bgRect, new Color(40, 40, 40));
+            _spriteBatch.Draw(_pixel, bgRect, new Color(40, 40, 40));
 
             var healthRect = new Rectangle(x, y, (int)(barWidth * health), barHeight);
             Color healthColor = health > 0.5 ? Color.Green : (health > 0.2 ? Color.Yellow : Color.Red);
-            _spriteBatch.Draw(pixel, healthRect, healthColor);
+            _spriteBatch.Draw(_pixel, healthRect, healthColor);
+        }
+
+        public void Dispose()
+        {
+            _pixel?.Dispose();
         }
     }
 }

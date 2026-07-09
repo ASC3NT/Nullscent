@@ -12,6 +12,8 @@ namespace Nullscent.Rulesets.Mania.Objects
         public double StartTime { get; set; }
         public int Column { get; set; }
         public HitSampleInfo[] Samples { get; set; } = Array.Empty<HitSampleInfo>();
+        public int HitSound { get; set; }
+        public string? SampleFileName { get; set; }
 
         // Judgement tracking
         public bool IsJudged { get; set; }

@@ -11,8 +11,21 @@ namespace Nullscent
         [STAThread]
         public static void Main(string[] args)
         {
-            var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "nullscent_log.txt");
-            var fileStream = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+            string logPath;
+            FileStream fileStream;
+            try
+            {
+                logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "nullscent_log.txt");
+                fileStream = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+            }
+            catch
+            {
+                string appDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Nullscent");
+                Directory.CreateDirectory(appDataFolder);
+                logPath = Path.Combine(appDataFolder, "nullscent_log.txt");
+                fileStream = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+            }
+
             var logWriter = new StreamWriter(fileStream, Encoding.UTF8) { AutoFlush = true };
             
             // Guardar salida original de consola

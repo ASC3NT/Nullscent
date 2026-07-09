@@ -189,10 +189,30 @@ namespace Nullscent.Config
 
         // === MÉTODOS ===
 
+        private static string GetConfigPath(string fileName)
+        {
+            // 1. Intentar usar la ruta local (directorio del ejecutable) para mantener portabilidad
+            string localPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+            try
+            {
+                // Verificar si tenemos permisos de escritura en la carpeta del ejecutable
+                string testFile = localPath + ".tmp";
+                File.WriteAllText(testFile, "test");
+                File.Delete(testFile);
+                return localPath;
+            }
+            catch
+            {
+                // 2. Si no hay permisos (ej. instalado en Program Files), usar AppData
+                string appDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Nullscent");
+                return Path.Combine(appDataFolder, fileName);
+            }
+        }
+
         /// <summary>
         /// Ruta al archivo de configuración.
         /// </summary>
-        private static readonly string ConfigFilePath = "settings.json";
+        private static readonly string ConfigFilePath = GetConfigPath("settings.json");
 
         /// <summary>
         /// Guarda la configuración actual en un archivo JSON.
@@ -207,6 +227,14 @@ namespace Nullscent.Config
                 };
 
                 string json = JsonSerializer.Serialize(this, options);
+
+                // Asegurar que el directorio de destino exista (especialmente para AppData)
+                string? directory = Path.GetDirectoryName(ConfigFilePath);
+                if (directory != null)
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
                 File.WriteAllText(ConfigFilePath, json);
 
                 Console.WriteLine($"[GameSettings] Settings saved to {ConfigFilePath}");

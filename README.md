@@ -17,7 +17,7 @@ Still early in development but fully playable. The core gameplay loop is solid.
 - Pause and fail states
 - Results screen after a map ends
 - Mod selection: AT, EZ, NF, HT, HR, DT, HD, FL, RD, MR, 1K/4K/7K
-- Skin support (reads `skin.ini`, applies number sprites and assets)
+- **Partial skin support** — `skin.ini` parsing and custom assets are working, but there are still quite a few visual bugs and unfinished parts.
 - Per-column key bindings, configurable
 - Settings overlay (toggled in-game)
 - FPS counter toggle

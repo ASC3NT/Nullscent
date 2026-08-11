@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Nullscent.Beatmap
@@ -33,6 +34,21 @@ namespace Nullscent.Beatmap
                 FilePath = filePath,
                 Directory = Path.GetDirectoryName(filePath) ?? string.Empty
             };
+
+            // Calcular Hash MD5 del archivo .osu
+            try
+            {
+                using (var md5 = MD5.Create())
+                using (var stream = File.OpenRead(filePath))
+                {
+                    var hashBytes = md5.ComputeHash(stream);
+                    beatmap.Hash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[BeatmapParser] Error calculating hash for {filePath}: {ex.Message}");
+            }
 
             // Leer todas las líneas con encoding UTF-8 (soporta BOM)
             var lines = File.ReadAllLines(filePath, Encoding.UTF8);
@@ -361,6 +377,21 @@ namespace Nullscent.Beatmap
                 FilePath = filePath,
                 Directory = Path.GetDirectoryName(filePath) ?? string.Empty
             };
+
+            // Calcular Hash MD5 del archivo .osu
+            try
+            {
+                using (var md5 = MD5.Create())
+                using (var stream = File.OpenRead(filePath))
+                {
+                    var hashBytes = md5.ComputeHash(stream);
+                    beatmap.Hash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[BeatmapParser] Error calculating hash for {filePath}: {ex.Message}");
+            }
 
             var lines = File.ReadAllLines(filePath, Encoding.UTF8);
             string currentSection = string.Empty;

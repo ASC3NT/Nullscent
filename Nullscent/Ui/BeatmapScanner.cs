@@ -109,6 +109,7 @@ namespace Nullscent.UI
                 {
                     var difficulty = new BeatmapDifficulty
                     {
+                        Hash = beatmap.Hash,
                         FilePath = filePath,
                         DifficultyName = beatmap.Metadata.Version,
                         KeyCount = beatmap.KeyCount,

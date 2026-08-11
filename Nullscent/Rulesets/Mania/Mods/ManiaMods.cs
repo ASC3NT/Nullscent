@@ -13,6 +13,15 @@ namespace Nullscent.Rulesets.Mania.Mods
         public virtual void Apply() { }
     }
 
+    public class ManiaModAutoplay : ManiaMod
+    {
+        public override string Name => "Autoplay";
+        public override string Acronym => "AT";
+        public override string Description => "Watch the game play itself";
+        public override double ScoreMultiplier => 1.0;
+        public override bool Ranked => false;
+    }
+
     public class ManiaModEasy : ManiaMod
     {
         public override string Name => "Easy";

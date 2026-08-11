@@ -32,6 +32,16 @@ namespace Nullscent.Audio
         public string BaseDirectory { get; set; } = string.Empty;
 
         /// <summary>
+        /// Directorio de la skin activa para buscar hitsounds.
+        /// </summary>
+        public string SkinDirectory { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Si es true, ignora los hitsounds del mapa y usa siempre los de la skin.
+        /// </summary>
+        public bool OverrideMapHitsounds { get; set; } = false;
+
+        /// <summary>
         /// Inicializa el reproductor de hitsounds.
         /// Debe llamarse después de que BASS esté inicializado.
         /// </summary>
@@ -45,6 +55,7 @@ namespace Nullscent.Audio
 
             // Apply volume from settings
             _hitsoundVolume = Core.SettingsService.Instance.HitsoundVolume;
+            OverrideMapHitsounds = Core.SettingsService.Instance.OverrideMapHitsounds;
 
             // Subscribe to settings changes
             Core.SettingsService.Instance.SettingChanged += OnSettingChanged;
@@ -67,27 +78,43 @@ namespace Nullscent.Audio
             if (_sampleCache.TryGetValue(fileName, out int existingSample))
                 return existingSample;
 
-            // 1. Intentar cargar desde el directorio base (si está establecido)
-            string fullPath = string.IsNullOrEmpty(BaseDirectory) ? fileName : Path.Combine(BaseDirectory, fileName);
-            if (!fullPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+            string fullPath = string.Empty;
+            var searchDirectories = new List<string>();
+
+            // Prioridades de directorios para hitsounds
+            if (OverrideMapHitsounds && !string.IsNullOrEmpty(SkinDirectory))
             {
-                fullPath += ".wav";
+                searchDirectories.Add(SkinDirectory);
             }
 
-            if (!File.Exists(fullPath))
+            if (!string.IsNullOrEmpty(BaseDirectory))
             {
-                // 2. Fallback: Intentar cargar desde la carpeta del ejecutable
-                if (!string.IsNullOrEmpty(BaseDirectory))
+                searchDirectories.Add(BaseDirectory);
+            }
+
+            if (!OverrideMapHitsounds && !string.IsNullOrEmpty(SkinDirectory))
+            {
+                searchDirectories.Add(SkinDirectory);
+            }
+
+            searchDirectories.Add(AppDomain.CurrentDomain.BaseDirectory);
+
+            foreach (var dir in searchDirectories)
+            {
+                string checkPath = Path.Combine(dir, fileName);
+                if (!checkPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
                 {
-                    fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
-                    if (!fullPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
-                    {
-                        fullPath += ".wav";
-                    }
+                    checkPath += ".wav";
+                }
+
+                if (File.Exists(checkPath))
+                {
+                    fullPath = checkPath;
+                    break;
                 }
             }
 
-            if (!File.Exists(fullPath))
+            if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
             {
                 Console.WriteLine($"[HitSoundPlayer] Sample not found: {fileName}");
                 return 0;
@@ -250,6 +277,13 @@ namespace Nullscent.Audio
             if (key == nameof(Core.SettingsService.Volume) && value is float vol)
             {
                 HitsoundVolume = vol;
+            }
+
+            if (key == nameof(Core.SettingsService.Instance.OverrideMapHitsounds) && value is bool overrideHitsounds)
+            {
+                OverrideMapHitsounds = overrideHitsounds;
+                ClearCache();
+                Console.WriteLine($"[HitSoundPlayer] OverrideMapHitsounds changed to {overrideHitsounds}");
             }
         }
     }

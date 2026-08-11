@@ -158,6 +158,48 @@ namespace Nullscent.IO
                 // Extraer .osk (es un ZIP)
                 ZipFile.ExtractToDirectory(oskPath, targetDirectory);
 
+                // Resolver anidación innecesaria (aplanar carpetas únicas contenedoras)
+                while (true)
+                {
+                    try
+                    {
+                        var files = Directory.GetFiles(targetDirectory);
+                        var directories = Directory.GetDirectories(targetDirectory);
+
+                        // Si no hay archivos en la raíz y hay exactamente un subdirectorio, subimos su contenido
+                        if (files.Length == 0 && directories.Length == 1)
+                        {
+                            string singleSubdir = directories[0];
+                            
+                            foreach (var file in Directory.GetFiles(singleSubdir))
+                            {
+                                string destFile = Path.Combine(targetDirectory, Path.GetFileName(file));
+                                if (File.Exists(destFile)) File.Delete(destFile);
+                                File.Move(file, destFile);
+                            }
+                            
+                            foreach (var dir in Directory.GetDirectories(singleSubdir))
+                            {
+                                string destDir = Path.Combine(targetDirectory, Path.GetFileName(dir));
+                                if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
+                                Directory.Move(dir, destDir);
+                            }
+                            
+                            Directory.Delete(singleSubdir, true);
+                            Console.WriteLine($"[FileDropManager] Flattened nested skin subdirectory: {singleSubdir}");
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[FileDropManager] Error flattening skin directories: {ex.Message}");
+                        break;
+                    }
+                }
+
                 Console.WriteLine($"[FileDropManager] Imported skin: {fileName} -> {targetDirectory}");
                 OnSkinImported?.Invoke(targetDirectory);
             }

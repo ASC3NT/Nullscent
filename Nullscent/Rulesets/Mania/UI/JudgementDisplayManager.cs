@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Nullscent.Rulesets.Mania.Judgements;
 using Nullscent.UI;
+using Nullscent.Skin;
 using System;
 using System.Collections.Generic;
 
@@ -12,7 +13,7 @@ namespace Nullscent.Rulesets.Mania.UI
     /// <summary>
     /// Gestor central para la visualización de juicios y combos (similar a osu!mania).
     /// Recibe eventos de juicio y renderiza un único elemento visual centrado.
-    /// </summary>
+    /// </summary> 
     public class JudgementDisplayManager : IDisposable
     {
         private readonly GraphicsDevice _graphicsDevice;
@@ -20,7 +21,8 @@ namespace Nullscent.Rulesets.Mania.UI
         private readonly TrueTypeFontRenderer? _fontRenderer;
 
         // Juicio activo actualmente (se muestra un único juicio a la vez, estilo osu!stable)
-        private QueuedJudgement? _activeJudgement;
+        private readonly QueuedJudgement _activeJudgement = new();
+        private bool _hasActiveJudgement;
         private readonly object _lock = new(); // Objeto para control de concurrencia
         private int _currentCombo;
         private int _cachedComboValue = -1;
@@ -56,14 +58,12 @@ namespace Nullscent.Rulesets.Mania.UI
             {
                 _currentCombo = combo;
                 _lastJudgementTime = time;
-                _activeJudgement = new QueuedJudgement
-                {
-                    Result = result,
-                    Column = column,
-                    Offset = offsetMs,
-                    Combo = combo,
-                    Time = time
-                };
+                _activeJudgement.Result = result;
+                _activeJudgement.Column = column;
+                _activeJudgement.Offset = offsetMs;
+                _activeJudgement.Combo = combo;
+                _activeJudgement.Time = time;
+                _hasActiveJudgement = true;
             }
 
             // Notificar a los componentes externos (ej. HitErrorBar)
@@ -74,21 +74,19 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             lock (_lock)
             {
-                if (_activeJudgement != null && currentTime - _activeJudgement.Time > DISPLAY_LIFETIME)
+                if (_hasActiveJudgement && currentTime - _activeJudgement.Time > DISPLAY_LIFETIME)
                 {
-                    _activeJudgement = null;
+                    _hasActiveJudgement = false;
                 }
             }
         }
 
-        public void Draw(double currentTime)
+        public void Draw(double currentTime, SkinManager? skinManager)
         {
-            if (_fontRenderer == null) return;
-
             // Dibujar el juicio activo
             lock (_lock)
             {
-                if (_activeJudgement != null)
+                if (_hasActiveJudgement)
                 {
                     double age = currentTime - _activeJudgement.Time;
                     if (age >= 0 && age <= DISPLAY_LIFETIME)
@@ -122,11 +120,22 @@ namespace Nullscent.Rulesets.Mania.UI
                         float driftY = (float)(age / DISPLAY_LIFETIME) * 40.0f;
                         int textY = (int)(Position.Y + 15 - driftY);
 
-                        string text = GetTextForResult(_activeJudgement.Result);
-                        _fontRenderer.SetFontSize(48);
-                        Color color = GetColorForResult(_activeJudgement.Result) * alpha;
-
-                        _fontRenderer.DrawTextCentered(text, (int)Position.X, textY, color, scale);
+                        Texture2D? judgementTexture = skinManager?.GetJudgementTexture(_activeJudgement.Result.ToString());
+                        if (judgementTexture != null)
+                        {
+                            float texScale = skinManager != null ? skinManager.GetTextureScale(judgementTexture) : 1.0f;
+                            int texW = (int)(judgementTexture.Width * scale * texScale);
+                            int texH = (int)(judgementTexture.Height * scale * texScale);
+                            var destRect = new Rectangle((int)Position.X - texW / 2, textY - texH / 2, texW, texH);
+                            _spriteBatch.Draw(judgementTexture, destRect, Color.White * alpha);
+                        }
+                        else if (_fontRenderer != null)
+                        {
+                            string text = GetTextForResult(_activeJudgement.Result);
+                            _fontRenderer.SetFontSize(48);
+                            Color color = GetColorForResult(_activeJudgement.Result) * alpha;
+                            _fontRenderer.DrawTextCentered(text, (int)Position.X, textY, color, scale);
+                        }
                     }
                 }
             }
@@ -160,8 +169,12 @@ namespace Nullscent.Rulesets.Mania.UI
                         _cachedComboString = _currentCombo.ToString();
                     }
 
-                    _fontRenderer.SetFontSize(36);
-                    _fontRenderer.DrawTextCentered(_cachedComboString, (int)Position.X, (int)Position.Y - 30, Color.White * comboAlpha, comboScale);
+                    bool drawn = skinManager != null && skinManager.DrawNumber(_spriteBatch, _cachedComboString, new Vector2(Position.X, Position.Y - 35), "default", comboScale * 0.75f, comboAlpha);
+                    if (!drawn && _fontRenderer != null)
+                    {
+                        _fontRenderer.SetFontSize(36);
+                        _fontRenderer.DrawTextCentered(_cachedComboString, (int)Position.X, (int)Position.Y - 30, Color.White * comboAlpha, comboScale);
+                    }
                 }
             }
         }
@@ -199,7 +212,7 @@ namespace Nullscent.Rulesets.Mania.UI
 
         public void Dispose()
         {
-            _activeJudgement = null;
+            _hasActiveJudgement = false;
         }
 
         // Estructura interna para almacenar datos de juicios encolados

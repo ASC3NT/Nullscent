@@ -10,7 +10,7 @@ namespace Nullscent.UI
     /// Loading screen with spinning circle animation, osu!stable style.
     /// Displays while preparing to start gameplay.
     /// </summary>
-    public class LoadingScreen
+    public class LoadingScreen : IDisposable
     {
         private readonly GraphicsDevice _graphicsDevice;
         private readonly SpriteBatch _spriteBatch;

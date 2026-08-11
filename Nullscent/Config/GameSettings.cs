@@ -100,6 +100,11 @@ namespace Nullscent.Config
         public bool VSync { get; set; } = true;
 
         /// <summary>
+        /// Indica si la velocidad de scroll debe escalar con los cambios de BPM de la canción.
+        /// </summary>
+        public bool ScaleScrollSpeedWithBPM { get; set; } = false;
+
+        /// <summary>
         /// Límite de FPS (0 = sin límite).
         /// </summary>
         public int FPSLimit { get; set; } = 0;
@@ -108,6 +113,28 @@ namespace Nullscent.Config
         /// Escala de UI (0.5 - 2.0).
         /// </summary>
         public float UIScale { get; set; } = 1.0f;
+
+        // === SKINNING ===
+
+        /// <summary>
+        /// Indica si se prefieren texturas de alta resolución (@2x) si están disponibles.
+        /// </summary>
+        public bool HighResolutionSkins { get; set; } = true;
+
+        /// <summary>
+        /// Multiplicador de escala de altura para las notas en la skin (0.5 - 2.0).
+        /// </summary>
+        public float SkinNoteHeightScale { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Multiplicador de escala de altura para los receptores en la skin (0.5 - 2.0).
+        /// </summary>
+        public float SkinReceptorHeightScale { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Indica si los hitsounds de la skin sobrescriben a los del beatmap.
+        /// </summary>
+        public bool OverrideMapHitsounds { get; set; } = false;
 
         /// <summary>
         public bool ShowFPS { get; set; } = false;
@@ -183,9 +210,13 @@ namespace Nullscent.Config
         public bool UseBeatmapSkin { get; set; } = false;
 
         /// <summary>
-        /// Tamaño del cursor (0.5 - 2.0).
-        /// </summary>
         public float CursorSize { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Indica si las capturas de pantalla se guardan comprimidas (PNG, true) o no (BMP, false).
+        /// Default: true.
+        /// </summary>
+        public bool CompressScreenshots { get; set; } = true;
 
         // === MÉTODOS ===
 
@@ -317,6 +348,7 @@ namespace Nullscent.Config
             WindowHeight = defaults.WindowHeight;
             Fullscreen = defaults.Fullscreen;
             VSync = defaults.VSync;
+            ScaleScrollSpeedWithBPM = defaults.ScaleScrollSpeedWithBPM;
             FPSLimit = defaults.FPSLimit;
             UIScale = defaults.UIScale;
             ShowFPS = defaults.ShowFPS;
@@ -333,8 +365,8 @@ namespace Nullscent.Config
             RawInput = defaults.RawInput;
             DisableMouseWheelInGameplay = defaults.DisableMouseWheelInGameplay;
             UseSkinHitsounds = defaults.UseSkinHitsounds;
-            UseBeatmapSkin = defaults.UseBeatmapSkin;
             CursorSize = defaults.CursorSize;
+            CompressScreenshots = defaults.CompressScreenshots;
 
             Console.WriteLine("[GameSettings] Reset to defaults");
         }

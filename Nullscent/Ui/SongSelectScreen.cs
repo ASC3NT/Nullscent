@@ -14,6 +14,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Nullscent.UI
 {
@@ -37,6 +38,7 @@ namespace Nullscent.UI
         private bool _isScanning = true;
         private string _searchText = string.Empty;
         private int _scrollOffset;
+        private float _smoothScrollOffset;
         private KeyboardState _previousKeyboardState;
         private MouseState _prevMouseState;
         private bool _needsRescan;
@@ -44,6 +46,105 @@ namespace Nullscent.UI
         private string? _pendingImportedPath;
         private bool _showModsOverlay;
         private readonly List<ManiaMod> _activeMods = new();
+        private float _entranceProgress = 0f;
+        private float EaseOutCubic(float x) => 1f - (float)Math.Pow(1f - x, 3);
+        private readonly List<(BeatmapSet Set, BeatmapDifficulty Difficulty, int SetIndex, int DifficultyIndex)> _flatDifficulties = new();
+        private int _selectedFlatIndex = 0;
+
+        private void RebuildFlatDifficulties()
+        {
+            _flatDifficulties.Clear();
+            if (_songList == null) return;
+            var filteredSets = _songList.FilteredBeatmapSets;
+            for (int i = 0; i < filteredSets.Count; i++)
+            {
+                var set = filteredSets[i];
+                for (int d = 0; d < set.Difficulties.Count; d++)
+                {
+                    _flatDifficulties.Add((set, set.Difficulties[d], i, d));
+                }
+            }
+        }
+
+        private void SyncFlatIndex()
+        {
+            _selectedFlatIndex = 0;
+            if (_songList == null) return;
+            for (int i = 0; i < _flatDifficulties.Count; i++)
+            {
+                if (_flatDifficulties[i].SetIndex == _songList.SelectedSetIndex && _flatDifficulties[i].DifficultyIndex == _songList.SelectedDifficultyIndex)
+                {
+                    _selectedFlatIndex = i;
+                    break;
+                }
+            }
+        }
+
+        private void ScrollToSelected()
+        {
+            if (_songList == null) return;
+            int targetIndex = -1;
+            for (int i = 0; i < _carouselItems.Count; i++)
+            {
+                var item = _carouselItems[i];
+                if (!item.IsSetHeader && item.SetIndex == _songList.SelectedSetIndex && item.DifficultyIndex == _songList.SelectedDifficultyIndex)
+                {
+                    targetIndex = i;
+                    break;
+                }
+            }
+            if (targetIndex != -1)
+            {
+                int pHeight = _graphicsDevice.Viewport.Height - 120;
+                int iHeight = 60;
+                int vItems = pHeight / iHeight;
+                _scrollOffset = Math.Max(0, targetIndex - vItems / 2);
+            }
+        }
+
+        private class CarouselItem
+        {
+            public bool IsSetHeader { get; set; }
+            public BeatmapSet Set { get; set; } = null!;
+            public BeatmapDifficulty? Difficulty { get; set; }
+            public int SetIndex { get; set; }
+            public int DifficultyIndex { get; set; }
+        }
+
+        private readonly List<CarouselItem> _carouselItems = new();
+
+        private void RebuildCarouselItems()
+        {
+            _carouselItems.Clear();
+            if (_songList == null) return;
+
+            var filteredSets = _songList.FilteredBeatmapSets;
+            for (int i = 0; i < filteredSets.Count; i++)
+            {
+                var set = filteredSets[i];
+                _carouselItems.Add(new CarouselItem
+                {
+                    IsSetHeader = true,
+                    Set = set,
+                    SetIndex = i
+                });
+
+                if (i == _songList.SelectedSetIndex)
+                {
+                    for (int d = 0; d < set.Difficulties.Count; d++)
+                    {
+                        _carouselItems.Add(new CarouselItem
+                        {
+                            IsSetHeader = false,
+                            Set = set,
+                            Difficulty = set.Difficulties[d],
+                            SetIndex = i,
+                            DifficultyIndex = d
+                        });
+                    }
+                }
+            }
+        }
 
         // Audio preview, background images and sorting
         private string? _lastSelectedDifficultyPath;
@@ -79,49 +180,77 @@ namespace Nullscent.UI
             _settings = settings;
         }
 
-        public async void Initialize()
+        public void Initialize()
         {
-            Console.WriteLine("[SongSelectScreen] Initialized");
-
+            Console.WriteLine("[SongSelectScreen] Initializing...");
             _fontRenderer = _game.FontRenderer;
-
-            // Reset font size to default for song select (18px is good for lists)
             _fontRenderer?.SetFontSize(18);
-
             _songList = new SongList();
 
-            // Inicializar estado del teclado y mouse para prevenir input fantasma
             _previousKeyboardState = Keyboard.GetState();
             _prevMouseState = Mouse.GetState();
 
-            // Escanear beatmaps de forma asíncrona
-            Console.WriteLine($"[SongSelectScreen] Scanning {_settings.SongsDirectory}...");
+            _isScanning = true;
 
-            var beatmapSets = await BeatmapScanner.ScanDirectoryAsync(
-                _settings.SongsDirectory,
-                (current, total) =>
-                {
-                    // Progress callback (opcional: actualizar UI)
-                }
-            );
+            // Iniciar tarea asíncrona de carga de forma segura
+            _ = InitializeAsync();
+        }
 
-            if (_isDisposed)
+        private async Task InitializeAsync()
+        {
+            try
             {
-                Console.WriteLine("[SongSelectScreen] Initialize completed after screen was disposed. Aborting setup.");
-                return;
+                Console.WriteLine(
+                    $"[SongSelectScreen] Initialize thread: {Environment.CurrentManagedThreadId}, " +
+                    $"Context: {System.Threading.SynchronizationContext.Current?.GetType().FullName ?? "null"}");
+
+                Console.WriteLine($"[SongSelectScreen] Scanning {_settings.SongsDirectory}...");
+
+                var beatmapSets = await BeatmapScanner.ScanDirectoryAsync(
+                    _settings.SongsDirectory,
+                    (current, total) =>
+                    {
+                        // Progress callback (opcional: actualizar UI)
+                    }
+                );
+
+                Console.WriteLine(
+                    $"[SongSelectScreen] After await thread: {Environment.CurrentManagedThreadId}, " +
+                    $"Context: {System.Threading.SynchronizationContext.Current?.GetType().FullName ?? "null"}");
+
+                if (_isDisposed)
+                {
+                    Console.WriteLine("[SongSelectScreen] Initialize completed after screen was disposed. Aborting setup.");
+                    return;
+                }
+
+                _songList.LoadBeatmapSets(beatmapSets);
+                _isScanning = false;
+                _game.Window.TextInput += OnTextInput;
+                RebuildFlatDifficulties();
+                SyncFlatIndex();
+                RebuildCarouselItems();
+
+                Console.WriteLine($"[SongSelectScreen] Scan complete: {beatmapSets.Count} sets loaded");
             }
-
-            _songList.LoadBeatmapSets(beatmapSets);
-            _isScanning = false;
-            _game.Window.TextInput += OnTextInput;
-
-            Console.WriteLine($"[SongSelectScreen] Scan complete: {beatmapSets.Count} sets loaded");
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SongSelectScreen] CRITICAL ERROR during initialization: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
+                _isScanning = false;
+                if (_songList != null)
+                {
+                    _songList.LoadBeatmapSets(new List<BeatmapSet>());
+                }
+            }
         }
 
         public void Update(GameTime gameTime)
         {
             if (_isScanning || _songList == null)
                 return;
+
+            _entranceProgress = Math.Min(1.0f, _entranceProgress + (float)gameTime.ElapsedGameTime.TotalSeconds * 3.0f);
 
             var currentKeyboardState = Keyboard.GetState();
             var currentMouseState = Mouse.GetState();
@@ -133,7 +262,12 @@ namespace Nullscent.UI
                 _lastSelectedDifficultyPath = selectedDiff.FilePath;
                 PlaySongPreview(selectedDiff);
                 LoadBackgroundTexture(selectedDiff);
+                SyncFlatIndex();
+                RebuildCarouselItems();
             }
+
+            // Interpolate smooth scroll
+            _smoothScrollOffset = MathHelper.Lerp(_smoothScrollOffset, _scrollOffset, 0.15f);
 
             // Actualizar reloj maestro de audio para permitir bucle de preview
             if (_audioEngine.IsPlaying)
@@ -161,7 +295,6 @@ namespace Nullscent.UI
                 ApplySorting();
             }
 
-            // Soporte para rueda de scroll del mouse dependiente de la posición del cursor
             int pHeight = _graphicsDevice.Viewport.Height - 120;
             int iHeight = 60;
             int vItems = pHeight / iHeight;
@@ -170,22 +303,20 @@ namespace Nullscent.UI
             {
                 int scrollDirection = mouseScrollDelta > 0 ? -1 : 1;
                 
-                // Si el puntero está en el panel izquierdo (carrusel de canciones)
-                if (currentMouseState.X < _graphicsDevice.Viewport.Width * 0.48f)
+                // Si el puntero está en el panel derecho (carrusel de canciones)
+                if (currentMouseState.X > _graphicsDevice.Viewport.Width * 0.52f)
                 {
-                    if (_songList.FilteredBeatmapSets.Count > 0)
+                    if (_carouselItems.Count > 0)
                     {
-                        _songList.SelectedSetIndex = Math.Clamp(_songList.SelectedSetIndex + scrollDirection, 0, _songList.FilteredBeatmapSets.Count - 1);
-                        _scrollOffset = Math.Max(0, _songList.SelectedSetIndex - vItems / 2);
-                    }
-                }
-                // Si el puntero está en el panel derecho (dificultades)
-                else
-                {
-                    var selectedSet = _songList.SelectedBeatmapSet;
-                    if (selectedSet != null && selectedSet.Difficulties.Count > 0)
-                    {
-                        _songList.SelectedDifficultyIndex = Math.Clamp(_songList.SelectedDifficultyIndex + scrollDirection, 0, selectedSet.Difficulties.Count - 1);
+                        if (_flatDifficulties.Count > 0)
+                        {
+                            _selectedFlatIndex = Math.Clamp(_selectedFlatIndex + scrollDirection, 0, _flatDifficulties.Count - 1);
+                            var flat = _flatDifficulties[_selectedFlatIndex];
+                            _songList.SelectedSetIndex = flat.SetIndex;
+                            _songList.SelectedDifficultyIndex = flat.DifficultyIndex;
+                            RebuildCarouselItems();
+                            ScrollToSelected();
+                        }
                     }
                 }
             }
@@ -282,74 +413,56 @@ namespace Nullscent.UI
                     _showModsOverlay = true;
                 }
 
-                // Click en elementos de la lista de canciones
+                // Click en elementos de la lista de canciones (carrusel cilíndrico de CarouselItems)
                 int panelWidth = (int)(_graphicsDevice.Viewport.Width * 0.45f);
                 int panelHeight = _graphicsDevice.Viewport.Height - 120;
                 int panelY = 80;
                 int itemHeight = 60;
                 int visibleItems = panelHeight / itemHeight;
-                var filteredSets = _songList.FilteredBeatmapSets;
-                int startIndex = _scrollOffset;
-                int endIndex = Math.Min(startIndex + visibleItems, filteredSets.Count);
+                int startIndex = Math.Max(0, _scrollOffset - 2);
+                int endIndex = Math.Min(startIndex + visibleItems + 4, _carouselItems.Count);
+
+                int screenWidth = _graphicsDevice.Viewport.Width;
+                int listPanelX = screenWidth - panelWidth;
+                int centerY = panelY + panelHeight / 2;
 
                 for (int i = startIndex; i < endIndex; i++)
                 {
-                    int yItem = panelY + (i - startIndex) * itemHeight;
-                    var itemRect = new Rectangle(10, yItem, panelWidth - 20, itemHeight);
+                    var item = _carouselItems[i];
+                    int yItem = panelY + (int)((i - _smoothScrollOffset) * itemHeight);
+                    if (yItem < panelY - itemHeight || yItem > panelY + panelHeight) continue;
+
+                    float dist = Math.Abs(yItem + itemHeight / 2 - centerY);
+                    int slantX = (int)(Math.Pow(dist / centerY, 2) * 40.0f);
+                    int hitX = listPanelX + 10 + slantX;
+                    if (!item.IsSetHeader) hitX += 25; // Indentación
+
+                    var itemRect = new Rectangle(hitX, yItem, panelWidth - (item.IsSetHeader ? 20 : 45), itemHeight);
                     if (itemRect.Contains(currentMouseState.X, currentMouseState.Y))
                     {
                         if (currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
                         {
-                            if (_songList.SelectedSetIndex == i)
+                            if (item.IsSetHeader)
                             {
-                                StartSelectedBeatmap();
+                                _songList.SelectedSetIndex = item.SetIndex;
+                                _songList.SelectedDifficultyIndex = 0;
                             }
                             else
                             {
-                                _songList.SelectedSetIndex = i;
-                                _songList.SelectedDifficultyIndex = 0;
-                            }
-                            break;
-                        }
-                    }
-                }
-
-                // Click en dificultades del panel lateral
-                var selectedSet = _songList.SelectedBeatmapSet;
-                if (selectedSet != null)
-                {
-                    int panelX = (int)(_graphicsDevice.Viewport.Width * 0.5f);
-                    int panelWidthRight = _graphicsDevice.Viewport.Width - panelX;
-                    int xDiff = panelX + 20;
-                    
-                    int currentY = panelY + 20;
-                    if (_currentBackgroundTexture != null)
-                    {
-                        int imgW = panelWidthRight - 40;
-                        int imgH = (int)(imgW * 0.5f);
-                        currentY += imgH + 15;
-                    }
-                    currentY += 26 + 30 + 22; // Título, artista y cabecera "Difficulties:"
-
-                    for (int i = 0; i < selectedSet.Difficulties.Count; i++)
-                    {
-                        var diffRect = new Rectangle(xDiff + 10, currentY - 2, panelWidthRight - 40, 18);
-                        if (diffRect.Contains(currentMouseState.X, currentMouseState.Y))
-                        {
-                            if (currentMouseState.LeftButton == ButtonState.Pressed && _prevMouseState.LeftButton == ButtonState.Released)
-                            {
-                                if (_songList.SelectedDifficultyIndex == i)
+                                if (_songList.SelectedSetIndex == item.SetIndex && _songList.SelectedDifficultyIndex == item.DifficultyIndex)
                                 {
                                     StartSelectedBeatmap();
                                 }
                                 else
                                 {
-                                    _songList.SelectedDifficultyIndex = i;
+                                    _songList.SelectedSetIndex = item.SetIndex;
+                                    _songList.SelectedDifficultyIndex = item.DifficultyIndex;
                                 }
-                                break;
                             }
+                            SyncFlatIndex();
+                            RebuildCarouselItems();
+                            break;
                         }
-                        currentY += 20;
                     }
                 }
 
@@ -372,27 +485,51 @@ namespace Nullscent.UI
 
         private void HandleInput(KeyboardState keyboardState)
         {
-            if (_songList == null)
+            if (_songList == null || _carouselItems.Count == 0)
                 return;
 
             // Navegación
             if (IsKeyPressed(keyboardState, Keys.Down))
             {
-                _songList.SelectNext();
-                _scrollOffset = Math.Max(0, _songList.SelectedSetIndex - 5);
+                if (_flatDifficulties.Count > 0)
+                {
+                    _selectedFlatIndex = (_selectedFlatIndex + 1) % _flatDifficulties.Count;
+                    var flat = _flatDifficulties[_selectedFlatIndex];
+                    _songList.SelectedSetIndex = flat.SetIndex;
+                    _songList.SelectedDifficultyIndex = flat.DifficultyIndex;
+                    RebuildCarouselItems();
+                    ScrollToSelected();
+                }
             }
 
             if (IsKeyPressed(keyboardState, Keys.Up))
             {
-                _songList.SelectPrevious();
-                _scrollOffset = Math.Max(0, _songList.SelectedSetIndex - 5);
+                if (_flatDifficulties.Count > 0)
+                {
+                    _selectedFlatIndex = (_selectedFlatIndex - 1 + _flatDifficulties.Count) % _flatDifficulties.Count;
+                    var flat = _flatDifficulties[_selectedFlatIndex];
+                    _songList.SelectedSetIndex = flat.SetIndex;
+                    _songList.SelectedDifficultyIndex = flat.DifficultyIndex;
+                    RebuildCarouselItems();
+                    ScrollToSelected();
+                }
             }
 
             if (IsKeyPressed(keyboardState, Keys.Right))
+            {
                 _songList.SelectNextDifficulty();
+                SyncFlatIndex();
+                RebuildCarouselItems();
+                ScrollToSelected();
+            }
 
             if (IsKeyPressed(keyboardState, Keys.Left))
+            {
                 _songList.SelectPreviousDifficulty();
+                SyncFlatIndex();
+                RebuildCarouselItems();
+                ScrollToSelected();
+            }
 
             // Enter para iniciar beatmap
             if (IsKeyPressed(keyboardState, Keys.Enter))
@@ -407,6 +544,7 @@ namespace Nullscent.UI
                 {
                     _searchText = string.Empty;
                     _songList.SearchQuery = _searchText;
+                    RebuildCarouselItems();
                 }
                 else
                 {
@@ -421,6 +559,7 @@ namespace Nullscent.UI
             {
                 _searchText = _searchText[..^1];
                 _songList.SearchQuery = _searchText;
+                RebuildCarouselItems();
             }
         }
 
@@ -429,14 +568,51 @@ namespace Nullscent.UI
             if (_isScanning || _showModsOverlay || _songList == null)
                 return;
 
-            // Ignorar teclas de control manejadas en HandleInput para evitar interferencias
-            if (e.Key == Keys.Back || e.Key == Keys.Escape || e.Key == Keys.Enter || e.Key == Keys.Tab)
+            // Enter inicia el beatmap seleccionado inmediatamente
+            if (e.Key == Keys.Enter || e.Character == '\r' || e.Character == '\n')
+            {
+                StartSelectedBeatmap();
+                return;
+            }
+
+            if (e.Key == Keys.Back || e.Character == '\b')
+            {
+                if (_searchText.Length > 0)
+                {
+                    _searchText = _searchText[..^1];
+                    _songList.SearchQuery = _searchText;
+                    RebuildFlatDifficulties();
+                    _selectedFlatIndex = 0;
+                    if (_flatDifficulties.Count > 0)
+                    {
+                        var flat = _flatDifficulties[0];
+                        _songList.SelectedSetIndex = flat.SetIndex;
+                        _songList.SelectedDifficultyIndex = flat.DifficultyIndex;
+                    }
+                    RebuildCarouselItems();
+                    ScrollToSelected();
+                }
+                return;
+            }
+
+            // Ignorar otras teclas de control para evitar interferencias
+            if (e.Key == Keys.Escape || e.Key == Keys.Tab)
                 return;
 
             if (!char.IsControl(e.Character))
             {
                 _searchText += e.Character;
                 _songList.SearchQuery = _searchText;
+                RebuildFlatDifficulties();
+                _selectedFlatIndex = 0;
+                if (_flatDifficulties.Count > 0)
+                {
+                    var flat = _flatDifficulties[0];
+                    _songList.SelectedSetIndex = flat.SetIndex;
+                    _songList.SelectedDifficultyIndex = flat.DifficultyIndex;
+                }
+                RebuildCarouselItems();
+                ScrollToSelected();
             }
         }
 
@@ -484,50 +660,67 @@ namespace Nullscent.UI
             _needsRescan = true;
         }
 
-        public async void RescanBeatmaps(string? newDirectoryToSelect = null)
+        public void RescanBeatmaps(string? newDirectoryToSelect = null)
         {
             if (_songList == null || _isScanning) return;
 
-            string? selectedDifficultyPath = _songList.SelectedDifficulty?.FilePath;
-
             _isScanning = true;
-            Console.WriteLine($"[SongSelectScreen] Rescanning {_settings.SongsDirectory}...");
+            _ = RescanBeatmapsAsync(newDirectoryToSelect);
+        }
 
-            var beatmapSets = await BeatmapScanner.ScanDirectoryAsync(
-                _settings.SongsDirectory,
-                null
-            );
-
-            if (_isDisposed)
+        private async Task RescanBeatmapsAsync(string? newDirectoryToSelect)
+        {
+            try
             {
-                Console.WriteLine("[SongSelectScreen] Rescan completed after screen was disposed. Aborting.");
-                return;
-            }
+                string? selectedDifficultyPath = _songList!.SelectedDifficulty?.FilePath;
+                Console.WriteLine($"[SongSelectScreen] Rescanning {_settings.SongsDirectory}...");
 
-            _songList.LoadBeatmapSets(beatmapSets);
+                var beatmapSets = await BeatmapScanner.ScanDirectoryAsync(
+                    _settings.SongsDirectory,
+                    null
+                );
 
-            bool selectedNew = false;
-            if (newDirectoryToSelect != null)
-            {
-                for (int i = 0; i < _songList.FilteredBeatmapSets.Count; i++)
+                if (_isDisposed)
                 {
-                    if (string.Equals(_songList.FilteredBeatmapSets[i].Directory, newDirectoryToSelect, StringComparison.OrdinalIgnoreCase))
+                    Console.WriteLine("[SongSelectScreen] Rescan completed after screen was disposed. Aborting.");
+                    return;
+                }
+
+                _songList.LoadBeatmapSets(beatmapSets);
+
+                bool selectedNew = false;
+                if (newDirectoryToSelect != null)
+                {
+                    for (int i = 0; i < _songList.FilteredBeatmapSets.Count; i++)
                     {
-                        _songList.SelectedSetIndex = i;
-                        _songList.SelectedDifficultyIndex = 0;
-                        selectedNew = true;
-                        break;
+                        if (string.Equals(_songList.FilteredBeatmapSets[i].Directory, newDirectoryToSelect, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _songList.SelectedSetIndex = i;
+                            _songList.SelectedDifficultyIndex = 0;
+                            selectedNew = true;
+                            break;
+                        }
                     }
                 }
-            }
 
-            if (!selectedNew && selectedDifficultyPath != null)
+                if (!selectedNew && selectedDifficultyPath != null)
+                {
+                    _songList.TrySelectDifficultyByPath(selectedDifficultyPath);
+                }
+
+                _isScanning = false;
+                RebuildFlatDifficulties();
+                SyncFlatIndex();
+                RebuildCarouselItems();
+                ScrollToSelected();
+                Console.WriteLine($"[SongSelectScreen] Rescan complete: {beatmapSets.Count} sets loaded");
+            }
+            catch (Exception ex)
             {
-                _songList.TrySelectDifficultyByPath(selectedDifficultyPath);
+                Console.WriteLine($"[SongSelectScreen] Error during rescan: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
+                _isScanning = false;
             }
-
-            _isScanning = false;
-            Console.WriteLine($"[SongSelectScreen] Rescan complete: {beatmapSets.Count} sets loaded");
         }
 
         private string? FindBackgroundImage(string directory)
@@ -646,6 +839,10 @@ namespace Nullscent.UI
             {
                 _songList.TrySelectDifficultyByPath(selectedDiffPath);
             }
+            RebuildFlatDifficulties();
+            SyncFlatIndex();
+            RebuildCarouselItems();
+            ScrollToSelected();
         }
 
         private void OpenImportFileDialog()
@@ -723,20 +920,26 @@ namespace Nullscent.UI
                 _spriteBatch.Draw(_currentBackgroundTexture, new Rectangle(0, 0, screenWidth, screenHeight), Color.White * 0.15f);
             }
 
-            // Panel izquierdo: Lista de beatmaps
-            DrawBeatmapList(screenWidth, screenHeight);
+            float ease = EaseOutCubic(_entranceProgress);
+            int leftOffset = (int)(-150f * (1f - ease));
+            int rightOffset = (int)(150f * (1f - ease));
+            int topOffset = (int)(-80f * (1f - ease));
+            int bottomOffset = (int)(80f * (1f - ease));
 
-            // Panel derecho: Metadata y dificultades
-            DrawMetadataPanel(screenWidth, screenHeight);
+            // Panel derecho: Lista de beatmaps (desliza desde la derecha)
+            DrawBeatmapList(screenWidth, screenHeight, rightOffset);
 
-            // Barra superior: Búsqueda
-            DrawSearchBar(screenWidth);
+            // Panel izquierdo: Metadata (desliza desde la izquierda)
+            DrawMetadataPanel(screenWidth, screenHeight, leftOffset);
 
-            // Footer: Controles
-            DrawFooter(screenWidth, screenHeight);
+            // Barra superior: Búsqueda (desliza desde arriba)
+            DrawSearchBar(screenWidth, topOffset);
+
+            // Footer: Controles (desliza desde abajo)
+            DrawFooter(screenWidth, screenHeight, bottomOffset);
         }
 
-        private void DrawBeatmapList(int screenWidth, int screenHeight)
+        private void DrawBeatmapList(int screenWidth, int screenHeight, int offsetX)
         {
             if (_fontRenderer == null || _songList == null)
                 return;
@@ -744,97 +947,107 @@ namespace Nullscent.UI
             int panelWidth = (int)(screenWidth * 0.45f);
             int panelHeight = screenHeight - 120;
             int panelY = 80;
+            int panelX = screenWidth - panelWidth + offsetX;
 
-            // Fondo del panel
-            var panelRect = new Rectangle(0, panelY, panelWidth, panelHeight);
-            _fontRenderer.DrawBox(panelRect, _panelColor);
-
-            // Dibujar lista de beatmap sets
-            var filteredSets = _songList.FilteredBeatmapSets;
             int itemHeight = 60;
             int visibleItems = panelHeight / itemHeight;
-            int startIndex = _scrollOffset;
-            int endIndex = Math.Min(startIndex + visibleItems, filteredSets.Count);
+            int startIndex = Math.Max(0, _scrollOffset - 2);
+            int endIndex = Math.Min(startIndex + visibleItems + 4, _carouselItems.Count);
+
+            int centerY = panelY + panelHeight / 2;
 
             for (int i = startIndex; i < endIndex; i++)
             {
-                var set = filteredSets[i];
-                int y = panelY + (i - startIndex) * itemHeight;
-                bool isSelected = i == _songList.SelectedSetIndex;
+                var item = _carouselItems[i];
+                int y = panelY + (int)((i - _smoothScrollOffset) * itemHeight);
 
-                DrawBeatmapSetItem(set, 10, y, panelWidth - 20, itemHeight, isSelected);
-            }
+                if (y < panelY - itemHeight || y > panelY + panelHeight) continue;
 
-            if (filteredSets.Count == 0)
-            {
-                _fontRenderer.SetFontSize(16);
-                int listCenterX = panelWidth / 2;
-                int listCenterY = panelY + panelHeight / 2;
-                _fontRenderer.DrawTextCentered("No beatmaps found.", listCenterX, listCenterY - 15, _textColor);
-                _fontRenderer.DrawTextCentered("Drag & drop a .osz beatmap file here", listCenterX, listCenterY + 10, _dimTextColor * 0.8f);
-                _fontRenderer.DrawTextCentered("or click 'Import .osz' to load one!", listCenterX, listCenterY + 30, _dimTextColor * 0.8f);
-            }
+                float dist = Math.Abs(y + itemHeight / 2 - centerY);
+                int slantX = (int)(Math.Pow(dist / centerY, 2) * 40.0f);
 
-            // Scrollbar indicador
-            if (filteredSets.Count > visibleItems)
-            {
-                float scrollPercent = (float)_scrollOffset / (filteredSets.Count - visibleItems);
-                int scrollbarHeight = Math.Max(20, panelHeight * visibleItems / filteredSets.Count);
-                int scrollbarY = panelY + (int)((panelHeight - scrollbarHeight) * scrollPercent);
+                int x = panelX + 10 + slantX;
+                if (!item.IsSetHeader) x += 25; // Indentar dificultades
+                
+                bool isSelected = !item.IsSetHeader
+                    ? (item.SetIndex == _songList.SelectedSetIndex && item.DifficultyIndex == _songList.SelectedDifficultyIndex)
+                    : (item.SetIndex == _songList.SelectedSetIndex);
+                if (isSelected) x -= (item.IsSetHeader ? 10 : 15);
 
-                var scrollbarRect = new Rectangle(panelWidth - 5, scrollbarY, 5, scrollbarHeight);
-                _fontRenderer.DrawBox(scrollbarRect, _accentColor);
+                if (!item.IsSetHeader)
+                    DrawCarouselDifficultyItem(item.Difficulty!, x, y, panelWidth - 45, itemHeight, isSelected);
+                else
+                    DrawCarouselSetHeader(item.Set, x, y, panelWidth - 20, itemHeight, isSelected);
             }
         }
 
-        private void DrawBeatmapSetItem(BeatmapSet set, int x, int y, int width, int height, bool isSelected)
+        private void DrawCarouselSetHeader(BeatmapSet set, int x, int y, int width, int height, bool isSelected)
         {
-            if (_fontRenderer == null)
-                return;
-
-            // Fondo seleccionado
-            if (isSelected)
+            if (_fontRenderer == null) return;
+            var bgRect = new Rectangle(x, y, width, height);
+            Color cardBg = isSelected ? _accentColor * 0.15f : _panelColor * 0.75f;
+            _fontRenderer.DrawBox(bgRect, cardBg);
+            _fontRenderer.DrawBoxBorder(bgRect, isSelected ? _accentColor : Color.White * 0.1f, 1);
+            
+            Color titleColor = isSelected ? Color.White : _dimTextColor;
+            Color artistColor = isSelected ? _dimTextColor : _dimTextColor * 0.7f;
+            
+            string title = TruncateString(set.DisplayTitle, 28);
+            string artist = TruncateString(set.DisplayArtist, 32);
+            
+            _fontRenderer.SetFontSize(16);
+            _fontRenderer.DrawText(title, x + 15, y + 8, titleColor);
+            _fontRenderer.SetFontSize(12);
+            _fontRenderer.DrawText(artist, x + 15, y + 28, artistColor);
+            
+            if (set.MaxStars > 0)
             {
-                var bgRect = new Rectangle(x, y, width, height);
-                _fontRenderer.DrawBox(bgRect, _accentColor * 0.2f);
-
-                // Borde izquierdo de acento
-                var accentRect = new Rectangle(x, y, 4, height);
-                _fontRenderer.DrawBox(accentRect, _accentColor);
+                _fontRenderer.SetFontSize(14);
+                _fontRenderer.DrawTextRight($"{set.MaxStars:F2}★", x + width - 15, y + 18, Color.Yellow);
             }
-
-            // Texto
-            Color color = isSelected ? _textColor : _dimTextColor;
-
-            // Calcular estrellas máximas de las dificultades del set
-            double maxStars = set.MaxStars;
-            string starsText = maxStars > 0 ? $" {maxStars:F2}★" : "";
-
-            string title = TruncateString(set.DisplayTitle + starsText, 30);
-            string artist = TruncateString(set.DisplayArtist, 30);
-            string creator = $"mapped by {set.Creator}";
-
-            _fontRenderer.DrawText(title, x + 10, y + 5, color);
-            _fontRenderer.DrawText(artist, x + 10, y + 25, color * 0.8f);
-            _fontRenderer.DrawText(creator, x + 10, y + 40, _dimTextColor * 0.6f);
         }
 
-        private void DrawMetadataPanel(int screenWidth, int screenHeight)
+        private void DrawCarouselDifficultyItem(BeatmapDifficulty diff, int x, int y, int width, int height, bool isSelected)
+        {
+            if (_fontRenderer == null) return;
+            var bgRect = new Rectangle(x, y, width, height);
+            Color cardBg = isSelected ? _accentColor * 0.25f : _panelColor * 0.5f;
+            _fontRenderer.DrawBox(bgRect, cardBg);
+            _fontRenderer.DrawBoxBorder(bgRect, isSelected ? _accentColor : Color.White * 0.1f, 1);
+            
+            Color titleColor = isSelected ? Color.White : _dimTextColor;
+            string keyText = $"[{diff.KeyCount}K] ";
+            string name = TruncateString(diff.DifficultyName, 20);
+            
+            _fontRenderer.SetFontSize(14);
+            _fontRenderer.DrawText(keyText, x + 15, y + 8, isSelected ? _accentColor : _dimTextColor);
+            _fontRenderer.DrawText(name, x + 55, y + 8, titleColor);
+            
+            _fontRenderer.SetFontSize(12);
+            _fontRenderer.DrawText($"BPM: {diff.BPM:F0}  OD: {diff.OverallDifficulty:F1}  HP: {diff.HPDrainRate:F1}", x + 15, y + 28, _dimTextColor * 0.7f);
+            
+            _fontRenderer.SetFontSize(14);
+            _fontRenderer.DrawTextRight($"{diff.StarRating:F2}★", x + width - 15, y + 18, Color.Yellow);
+        }
+
+        private void DrawMetadataPanel(int screenWidth, int screenHeight, int offsetX)
         {
             if (_fontRenderer == null || _songList == null)
                 return;
 
-            int panelX = (int)(screenWidth * 0.5f);
-            int panelWidth = screenWidth - panelX;
+            int panelX = 20 + offsetX;
+            int panelWidth = (int)(screenWidth * 0.50f);
             int panelHeight = screenHeight - 120;
             int panelY = 80;
 
             var panelRect = new Rectangle(panelX, panelY, panelWidth, panelHeight);
-            _fontRenderer.DrawBox(panelRect, _panelColor);
+            _fontRenderer.DrawBox(panelRect, _panelColor * 0.85f);
+            _fontRenderer.DrawBoxBorder(panelRect, Color.White * 0.1f, 1);
 
             var selectedSet = _songList.SelectedBeatmapSet;
             if (selectedSet == null)
             {
+                _fontRenderer.SetFontSize(18);
                 _fontRenderer.DrawTextCentered("No beatmap selected", panelX + panelWidth / 2, panelY + panelHeight / 2, _dimTextColor);
                 return;
             }
@@ -846,72 +1059,78 @@ namespace Nullscent.UI
             if (_currentBackgroundTexture != null)
             {
                 int imgW = panelWidth - 40;
-                int imgH = (int)(imgW * 0.5f); // 2:1 ratio
+                int imgH = (int)(imgW * 0.40f); // 2.5:1 ratio, más compacto
                 var destRect = new Rectangle(x, y, imgW, imgH);
-                _spriteBatch.Draw(_currentBackgroundTexture, destRect, Color.White * 0.8f);
-                _fontRenderer.DrawBoxBorder(destRect, _accentColor * 0.5f, 2);
+                _spriteBatch.Draw(_currentBackgroundTexture, destRect, Color.White * 0.85f);
+                _fontRenderer.DrawBoxBorder(destRect, _accentColor * 0.7f, 2);
                 y += imgH + 15;
             }
 
             // Título y artista
             _fontRenderer.SetFontSize(22);
-            _fontRenderer.DrawText(TruncateString(selectedSet.DisplayTitle, 35), x, y, _textColor);
+            _fontRenderer.DrawText(TruncateString(selectedSet.DisplayTitle, 32), x, y, _textColor);
             y += 26;
-            _fontRenderer.SetFontSize(18);
-            _fontRenderer.DrawText(TruncateString(selectedSet.DisplayArtist, 35), x, y, _dimTextColor);
-            y += 30;
-
-            // Dificultades
-            _fontRenderer.DrawText("Difficulties:", x, y, _textColor);
-            y += 22;
-
-            for (int i = 0; i < selectedSet.Difficulties.Count; i++)
-            {
-                var diff = selectedSet.Difficulties[i];
-                bool isSelected = i == _songList.SelectedDifficultyIndex;
-                Color diffColor = isSelected ? _accentColor : _dimTextColor;
-
-                string diffText = $"[{diff.KeyCount}K] {diff.DifficultyName} ({diff.StarRating:F2}★)";
-                _fontRenderer.DrawText(diffText, x + 10, y, diffColor);
-                y += 20;
-            }
-
-            y += 15;
+            _fontRenderer.SetFontSize(16);
+            _fontRenderer.DrawText(TruncateString(selectedSet.DisplayArtist, 36), x, y, _dimTextColor);
+            y += 24;
 
             // Metadata de la dificultad seleccionada
             var selectedDiff = _songList.SelectedDifficulty;
             if (selectedDiff != null)
             {
-                _fontRenderer.DrawText("Stats:", x, y, _textColor);
-                y += 22;
+                _fontRenderer.SetFontSize(18);
+                string diffNameText = $"Difficulty: {selectedDiff.DifficultyName}";
+                _fontRenderer.DrawText(TruncateString(diffNameText, 32), x, y, _accentColor);
+                _fontRenderer.DrawTextRight($"{selectedDiff.StarRating:F2}★", panelX + panelWidth - 20, y, Color.Gold);
+                y += 30;
+            }
+            if (selectedDiff != null)
+            {
+                _fontRenderer.SetFontSize(14);
+                _fontRenderer.DrawText("DIFFICULTY STATS:", x, y, _accentColor);
+                y += 20;
 
-                _fontRenderer.DrawText($"Rating: {selectedDiff.StarRating:F2}★", x + 10, y, _accentColor);
+                // Dibujar barras de progreso para OD y HP
+                int statBarW = 140;
+                int statBarH = 10;
+
+                // BPM y Duración
+                _fontRenderer.SetFontSize(12);
+                _fontRenderer.DrawText($"BPM: {selectedDiff.BPM:F0}   |   Length: {FormatTime(selectedDiff.Length)}   |   Objects: {selectedDiff.ObjectCount}", x, y, _dimTextColor);
                 y += 18;
 
-                _fontRenderer.DrawText($"BPM: {selectedDiff.BPM:F0}", x + 10, y, _dimTextColor);
-                y += 18;
+                // Overall Difficulty (OD)
+                _fontRenderer.DrawText("OD", x, y, _dimTextColor);
+                var odBgRect = new Rectangle(x + 35, y + 3, statBarW, statBarH);
+                _fontRenderer.DrawBox(odBgRect, _panelColor * 0.5f);
+                var odFillRect = new Rectangle(x + 35, y + 3, (int)(statBarW * (selectedDiff.OverallDifficulty / 10.0)), statBarH);
+                _fontRenderer.DrawBox(odFillRect, _accentColor);
+                _fontRenderer.DrawText($"{selectedDiff.OverallDifficulty:F1}", x + 35 + statBarW + 10, y, _textColor);
 
-                _fontRenderer.DrawText($"Length: {FormatTime(selectedDiff.Length)}", x + 10, y, _dimTextColor);
-                y += 18;
+                // HP Drain
+                _fontRenderer.DrawText("HP", x + 230, y, _dimTextColor);
+                var hpBgRect = new Rectangle(x + 260, y + 3, statBarW, statBarH);
+                _fontRenderer.DrawBox(hpBgRect, _panelColor * 0.5f);
+                var hpFillRect = new Rectangle(x + 260, y + 3, (int)(statBarW * (selectedDiff.HPDrainRate / 10.0)), statBarH);
+                _fontRenderer.DrawBox(hpFillRect, Color.Green);
+                _fontRenderer.DrawText($"{selectedDiff.HPDrainRate:F1}", x + 260 + statBarW + 10, y, _textColor);
 
-                _fontRenderer.DrawText($"Objects: {selectedDiff.ObjectCount}", x + 10, y, _dimTextColor);
-                y += 18;
+                y += 24;
 
-                _fontRenderer.DrawText($"OD: {selectedDiff.OverallDifficulty:F1} | HP: {selectedDiff.HPDrainRate:F1}", x + 10, y, _dimTextColor);
+                // Rankings locales
+                _fontRenderer.SetFontSize(14);
+                _fontRenderer.DrawText("LOCAL RANKINGS:", x, y, _accentColor);
+                y += 20;
 
-                // rankings locales
-                y += 25;
-                _fontRenderer.DrawText("Local Rankings:", x, y, _textColor);
-                y += 22;
-
-                var localScores = Nullscent.Core.LocalScoreManager.GetScores(selectedDiff.FilePath);
+                var localScores = Nullscent.Core.LocalScoreManager.GetScores(selectedDiff.FilePath, selectedDiff.Hash);
                 if (localScores.Count == 0)
                 {
-                    _fontRenderer.DrawText("No scores set yet", x + 10, y, _dimTextColor * 0.6f);
+                    _fontRenderer.SetFontSize(12);
+                    _fontRenderer.DrawText("No scores set yet (play this map to set a record!)", x, y, _dimTextColor * 0.5f);
                 }
                 else
                 {
-                    int displayCount = Math.Min(5, localScores.Count);
+                    int displayCount = Math.Min(3, localScores.Count);
                     for (int i = 0; i < displayCount; i++)
                     {
                         var score = localScores[i];
@@ -921,37 +1140,38 @@ namespace Nullscent.UI
                         Color gradeColor = score.Grade.Contains("SS") || score.Grade.Contains("S") ? Color.Gold : _dimTextColor;
                         if (score.Grade.Contains("XH") || score.Grade.Contains("SH")) gradeColor = Color.LightPink;
 
-                        _fontRenderer.DrawText($"[{score.Grade}]", x + 10, y, gradeColor);
-                        _fontRenderer.DrawText(rankingText, x + 55, y, _textColor);
+                        _fontRenderer.SetFontSize(12);
+                        _fontRenderer.DrawText($"[{score.Grade}]", x, y, gradeColor);
+                        _fontRenderer.DrawText(rankingText, x + 40, y, _textColor);
                         y += 18;
                     }
                 }
             }
         }
 
-        private void DrawSearchBar(int screenWidth)
+        private void DrawSearchBar(int screenWidth, int offsetY)
         {
             if (_fontRenderer == null)
                 return;
 
             int barHeight = 60;
-            var barRect = new Rectangle(0, 0, screenWidth, barHeight);
+            var barRect = new Rectangle(0, offsetY, screenWidth, barHeight);
             _fontRenderer.DrawBox(barRect, new Color(15, 15, 20));
 
             // Logo/título
-            _fontRenderer.DrawText("Nullscent", 20, 15, _accentColor);
+            _fontRenderer.DrawText("Nullscent", 20, 15 + offsetY, _accentColor);
 
             var mouseState = Mouse.GetState();
 
             // Botón de Importar (.osz)
-            var importButtonRect = new Rectangle(160, 12, 160, 36);
+            var importButtonRect = new Rectangle(160, 12 + offsetY, 160, 36);
             bool isImportHovered = importButtonRect.Contains(mouseState.X, mouseState.Y);
             Color importBtnColor = isImportHovered ? _accentColor : _accentColor * 0.7f;
             _fontRenderer.DrawBox(importButtonRect, importBtnColor);
             _fontRenderer.DrawTextCentered("Import .osz", importButtonRect.X + importButtonRect.Width / 2, importButtonRect.Y + importButtonRect.Height / 2, Color.White);
 
             // Botón de Mods
-            var modsButtonRect = new Rectangle(330, 12, 120, 36);
+            var modsButtonRect = new Rectangle(330, 12 + offsetY, 120, 36);
             bool isModsHovered = modsButtonRect.Contains(mouseState.X, mouseState.Y);
             string modsText = _activeMods.Count > 0 ? $"Mods ({_activeMods.Count})" : "Mods (F1)";
             Color modsBtnColor = _showModsOverlay ? _accentColor : (isModsHovered ? _accentColor * 0.8f : new Color(40, 40, 50));
@@ -966,18 +1186,18 @@ namespace Nullscent.UI
             int sortX = Math.Max(420, screenWidth - 460);
             int searchX = Math.Max(660, screenWidth - 260);
 
-            _fontRenderer.DrawText($"Sort: [F2] {_currentSortMode}", sortX, 20, _accentColor);
-            _fontRenderer.DrawText("Search: ", searchX, 20, _dimTextColor);
+            _fontRenderer.DrawText($"Sort: [F2] {_currentSortMode}", sortX, 20 + offsetY, _accentColor);
+            _fontRenderer.DrawText("Search: ", searchX, 20 + offsetY, _dimTextColor);
             string truncatedSearch = TruncateString(searchDisplay, 16);
-            _fontRenderer.DrawText(truncatedSearch, searchX + 70, 20, searchColor);
+            _fontRenderer.DrawText(truncatedSearch, searchX + 70, 20 + offsetY, searchColor);
         }
 
-        private void DrawFooter(int screenWidth, int screenHeight)
+        private void DrawFooter(int screenWidth, int screenHeight, int offsetY)
         {
             if (_fontRenderer == null)
                 return;
 
-            int footerY = screenHeight - 40;
+            int footerY = screenHeight - 40 + offsetY;
             var footerRect = new Rectangle(0, footerY, screenWidth, 40);
             _fontRenderer.DrawBox(footerRect, new Color(15, 15, 20));
 
@@ -1059,7 +1279,8 @@ namespace Nullscent.UI
             new ModItem("Hidden", "HD", typeof(ManiaModHidden), "Notes fade out before reaching the judgement line"),
             new ModItem("Flashlight", "FL", typeof(ManiaModFlashlight), "Restricted view area"),
             new ModItem("Random", "RD", typeof(ManiaModRandom), "Shuffle the columns"),
-            new ModItem("Mirror", "MR", typeof(ManiaModMirror), "Flip columns horizontally")
+            new ModItem("Mirror", "MR", typeof(ManiaModMirror), "Flip columns horizontally"),
+            new ModItem("Autoplay", "AT", typeof(ManiaModAutoplay), "Watch the game play itself")
         };
 
         private void DrawModsOverlay(int screenWidth, int screenHeight)
@@ -1129,7 +1350,10 @@ namespace Nullscent.UI
         {
             Console.WriteLine("[SongSelectScreen] Cleanup");
             _isDisposed = true;
-            _game.Window.TextInput -= OnTextInput;
+            if (_game?.Window != null)
+            {
+                _game.Window.TextInput -= OnTextInput;
+            }
             _currentBackgroundTexture?.Dispose();
             _currentBackgroundTexture = null;
             _audioEngine.Stop();

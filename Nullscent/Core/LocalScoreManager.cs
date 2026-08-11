@@ -89,9 +89,12 @@ namespace Nullscent.Core
             }
         }
 
-        public static void AddScore(string beatmapPath, LocalScore score)
+        public static void AddScore(string beatmapPath, LocalScore score, string hash = "")
         {
-            string key = Path.GetFileName(beatmapPath).ToLowerInvariant();
+            string key = !string.IsNullOrEmpty(hash) 
+                ? hash.ToLowerInvariant() 
+                : Path.GetFileName(beatmapPath).ToLowerInvariant();
+
             if (!_scoreDb.ContainsKey(key))
             {
                 _scoreDb[key] = new List<LocalScore>();
@@ -112,14 +115,27 @@ namespace Nullscent.Core
 
         private static readonly List<LocalScore> _emptyList = new();
 
-        public static List<LocalScore> GetScores(string beatmapPath)
+        public static List<LocalScore> GetScores(string beatmapPath, string hash = "")
         {
             if (string.IsNullOrEmpty(beatmapPath)) return _emptyList;
-            string key = Path.GetFileName(beatmapPath).ToLowerInvariant();
-            if (_scoreDb.TryGetValue(key, out var scores))
+
+            // 1. Intentar buscar por Hash MD5
+            if (!string.IsNullOrEmpty(hash))
             {
-                return scores;
+                string hashKey = hash.ToLowerInvariant();
+                if (_scoreDb.TryGetValue(hashKey, out var hashScores))
+                {
+                    return hashScores;
+                }
             }
+
+            // 2. Fallback de lectura legacy por nombre de archivo
+            string legacyKey = Path.GetFileName(beatmapPath).ToLowerInvariant();
+            if (_scoreDb.TryGetValue(legacyKey, out var legacyScores))
+            {
+                return legacyScores;
+            }
+
             return _emptyList;
         }
     }

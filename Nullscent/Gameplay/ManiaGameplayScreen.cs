@@ -61,6 +61,7 @@ namespace Nullscent.Gameplay
         private double? _endDelayTimer;
         private string? _scrollNotificationText;
         private double _scrollNotificationTimer;
+        private bool _isCleanedUp;
 
         // Registro de estado de teclas
         private KeyboardState _previousKeyboardState;
@@ -159,7 +160,8 @@ namespace Nullscent.Gameplay
                 adjustedDifficulty,
                 _hitSoundPlayer,
                 isScoreV2: true,
-                activeMods: _activeMods
+                activeMods: _activeMods,
+                skinManager: _game.SkinManager
             );
             _playfield.Beatmap = _originalBeatmap;
 
@@ -397,7 +399,14 @@ namespace Nullscent.Gameplay
                 return;
             }
 
-            HandleInput(keyboardState);
+            if (_activeMods.Any(m => m is Nullscent.Rulesets.Mania.Mods.ManiaModAutoplay))
+            {
+                UpdateAutoplay();
+            }
+            else
+            {
+                HandleInput(keyboardState);
+            }
 
             _playfield.Update(_currentTime, _scoreProcessor, _maniaConfig.ScrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
@@ -512,7 +521,7 @@ namespace Nullscent.Gameplay
 
             _playfield.Draw(_currentTime, _maniaConfig.ScrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
 
-            _hud.Draw(_scoreProcessor, _originalBeatmap!, _currentTime, _activeMods);
+            _hud.Draw(_scoreProcessor, _originalBeatmap!, _currentTime, _activeMods, _game.SkinManager);
 
             // Draw hit error bar if enabled (only when loading screen is not active)
             if (!(_loadingScreen != null && _loadingScreen.IsActive) && _hitErrorBar != null && Core.SettingsService.Instance.ShowHitErrorBar && _whitePixel != null)
@@ -591,6 +600,51 @@ namespace Nullscent.Gameplay
             _stateManager.ChangeState(GameState.SongSelect, songSelect);
         }
 
+        private void UpdateAutoplay()
+        {
+            if (_playfield == null || _scoreProcessor == null || _maniaBeatmap == null) return;
+            
+            bool[] shouldPressColumn = new bool[_playfield.Columns.Count];
+            
+            foreach (var hitObject in _maniaBeatmap.HitObjects)
+            {
+                int col = hitObject.Column;
+                if (col < 0 || col >= shouldPressColumn.Length) continue;
+                
+                if (hitObject is Nullscent.Rulesets.Mania.Objects.HoldNote ln)
+                {
+                    // Se mantiene presionado durante toda la nota larga
+                    if (_currentTime >= ln.StartTime && _currentTime <= ln.EndTime)
+                    {
+                        shouldPressColumn[col] = true;
+                    }
+                }
+                else
+                {
+                    // Nota normal se presiona por un periodo corto
+                    if (_currentTime >= hitObject.StartTime && _currentTime < hitObject.StartTime + 80.0)
+                    {
+                        shouldPressColumn[col] = true;
+                    }
+                }
+            }
+            
+            for (int col = 0; col < shouldPressColumn.Length; col++)
+            {
+                bool isPressedNow = shouldPressColumn[col];
+                bool wasPressedBefore = _playfield.Columns[col].IsPressed;
+                
+                if (isPressedNow && !wasPressedBefore)
+                {
+                    _playfield.HandleKeyPress(col, _currentTime, _scoreProcessor);
+                }
+                else if (!isPressedNow && wasPressedBefore)
+                {
+                    _playfield.HandleKeyRelease(col, _currentTime, _scoreProcessor);
+                }
+            }
+        }
+
         private void HandleFail()
         {
             if (_isFailed) return;
@@ -629,31 +683,104 @@ namespace Nullscent.Gameplay
             };
         }
 
+        private static void SafeDispose<T>(ref T? resource, string resourceName) where T : class, IDisposable
+        {
+            if (resource == null) return;
+            try
+            {
+                resource.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ManiaGameplayScreen] Error liberando {resourceName}: {ex.Message}");
+            }
+            finally
+            {
+                resource = null;
+            }
+        }
+
         public void Cleanup()
         {
-            _game.IsMouseVisible = true;
-            _audioEngine.RateMultiplier = 1.0;
-            _audioEngine.Stop();
-            _inputManager.ClearEventListeners();
+            if (_isCleanedUp) return;
+            _isCleanedUp = true;
 
-            // Desvincular eventos para evitar fugas de memoria
-            Core.SettingsService.Instance.SettingChanged -= OnSettingChanged;
+            Console.WriteLine("[ManiaGameplayScreen] Limpieza de recursos iniciada...");
 
-            if (_playfield?.JudgementDisplayManager != null)
+            // 1. Restaurar propiedades de mouse de forma segura
+            if (_game != null)
             {
-                _playfield.JudgementDisplayManager.JudgementOccurred -= OnJudgementOccurred;
+                try
+                {
+                    _game.IsMouseVisible = true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ManiaGameplayScreen] Error al restaurar cursor del mouse: {ex.Message}");
+                }
             }
 
-            _hitSoundPlayer.BaseDirectory = string.Empty;
+            // 2. Detener audio engine de forma segura
+            try
+            {
+                if (_audioEngine != null)
+                {
+                    _audioEngine.RateMultiplier = 1.0;
+                    _audioEngine.Stop();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ManiaGameplayScreen] Error al detener audio engine: {ex.Message}");
+            }
 
-            // Liberación de recursos no administrados (Textura cacheada)
-            _whitePixel?.Dispose();
-            _bgTexture?.Dispose();
-            _bgTexture = null;
-            _pauseOverlay?.Dispose();
-            _playfield?.Dispose();
-            _hud?.Dispose();
-            _loadingScreen?.Dispose();
+            // 3. Limpiar listeners
+            if (_inputManager != null)
+            {
+                try
+                {
+                    _inputManager.ClearEventListeners();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ManiaGameplayScreen] Error al limpiar listeners de entrada: {ex.Message}");
+                }
+            }
+
+            // 4. Desvincular eventos
+            try
+            {
+                Core.SettingsService.Instance.SettingChanged -= OnSettingChanged;
+            }
+            catch { }
+
+            try
+            {
+                if (_playfield?.JudgementDisplayManager != null)
+                {
+                    _playfield.JudgementDisplayManager.JudgementOccurred -= OnJudgementOccurred;
+                }
+            }
+            catch { }
+
+            if (_hitSoundPlayer != null)
+            {
+                try
+                {
+                    _hitSoundPlayer.BaseDirectory = string.Empty;
+                }
+                catch { }
+            }
+
+            // 5. Liberar recursos secuencialmente aislados de forma segura
+            SafeDispose(ref _whitePixel, nameof(_whitePixel));
+            SafeDispose(ref _bgTexture, nameof(_bgTexture));
+            SafeDispose(ref _pauseOverlay, nameof(_pauseOverlay));
+            SafeDispose(ref _failOverlay, nameof(_failOverlay));
+            SafeDispose(ref _playfield, nameof(_playfield));
+            SafeDispose(ref _hud, nameof(_hud));
+            SafeDispose(ref _loadingScreen, nameof(_loadingScreen));
+
             _isInitialized = false;
         }
 

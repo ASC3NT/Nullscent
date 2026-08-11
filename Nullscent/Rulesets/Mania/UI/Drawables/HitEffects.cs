@@ -14,8 +14,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     /// </summary>
     public class HitExplosion
     {
-        private readonly HitResult _result;
-        private readonly double _startTime;
+        private HitResult _result;
+        private double _startTime;
         private readonly double _duration;
         private bool _isActive;
 
@@ -32,6 +32,13 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             _isActive = true;
         }
 
+        public void Reset(HitResult result, double currentTime)
+        {
+            _result = result;
+            _startTime = currentTime;
+            _isActive = true;
+        }
+
         public void Update(double currentTime)
         {
             double elapsed = currentTime - _startTime;
@@ -41,7 +48,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
         }
 
-        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime)
+        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime, System.Collections.Generic.List<Texture2D>? skinnedExplosionFrames = null)
         {
             if (!_isActive) return;
 
@@ -70,10 +77,21 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             int y = receptorY - height / 2;
 
             var explosionRect = new Rectangle(x, y, width, height);
-            spriteBatch.Draw(glowTexture, explosionRect, explosionColor);
+            
+            Texture2D activeTexture = glowTexture;
+            bool isSkinned = skinnedExplosionFrames != null && skinnedExplosionFrames.Count > 0;
+            if (isSkinned)
+            {
+                int frameIdx = (int)((elapsed / _duration) * skinnedExplosionFrames!.Count);
+                frameIdx = Math.Clamp(frameIdx, 0, skinnedExplosionFrames.Count - 1);
+                activeTexture = skinnedExplosionFrames[frameIdx];
+            }
+            
+            // Draw texture
+            spriteBatch.Draw(activeTexture, explosionRect, isSkinned ? Color.White * alpha : explosionColor);
 
-            // Draw bright core (using soft radial core instead of square)
-            if (elapsed < SCALE_UP_DURATION * 2)
+            // Draw bright core only if not using skinned texture
+            if (!isSkinned && elapsed < SCALE_UP_DURATION * 2)
             {
                 int coreSize = (int)((columnWidth * 0.6f) * scale);
                 var coreRect = new Rectangle(

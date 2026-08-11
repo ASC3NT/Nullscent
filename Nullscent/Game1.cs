@@ -11,6 +11,7 @@ using Nullscent.Gameplay;
 using Nullscent.IO;
 using Nullscent.Skin;
 using Nullscent.UI;
+using Nullscent.Screens;
 using System;
 using System.IO;
 
@@ -36,11 +37,17 @@ namespace Nullscent
         private GameSettings? _settings;
         private FileDropManager? _fileDropManager;
         private TrueTypeFontRenderer? _fontRenderer;
+        private SettingsOverlay? _settingsOverlay;
 
         // Control de volumen con scroll
         private int _previousMouseScrollValue = 0;
         private KeyboardState _previousKeyboardState;
         private double _volumeOverlayTimer = 0.0;
+
+        // Último estado de pantalla válido aplicado con éxito
+        private int _lastValidWidth;
+        private int _lastValidHeight;
+        private bool _lastValidFullscreen;
 
         // Transición de fundido de pantalla suave
         private double _transitionAlpha = 1.0;
@@ -50,6 +57,7 @@ namespace Nullscent
         private double _fpsTimer = 0;
         private int _fpsCounter = 0;
         private int _currentFps = 0;
+        private bool _takeScreenshotRequested = false;
 
         // Propiedades públicas para acceso desde screens
         public SpriteBatch SpriteBatch => _spriteBatch!;
@@ -59,9 +67,12 @@ namespace Nullscent
         public HitSoundPlayer HitSoundPlayer => _hitSoundPlayer!;
         public GameSettings Settings => _settings!;
         public FileDropManager FileDropManager => _fileDropManager!;
+        public SkinManager SkinManager => _skinManager!;
         public GraphicsDeviceManager Graphics => _graphics;
         public int WindowWidth => _graphics.PreferredBackBufferWidth;
         public int WindowHeight => _graphics.PreferredBackBufferHeight;
+        public SettingsOverlay SettingsOverlay => _settingsOverlay!;
+        public void ToggleSettingsOverlay() => _settingsOverlay?.Toggle();
 
         public Game1()
         {
@@ -97,9 +108,39 @@ namespace Nullscent
             _graphics.PreferredBackBufferHeight = _settings.WindowHeight;
             _graphics.IsFullScreen = _settings.Fullscreen;
             _graphics.SynchronizeWithVerticalRetrace = _settings.VSync;
-            _graphics.ApplyChanges();
+            _graphics.HardwareModeSwitch = true; // Activar hardware mode switch para cambio de resolución físico y máximo rendimiento
 
-            Console.WriteLine($"[Game1] Window: {_settings.WindowWidth}x{_settings.WindowHeight} (Fullscreen: {_settings.Fullscreen})");
+            try
+            {
+                _graphics.ApplyChanges();
+                _lastValidWidth = _graphics.PreferredBackBufferWidth;
+                _lastValidHeight = _graphics.PreferredBackBufferHeight;
+                _lastValidFullscreen = _graphics.IsFullScreen;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] Failed to apply initial graphic settings: {ex.Message}. Resetting to default 1280x720 windowed.");
+                _graphics.PreferredBackBufferWidth = 1280;
+                _graphics.PreferredBackBufferHeight = 720;
+                _graphics.IsFullScreen = false;
+                try
+                {
+                    _graphics.ApplyChanges();
+                }
+                catch { }
+
+                _lastValidWidth = 1280;
+                _lastValidHeight = 720;
+                _lastValidFullscreen = false;
+
+                // Guardar fallback
+                _settings.WindowWidth = 1280;
+                _settings.WindowHeight = 720;
+                _settings.Fullscreen = false;
+                _settings.Save();
+            }
+
+            Console.WriteLine($"[Game1] Window: {_lastValidWidth}x{_lastValidHeight} (Fullscreen: {_lastValidFullscreen})");
 
             // Crear directorios necesarios con salvaguardas para permisos de escritura
             try
@@ -198,20 +239,46 @@ namespace Nullscent
             // Cargar skin por defecto
             if (Directory.Exists(_settings!.SkinDirectory))
             {
-                var skinIniPath = Path.Combine(_settings.SkinDirectory, "skin.ini");
-                if (File.Exists(skinIniPath))
+                bool success = _skinManager.LoadSkin(_settings.SkinDirectory);
+                if (success && _skinManager.CurrentSkinConfig != null)
                 {
-                    _skinManager.LoadSkin(_settings.SkinDirectory);
-                    Console.WriteLine($"[Game1] Loaded default skin from {_settings.SkinDirectory}");
+                    Console.WriteLine($"[Game1] Loaded default skin from {_skinManager.CurrentSkinDirectory}");
+                    if (_hitSoundPlayer != null)
+                    {
+                        _hitSoundPlayer.SkinDirectory = _skinManager.CurrentSkinDirectory;
+                    }
                 }
                 else
                 {
-                    Console.WriteLine("[Game1] No skin.ini found in Skin directory, using fallback rendering");
+                    Console.WriteLine("[Game1] No skin.ini found in Skin directory or subdirectories, using fallback rendering");
+                    if (_hitSoundPlayer != null)
+                    {
+                        _hitSoundPlayer.SkinDirectory = _settings.SkinDirectory;
+                    }
                 }
             }
 
+            // Resolver la carpeta raíz de skins (padre de la skin activa si no es el directorio raíz "Skin")
+            string skinsRoot = _settings.SkinDirectory;
+            try
+            {
+                string normalizedSkins = skinsRoot.Replace('\\', '/').TrimEnd('/');
+                if (!normalizedSkins.EndsWith("/Skin", StringComparison.OrdinalIgnoreCase) && !normalizedSkins.EndsWith("/Skins", StringComparison.OrdinalIgnoreCase))
+                {
+                    string? parent = Path.GetDirectoryName(skinsRoot);
+                    if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+                    {
+                        skinsRoot = parent;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] Error resolving skins root directory: {ex.Message}");
+            }
+
             // Inicializar FileDropManager para drag-and-drop de .osz y .osk
-            _fileDropManager = new FileDropManager(Window, _settings.SongsDirectory, _settings.SkinDirectory);
+            _fileDropManager = new FileDropManager(Window, _settings.SongsDirectory, skinsRoot);
             _fileDropManager.OnBeatmapImported += path =>
             {
                 Console.WriteLine($"[FileDropManager] Beatmap imported: {path}");
@@ -228,6 +295,11 @@ namespace Nullscent
                 _skinManager.LoadSkin(path);
                 _settings.SkinDirectory = path;
                 _settings.Save();
+                if (_hitSoundPlayer != null)
+                {
+                    _hitSoundPlayer.SkinDirectory = path;
+                    _hitSoundPlayer.ClearCache();
+                }
             };
             _fileDropManager.OnImportError += error =>
             {
@@ -238,6 +310,10 @@ namespace Nullscent
 
             // Iniciar en el Menú Principal
             StartMainMenu();
+
+            // Inicializar SettingsOverlay deslizable global
+            _settingsOverlay = new SettingsOverlay(this, _inputManager!, _fontRenderer!);
+            _settingsOverlay.Initialize();
 
             Console.WriteLine("[Game1] Content loaded");
         }
@@ -318,6 +394,21 @@ namespace Nullscent
                 {
                     ToggleFullscreen();
                 }
+
+                // Toggle Settings Panel con Ctrl+O
+                if (IsActive && (keyboardState.IsKeyDown(Keys.LeftControl) || keyboardState.IsKeyDown(Keys.RightControl)) &&
+                    keyboardState.IsKeyDown(Keys.O) && _previousKeyboardState.IsKeyUp(Keys.O))
+                {
+                    _settingsOverlay?.Toggle();
+                }
+
+                // Captura de pantalla con F12
+                if (IsActive && keyboardState.IsKeyDown(Keys.F12) && _previousKeyboardState.IsKeyUp(Keys.F12))
+                {
+                    _takeScreenshotRequested = true;
+                    Console.WriteLine("[Game1] Screenshot requested (F12)");
+                }
+
                 _previousKeyboardState = keyboardState;
                 
                 // Actualizar temporizador de overlay de volumen
@@ -332,7 +423,17 @@ namespace Nullscent
                     _transitionAlpha = Math.Max(0.0, _transitionAlpha - gameTime.ElapsedGameTime.TotalSeconds * 4.0); // 250ms de fundido
                 }
 
-                // Actualizar estado actual del juego
+                // Si el panel de ajustes está completamente abierto, bloquea el input y actualiza el overlay
+                if (_settingsOverlay != null && _settingsOverlay.IsFullyOpen)
+                {
+                    _settingsOverlay.Update(gameTime);
+                    _audioEngine?.Update();
+                    base.Update(gameTime);
+                    return;
+                }
+
+                // Actualizar overlay (para animar deslizamientos) y juego normal
+                _settingsOverlay?.Update(gameTime);
                 _stateManager?.Update(gameTime);
             }
             catch (Exception ex)
@@ -364,6 +465,9 @@ namespace Nullscent
 
                 // Dibujar pantalla actual
                 _stateManager?.Draw(gameTime);
+
+                // Dibujar settings overlay deslizable por encima
+                _settingsOverlay?.Draw(gameTime);
 
                 // Dibujar transición de fundido
                 if (_transitionAlpha > 0 && _fadeTexture != null && _spriteBatch != null)
@@ -421,6 +525,32 @@ namespace Nullscent
                     
                     _spriteBatch.End();
                 }
+
+                // Dibujar cursor personalizado de osu! si está disponible en la skin
+                var cursorTex = _skinManager?.GetCursorTexture();
+                if (cursorTex != null && _spriteBatch != null)
+                {
+                    IsMouseVisible = false;
+                    var mouseState = Mouse.GetState();
+                    _spriteBatch.Begin();
+                    float cursorScale = _skinManager != null ? _skinManager.GetTextureScale(cursorTex) : 1.0f;
+                    _spriteBatch.Draw(
+                        cursorTex, 
+                        new Vector2(mouseState.X, mouseState.Y), 
+                        null, 
+                        Color.White, 
+                        0f, 
+                        new Vector2(cursorTex.Width / 2f, cursorTex.Height / 2f), 
+                        cursorScale, 
+                        SpriteEffects.None, 
+                        0f
+                    );
+                    _spriteBatch.End();
+                }
+                else
+                {
+                    IsMouseVisible = true;
+                }
             }
             catch (Exception ex)
             {
@@ -430,31 +560,70 @@ namespace Nullscent
                 return;
             }
 
+            if (_takeScreenshotRequested)
+            {
+                ScreenshotHelper.TakeScreenshot(GraphicsDevice, _settings!.CompressScreenshots);
+                _takeScreenshotRequested = false;
+            }
+
             base.Draw(gameTime);
+        }
+
+        public void ApplyResolution(int width, int height, bool fullscreen)
+        {
+            try
+            {
+                // 1. Intentar aplicar el cambio a nivel de hardware gráfico
+                _graphics.PreferredBackBufferWidth = width;
+                _graphics.PreferredBackBufferHeight = height;
+                _graphics.IsFullScreen = fullscreen;
+                _graphics.HardwareModeSwitch = true;
+                _graphics.ApplyChanges();
+
+                // 2. Si tiene éxito, registrar nuevo estado de rollback y guardar de forma persistente
+                _lastValidWidth = width;
+                _lastValidHeight = height;
+                _lastValidFullscreen = fullscreen;
+
+                _settings!.WindowWidth = width;
+                _settings.WindowHeight = height;
+                _settings.Fullscreen = fullscreen;
+                _settings.Save();
+
+                Console.WriteLine($"[Game1] Resolution applied successfully: {width}x{height} (Fullscreen: {fullscreen})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] ERROR Gráfico al aplicar resolución ({width}x{height} Fullscreen={fullscreen}): {ex.Message}. Aplicando rollback...");
+
+                // 3. Rollback de hardware al último modo seguro (No sobrescribe settings.json en disco para preservar el deseo del usuario)
+                try
+                {
+                    _graphics.PreferredBackBufferWidth = _lastValidWidth;
+                    _graphics.PreferredBackBufferHeight = _lastValidHeight;
+                    _graphics.IsFullScreen = _lastValidFullscreen;
+                    _graphics.ApplyChanges();
+                }
+                catch (Exception rollbackEx)
+                {
+                    Console.WriteLine($"[Game1] Fallback crítico de hardware fallido: {rollbackEx.Message}. Forzando modo ventana.");
+                    
+                    // Fallback final a ventana segura de emergencia
+                    try
+                    {
+                        _graphics.IsFullScreen = false;
+                        _graphics.PreferredBackBufferWidth = 1280;
+                        _graphics.PreferredBackBufferHeight = 720;
+                        _graphics.ApplyChanges();
+                    }
+                    catch { }
+                }
+            }
         }
 
         public void ToggleFullscreen()
         {
-            _settings!.Fullscreen = !_settings.Fullscreen;
-            _graphics.IsFullScreen = _settings.Fullscreen;
-            
-            if (_settings.Fullscreen)
-            {
-                _graphics.PreferredBackBufferWidth = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width;
-                _graphics.PreferredBackBufferHeight = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Height;
-            }
-            else
-            {
-                _graphics.PreferredBackBufferWidth = 1280;
-                _graphics.PreferredBackBufferHeight = 720;
-            }
-            
-            _graphics.ApplyChanges();
-            _settings.WindowWidth = _graphics.PreferredBackBufferWidth;
-            _settings.WindowHeight = _graphics.PreferredBackBufferHeight;
-            _settings.Save();
-            
-            Console.WriteLine($"[Game1] Fullscreen toggled to {_settings.Fullscreen} ({_graphics.PreferredBackBufferWidth}x{_graphics.PreferredBackBufferHeight})");
+            ApplyResolution(_settings!.WindowWidth, _settings.WindowHeight, !_settings.Fullscreen);
         }
 
         private void OnWindowSizeChanged(object? sender, EventArgs e)
@@ -464,15 +633,25 @@ namespace Nullscent
                 _graphics.PreferredBackBufferHeight == Window.ClientBounds.Height)
                 return;
 
-            _graphics.PreferredBackBufferWidth = Window.ClientBounds.Width;
-            _graphics.PreferredBackBufferHeight = Window.ClientBounds.Height;
-            _graphics.ApplyChanges();
+            try
+            {
+                _graphics.PreferredBackBufferWidth = Window.ClientBounds.Width;
+                _graphics.PreferredBackBufferHeight = Window.ClientBounds.Height;
+                _graphics.ApplyChanges();
 
-            _settings!.WindowWidth = _graphics.PreferredBackBufferWidth;
-            _settings.WindowHeight = _graphics.PreferredBackBufferHeight;
-            _settings.Save();
+                _lastValidWidth = _graphics.PreferredBackBufferWidth;
+                _lastValidHeight = _graphics.PreferredBackBufferHeight;
 
-            Console.WriteLine($"[Game1] Window size changed to {_graphics.PreferredBackBufferWidth}x{_graphics.PreferredBackBufferHeight}");
+                _settings!.WindowWidth = _graphics.PreferredBackBufferWidth;
+                _settings.WindowHeight = _graphics.PreferredBackBufferHeight;
+                _settings.Save();
+
+                Console.WriteLine($"[Game1] Window size changed to {_graphics.PreferredBackBufferWidth}x{_graphics.PreferredBackBufferHeight}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Game1] Warning: Failed to apply window size change during resize event: {ex.Message}");
+            }
         }
 
         protected override void Dispose(bool disposing)

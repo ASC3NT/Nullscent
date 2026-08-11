@@ -3,11 +3,12 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using System;
 using Nullscent.UI;
 
 namespace Nullscent.Rulesets.Mania.UI
 {
-    public class ManiaFailOverlay
+    public class ManiaFailOverlay : IDisposable
     {
         private readonly GraphicsDevice _graphicsDevice;
         private readonly SpriteBatch _spriteBatch;
@@ -105,6 +106,11 @@ namespace Nullscent.Rulesets.Mania.UI
         private bool IsKeyPressed(KeyboardState currentState, Keys key)
         {
             return currentState.IsKeyDown(key) && _previousKeyboardState.IsKeyUp(key);
+        }
+
+        public void Dispose()
+        {
+            // No resources to dispose currently
         }
     }
 }

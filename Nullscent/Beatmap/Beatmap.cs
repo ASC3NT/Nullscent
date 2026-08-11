@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Nullscent.Beatmap
 {
@@ -11,6 +12,11 @@ namespace Nullscent.Beatmap
     /// </summary>
     public class Beatmap
     {
+        /// <summary>
+        /// Hash MD5 único del contenido del archivo .osu
+        /// </summary>
+        public string Hash { get; set; } = string.Empty;
+
         /// <summary>
         /// Metadatos del beatmap (título, artista, creator, audio, etc.).
         /// </summary>
@@ -172,15 +178,24 @@ namespace Nullscent.Beatmap
         }
 
         private bool _isScrollPrecalculated = false;
+        private ScrollCacheKey? _cachedScrollKey;
         private readonly List<double> _accumulatedScrolls = new();
+        private readonly List<double> _effectiveMultipliers = new();
 
         private void PrecalculateScrolls()
         {
-            if (_isScrollPrecalculated) return;
+            bool scaleWithBpm = Core.SettingsService.Instance.ScaleScrollSpeedWithBPM;
+            var currentKey = new ScrollCacheKey(scaleWithBpm, MostCommonBPM, TimingPoints.Count);
+
+            if (_isScrollPrecalculated && _cachedScrollKey.HasValue && _cachedScrollKey.Value.Equals(currentKey))
+                return;
 
             _accumulatedScrolls.Clear();
+            _effectiveMultipliers.Clear();
+
             if (TimingPoints.Count == 0)
             {
+                _cachedScrollKey = currentKey;
                 _isScrollPrecalculated = true;
                 return;
             }
@@ -193,17 +208,53 @@ namespace Nullscent.Beatmap
                 return b.Uninherited.CompareTo(a.Uninherited);
             });
 
+            double standardBPM = MostCommonBPM;
+            if (standardBPM <= 0) standardBPM = 120.0;
+
+            double activeBPM = 120.0;
+            // Buscar el primer BPM disponible
+            var firstBpmPoint = TimingPoints.FindAll(tp => tp.Uninherited).FirstOrDefault();
+            if (firstBpmPoint != null) activeBPM = firstBpmPoint.BPM;
+
+            double activeSV = 1.0;
+
             double currentAccumulated = 0.0;
             _accumulatedScrolls.Add(0.0);
 
+            if (TimingPoints[0].Uninherited)
+            {
+                activeBPM = TimingPoints[0].BPM;
+            }
+            else
+            {
+                activeSV = TimingPoints[0].ScrollVelocityMultiplier;
+            }
+
+            double initialMult = scaleWithBpm ? activeSV * (activeBPM / standardBPM) : activeSV;
+            _effectiveMultipliers.Add(initialMult);
+
             for (int i = 1; i < TimingPoints.Count; i++)
             {
+                var tp = TimingPoints[i];
+                if (tp.Uninherited)
+                {
+                    activeBPM = tp.BPM;
+                }
+                else
+                {
+                    activeSV = tp.ScrollVelocityMultiplier;
+                }
+
+                double mult = scaleWithBpm ? activeSV * (activeBPM / standardBPM) : activeSV;
+                _effectiveMultipliers.Add(mult);
+
                 double duration = TimingPoints[i].Offset - TimingPoints[i - 1].Offset;
-                double multiplier = TimingPoints[i - 1].ScrollVelocityMultiplier;
+                double multiplier = _effectiveMultipliers[i - 1];
                 currentAccumulated += duration * multiplier;
                 _accumulatedScrolls.Add(currentAccumulated);
             }
 
+            _cachedScrollKey = currentKey;
             _isScrollPrecalculated = true;
         }
 
@@ -246,19 +297,19 @@ namespace Nullscent.Beatmap
 
             if (index < 0)
             {
-                double multiplier = TimingPoints[0].ScrollVelocityMultiplier;
+                double multiplier = _effectiveMultipliers[0];
                 double offsetDiff = time - TimingPoints[0].Offset;
                 return _accumulatedScrolls[0] + offsetDiff * multiplier;
             }
 
             if (index >= TimingPoints.Count - 1)
             {
-                double multiplier = TimingPoints[index].ScrollVelocityMultiplier;
+                double multiplier = _effectiveMultipliers[index];
                 double offsetDiff = time - TimingPoints[index].Offset;
                 return _accumulatedScrolls[index] + offsetDiff * multiplier;
             }
 
-            double segmentMultiplier = TimingPoints[index].ScrollVelocityMultiplier;
+            double segmentMultiplier = _effectiveMultipliers[index];
             double segmentDiff = time - TimingPoints[index].Offset;
             return _accumulatedScrolls[index] + segmentDiff * segmentMultiplier;
         }
@@ -269,6 +320,34 @@ namespace Nullscent.Beatmap
             {
                 if (x == null || y == null) return 0;
                 return x.Offset.CompareTo(y.Offset);
+            }
+        }
+
+        private readonly struct ScrollCacheKey : IEquatable<ScrollCacheKey>
+        {
+            public readonly bool ScaleScrollSpeedWithBPM;
+            public readonly double MostCommonBPM;
+            public readonly int TimingPointsCount;
+
+            public ScrollCacheKey(bool scaleScrollSpeedWithBPM, double mostCommonBPM, int timingPointsCount)
+            {
+                ScaleScrollSpeedWithBPM = scaleScrollSpeedWithBPM;
+                MostCommonBPM = mostCommonBPM;
+                TimingPointsCount = timingPointsCount;
+            }
+
+            public bool Equals(ScrollCacheKey other)
+            {
+                return ScaleScrollSpeedWithBPM == other.ScaleScrollSpeedWithBPM &&
+                       MostCommonBPM == other.MostCommonBPM &&
+                       TimingPointsCount == other.TimingPointsCount;
+            }
+
+            public override bool Equals(object? obj) => obj is ScrollCacheKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                return HashCode.Combine(ScaleScrollSpeedWithBPM, MostCommonBPM, TimingPointsCount);
             }
         }
     }

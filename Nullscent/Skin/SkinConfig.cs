@@ -14,29 +14,15 @@ namespace Nullscent.Skin
     /// </summary>
     public class SkinConfig
     {
-        /// <summary>
-        /// Ruta al directorio de la skin.
-        /// </summary>
         public string SkinDirectory { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Nombre de la skin.
-        /// </summary>
         public string Name { get; set; } = "Default";
-
-        /// <summary>
-        /// Autor de la skin.
-        /// </summary>
         public string Author { get; set; } = "Unknown";
-
-        /// <summary>
-        /// Versión de la skin.
-        /// </summary>
         public string Version { get; set; } = "1.0";
+        public int AnimationFramerate { get; set; } = -1; // -1 significa auto-calcular o fallback
 
         /// <summary>
         /// Configuraciones específicas de mania por key count.
-        /// Dictionary: KeyCount → ManiaConfig
+        /// Dictionary: KeyCount → ManiaKeyConfig
         /// </summary>
         public Dictionary<int, ManiaKeyConfig> ManiaConfigs { get; set; } = new();
 
@@ -57,79 +43,100 @@ namespace Nullscent.Skin
 
     /// <summary>
     /// Configuración específica de mania para un key count.
+    /// Basado directamente en la especificación de osu!mania skinning.
     /// </summary>
     public class ManiaKeyConfig
     {
-        /// <summary>
-        /// Anchos de columna personalizados (en píxeles). Array de longitud = key count.
-        /// Si es null o vacío, se usa ancho automático.
-        /// </summary>
         public float[]? ColumnWidths { get; set; }
-
-        /// <summary>
-        /// Colores personalizados por columna. Array de (R, G, B, A).
-        /// </summary>
-        public (byte R, byte G, byte B, byte A)[]? ColumnColors { get; set; }
-
-        /// <summary>
-        /// Posición del hit position (receptor) en píxeles desde la parte inferior.
-        /// Si es null, usa el valor por defecto de GameSettings.
-        /// </summary>
+        public float[]? ColumnSpacing { get; set; }
+        public bool[]? ColumnLines { get; set; }
+        public float[]? LightingNWidths { get; set; }
+        public float[]? LightingLWidths { get; set; }
+        public float? ColumnStart { get; set; }
+        public float? WidthForNoteHeightScale { get; set; }
+        public (byte R, byte G, byte B, byte A)[]? ColumnColors { get; set; } // Obsoleto, usar ColumnColorsMap
         public int? HitPosition { get; set; }
-
-        /// <summary>
-        /// Habilitar iluminación de columnas al presionar (glow effect).
-        /// </summary>
+        public int? LightPosition { get; set; }
         public bool ColumnLighting { get; set; } = true;
+        public bool JudgementLine { get; set; } = true;
+        public int SpecialStyle { get; set; } = 0;
+        public bool UpsideDown { get; set; } = false;
+        public bool KeysUnderNotes { get; set; } = false;
+        public int? ScorePosition { get; set; }
+        public int? ComboPosition { get; set; }
+        public int NoteBodyStyle { get; set; } = 1;
+        public Dictionary<int, int> NoteBodyStyles { get; set; } = new();
 
-        /// <summary>
-        /// Rutas personalizadas a archivos de note images por columna.
-        /// Dictionary: columnIndex → filePath
-        /// </summary>
+        // Colores ColourX, ColourLightX, ColourHoldX (0-indexed para ColumnIndex)
+        public Dictionary<int, (byte R, byte G, byte B, byte A)> ColumnColorsMap { get; set; } = new();
+        public Dictionary<int, (byte R, byte G, byte B, byte A)> ColourLights { get; set; } = new();
+        public Dictionary<int, (byte R, byte G, byte B, byte A)> ColourHolds { get; set; } = new();
+
+        public (byte R, byte G, byte B, byte A)? ColourBarline { get; set; }
+        public (byte R, byte G, byte B, byte A)? ColourJudgementLine { get; set; }
+        public (byte R, byte G, byte B, byte A)? ColourColumnLine { get; set; }
+        public (byte R, byte G, byte B, byte A)? ColourBreak { get; set; }
+        public (byte R, byte G, byte B, byte A)? ColourHold { get; set; }
+
+        // Recursos gráficos específicos para el stage
+        public string? StageLeft { get; set; }
+        public string? StageRight { get; set; }
+        public string? StageBottom { get; set; }
+        public string? StageHint { get; set; }
+        public string? StageLight { get; set; }
+        public string? LightingN { get; set; }
+        public string? LightingL { get; set; }
+
         public Dictionary<int, string> NoteImages { get; set; } = new();
-
-        /// <summary>
-        /// Rutas personalizadas a archivos de note head images (para LN).
-        /// </summary>
         public Dictionary<int, string> NoteHeadImages { get; set; } = new();
-
-        /// <summary>
-        /// Rutas personalizadas a archivos de note body images (para LN).
-        /// </summary>
         public Dictionary<int, string> NoteBodyImages { get; set; } = new();
-
-        /// <summary>
-        /// Rutas personalizadas a archivos de note tail images (para LN).
-        /// </summary>
         public Dictionary<int, string> NoteTailImages { get; set; } = new();
-
-        /// <summary>
-        /// Rutas personalizadas a archivos de key/receptor images.
-        /// </summary>
         public Dictionary<int, string> KeyImages { get; set; } = new();
-
-        /// <summary>
-        /// Rutas personalizadas a archivos de key pressed images.
-        /// </summary>
         public Dictionary<int, string> KeyPressedImages { get; set; } = new();
     }
 
     /// <summary>
-    /// Parser de skin.ini (formato osu!stable).
+    /// Parser robusto de skin.ini (formato osu!stable).
     /// </summary>
     public static class SkinConfigParser
     {
-        /// <summary>
-        /// Parsea un archivo skin.ini y retorna SkinConfig.
-        /// </summary>
+        private class ParsedSection
+        {
+            public string Name { get; set; } = string.Empty;
+            public List<KeyValuePair<string, string>> KeyValues { get; } = new();
+        }
+
         public static SkinConfig Parse(string skinDirectory)
         {
             string iniPath = Path.Combine(skinDirectory, "skin.ini");
+            string resolvedSkinDir = skinDirectory;
 
-            var config = new SkinConfig
+            if (!File.Exists(iniPath))
             {
-                SkinDirectory = skinDirectory
-            };
+                try
+                {
+                    if (Directory.Exists(skinDirectory))
+                    {
+                        var subDirs = Directory.GetDirectories(skinDirectory);
+                        foreach (var subDir in subDirs)
+                        {
+                            if (File.Exists(Path.Combine(subDir, "skin.ini")))
+                            {
+                                resolvedSkinDir = subDir;
+                                iniPath = Path.Combine(resolvedSkinDir, "skin.ini");
+                                Console.WriteLine($"[SkinConfigParser] Found skin.ini in subdirectory: {resolvedSkinDir}");
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SkinConfigParser] Error searching subdirectories: {ex.Message}");
+                }
+            }
+
+            var config = new SkinConfig { SkinDirectory = resolvedSkinDir };
 
             if (!File.Exists(iniPath))
             {
@@ -140,65 +147,99 @@ namespace Nullscent.Skin
             try
             {
                 var lines = File.ReadAllLines(iniPath);
-                string currentSection = string.Empty;
-                int? currentKeyCount = null;
+                var sections = new List<ParsedSection>();
+                ParsedSection? currentSection = null;
 
                 foreach (var rawLine in lines)
                 {
                     var line = rawLine.Trim();
 
-                    // Ignorar comentarios y líneas vacías
-                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("//") || line.StartsWith("#"))
+                    // Ignorar líneas vacías y comentarios que ocupan toda la línea (empezando con //, # o ;)
+                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("//") || line.StartsWith("#") || line.StartsWith(";"))
                         continue;
 
-                    // Detectar sección
+                    // Eliminar comentarios en línea
+                    int commentIdx = line.IndexOf("//");
+                    if (commentIdx >= 0)
+                        line = line[..commentIdx].Trim();
+
+                    commentIdx = line.IndexOf(";");
+                    if (commentIdx >= 0)
+                        line = line[..commentIdx].Trim();
+
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    // Detectar cabecera de sección
                     if (line.StartsWith("[") && line.EndsWith("]"))
                     {
-                        currentSection = line[1..^1];
-
-                        // Parsear key count si la sección es [ManiaXK] (ej: [Mania4K])
-                        if (currentSection.StartsWith("Mania") && currentSection.EndsWith("K"))
-                        {
-                            string keyStr = currentSection[5..^1];
-                            if (int.TryParse(keyStr, out int keyCount))
-                            {
-                                currentKeyCount = keyCount;
-                                if (!config.ManiaConfigs.ContainsKey(keyCount))
-                                    config.ManiaConfigs[keyCount] = new ManiaKeyConfig();
-                            }
-                        }
-                        else if (currentSection == "Mania")
-                        {
-                            currentKeyCount = null; // Configuración general de mania
-                        }
-
+                        currentSection = new ParsedSection { Name = line[1..^1].Trim() };
+                        sections.Add(currentSection);
                         continue;
                     }
 
-                    // Parsear key-value
+                    // Parsear par clave-valor
                     var parts = line.Split(':', 2);
-                    if (parts.Length != 2)
-                        continue;
-
-                    string key = parts[0].Trim();
-                    string value = parts[1].Trim();
-
-                    // Parsear según sección
-                    if (currentSection == "General")
+                    if (parts.Length == 2 && currentSection != null)
                     {
-                        ParseGeneralSection(key, value, config);
-                    }
-                    else if (currentSection == "Mania" || currentKeyCount.HasValue)
-                    {
-                        var maniaConfig = currentKeyCount.HasValue
-                            ? config.ManiaConfigs[currentKeyCount.Value]
-                            : config.DefaultConfig;
-
-                        ParseManiaSection(key, value, maniaConfig, currentKeyCount);
+                        currentSection.KeyValues.Add(new KeyValuePair<string, string>(parts[0].Trim(), parts[1].Trim()));
                     }
                 }
 
-                Console.WriteLine($"[SkinConfigParser] Parsed skin.ini: {config.Name} by {config.Author}");
+                // Procesar cada sección recolectada
+                foreach (var section in sections)
+                {
+                    if (section.Name == "General")
+                    {
+                        foreach (var kvp in section.KeyValues)
+                        {
+                            ParseGeneralSection(kvp.Key, kvp.Value, config);
+                        }
+                    }
+                    else if (section.Name == "Mania" || (section.Name.StartsWith("Mania") && section.Name.EndsWith("K")))
+                    {
+                        // 1. Determinar keyCount. Primero ver si está la clave 'Keys' en la sección.
+                        int? keyCount = null;
+                        var keysKvp = section.KeyValues.FirstOrDefault(k => k.Key.Equals("Keys", StringComparison.OrdinalIgnoreCase));
+                        if (!string.IsNullOrEmpty(keysKvp.Key) && int.TryParse(keysKvp.Value, out int parsedKeys))
+                        {
+                            keyCount = parsedKeys;
+                        }
+                        // Si no, intentar obtenerlo del nombre de la sección (ej: [Mania4K] -> 4)
+                        else if (section.Name.StartsWith("Mania") && section.Name.EndsWith("K"))
+                        {
+                            string keyStr = section.Name[5..^1];
+                            if (int.TryParse(keyStr, out int parsedKeysSec))
+                            {
+                                keyCount = parsedKeysSec;
+                            }
+                        }
+
+                        // 2. Obtener o crear configuración correspondiente
+                        ManiaKeyConfig maniaConfig;
+                        if (keyCount.HasValue)
+                        {
+                            if (!config.ManiaConfigs.TryGetValue(keyCount.Value, out var specificConfig))
+                            {
+                                specificConfig = new ManiaKeyConfig();
+                                config.ManiaConfigs[keyCount.Value] = specificConfig;
+                            }
+                            maniaConfig = specificConfig;
+                        }
+                        else
+                        {
+                            maniaConfig = config.DefaultConfig;
+                        }
+
+                        // 3. Parsear todas las claves de esta sección
+                        foreach (var kvp in section.KeyValues)
+                        {
+                            ParseManiaSection(kvp.Key, kvp.Value, maniaConfig);
+                        }
+                    }
+                }
+
+                Console.WriteLine($"[SkinConfigParser] Parsed skin.ini: {config.Name} by {config.Author} (Mania configs: {config.ManiaConfigs.Count})");
                 return config;
             }
             catch (Exception ex)
@@ -215,88 +256,258 @@ namespace Nullscent.Skin
                 case "Name":
                     config.Name = value;
                     break;
-
                 case "Author":
                     config.Author = value;
                     break;
-
                 case "Version":
                     config.Version = value;
+                    break;
+                case "AnimationFramerate":
+                    if (int.TryParse(value, out int fps))
+                        config.AnimationFramerate = fps;
                     break;
             }
         }
 
-        private static void ParseManiaSection(string key, string value, ManiaKeyConfig maniaConfig, int? keyCount)
+        private static void ParseManiaSection(string key, string value, ManiaKeyConfig maniaConfig)
         {
-            // ColumnWidth (comma-separated)
-            if (key == "ColumnWidth")
+            if (key.Equals("ColumnWidth", StringComparison.OrdinalIgnoreCase))
             {
-                var widths = value.Split(',')
-                    .Select(s => float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float w) ? w : 50f)
-                    .ToArray();
-
-                maniaConfig.ColumnWidths = widths;
+                maniaConfig.ColumnWidths = ParseFloatArray(value);
             }
-
-            // HitPosition
-            else if (key == "HitPosition")
+            else if (key.Equals("ColumnSpacing", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.ColumnSpacing = ParseFloatArray(value);
+            }
+            else if (key.Equals("ColumnLine", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.ColumnLines = ParseBoolArray(value);
+            }
+            else if (key.Equals("ColumnStart", StringComparison.OrdinalIgnoreCase))
+            {
+                if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float start))
+                    maniaConfig.ColumnStart = start;
+            }
+            else if (key.Equals("WidthForNoteHeightScale", StringComparison.OrdinalIgnoreCase))
+            {
+                if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float val))
+                    maniaConfig.WidthForNoteHeightScale = val;
+            }
+            else if (key.Equals("HitPosition", StringComparison.OrdinalIgnoreCase))
             {
                 if (int.TryParse(value, out int hitPos))
                     maniaConfig.HitPosition = hitPos;
             }
-
-            // ColumnLighting
-            else if (key == "LightingN" || key == "ColumnLighting")
+            else if (key.Equals("LightPosition", StringComparison.OrdinalIgnoreCase))
             {
-                maniaConfig.ColumnLighting = value == "1" || value.ToLower() == "true";
+                if (int.TryParse(value, out int lightPos))
+                    maniaConfig.LightPosition = lightPos;
             }
-
-            // Note images
-            else if (key.StartsWith("NoteImage"))
+            else if (key.Equals("LightingNWidth", StringComparison.OrdinalIgnoreCase))
             {
-                ParseImageKey(key, value, maniaConfig.NoteImages, "NoteImage");
+                maniaConfig.LightingNWidths = ParseFloatArray(value);
             }
-
-            // Note head images (LN)
-            else if (key.StartsWith("NoteImageH"))
+            else if (key.Equals("LightingLWidth", StringComparison.OrdinalIgnoreCase))
             {
-                ParseImageKey(key, value, maniaConfig.NoteHeadImages, "NoteImageH");
+                maniaConfig.LightingLWidths = ParseFloatArray(value);
             }
-
-            // Note body images (LN)
-            else if (key.StartsWith("NoteImageL"))
+            else if (key.Equals("ScorePosition", StringComparison.OrdinalIgnoreCase))
             {
-                ParseImageKey(key, value, maniaConfig.NoteBodyImages, "NoteImageL");
+                if (int.TryParse(value, out int scorePos))
+                    maniaConfig.ScorePosition = scorePos;
             }
-
-            // Note tail images (LN)
-            else if (key.StartsWith("NoteImageT"))
+            else if (key.Equals("ComboPosition", StringComparison.OrdinalIgnoreCase))
             {
-                ParseImageKey(key, value, maniaConfig.NoteTailImages, "NoteImageT");
+                if (int.TryParse(value, out int comboPos))
+                    maniaConfig.ComboPosition = comboPos;
             }
-
-            // Key images
-            else if (key.StartsWith("KeyImage") && !key.EndsWith("D"))
+            else if (key.Equals("JudgementLine", StringComparison.OrdinalIgnoreCase))
             {
-                ParseImageKey(key, value, maniaConfig.KeyImages, "KeyImage");
+                maniaConfig.JudgementLine = value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase);
             }
-
-            // Key pressed images
-            else if (key.StartsWith("KeyImage") && key.EndsWith("D"))
+            else if (key.Equals("SpecialStyle", StringComparison.OrdinalIgnoreCase))
             {
-                ParseImageKey(key, value, maniaConfig.KeyPressedImages, "KeyImage", stripSuffix: "D");
+                if (int.TryParse(value, out int style))
+                    maniaConfig.SpecialStyle = style;
+            }
+            else if (key.Equals("UpsideDown", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.UpsideDown = value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase);
+            }
+            else if (key.Equals("KeysUnderNotes", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.KeysUnderNotes = value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase);
+            }
+            else if (key.Equals("ColumnLighting", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.ColumnLighting = value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase);
+            }
+            else if (key.Equals("LightingN", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.LightingN = value;
+            }
+            else if (key.Equals("LightingL", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.LightingL = value;
+            }
+            else if (key.Equals("StageLeft", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.StageLeft = value;
+            }
+            else if (key.Equals("StageRight", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.StageRight = value;
+            }
+            else if (key.Equals("StageBottom", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.StageBottom = value;
+            }
+            else if (key.Equals("StageHint", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.StageHint = value;
+            }
+            else if (key.Equals("StageLight", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.StageLight = value;
+            }
+            else if (key.Equals("ColourBarline", StringComparison.OrdinalIgnoreCase))
+            {
+                var col = ParseColor(value);
+                if (col.HasValue) maniaConfig.ColourBarline = col.Value;
+            }
+            else if (key.Equals("ColourJudgementLine", StringComparison.OrdinalIgnoreCase))
+            {
+                var col = ParseColor(value);
+                if (col.HasValue) maniaConfig.ColourJudgementLine = col.Value;
+            }
+            else if (key.Equals("ColourColumnLine", StringComparison.OrdinalIgnoreCase))
+            {
+                var col = ParseColor(value);
+                if (col.HasValue) maniaConfig.ColourColumnLine = col.Value;
+            }
+            else if (key.Equals("ColourBreak", StringComparison.OrdinalIgnoreCase))
+            {
+                var col = ParseColor(value);
+                if (col.HasValue) maniaConfig.ColourBreak = col.Value;
+            }
+            else if (key.StartsWith("NoteBodyStyle", StringComparison.OrdinalIgnoreCase))
+            {
+                string idxStr = key["NoteBodyStyle".Length..];
+                if (int.TryParse(idxStr, out int idx))
+                {
+                    if (idx >= 0 && int.TryParse(value, out int bodyStyle))
+                    {
+                        if (bodyStyle >= 0 && bodyStyle <= 2)
+                            maniaConfig.NoteBodyStyles[idx] = bodyStyle;
+                    }
+                }
+                else if (string.IsNullOrEmpty(idxStr))
+                {
+                    if (int.TryParse(value, out int bodyStyle))
+                    {
+                        if (bodyStyle >= 0 && bodyStyle <= 2)
+                            maniaConfig.NoteBodyStyle = bodyStyle;
+                    }
+                }
+            }
+            else if (key.StartsWith("ColourLight", StringComparison.OrdinalIgnoreCase))
+            {
+                string idxStr = key["ColourLight".Length..];
+                if (int.TryParse(idxStr, out int idx))
+                {
+                    if (idx >= 1)
+                    {
+                        var col = ParseColor(value);
+                        if (col.HasValue)
+                            maniaConfig.ColourLights[idx - 1] = col.Value;
+                    }
+                }
+            }
+            else if (key.StartsWith("ColourHold", StringComparison.OrdinalIgnoreCase))
+            {
+                string idxStr = key["ColourHold".Length..];
+                if (int.TryParse(idxStr, out int idx))
+                {
+                    if (idx >= 1)
+                    {
+                        var col = ParseColor(value);
+                        if (col.HasValue)
+                            maniaConfig.ColourHolds[idx - 1] = col.Value;
+                    }
+                }
+                else if (string.IsNullOrEmpty(idxStr))
+                {
+                    var col = ParseColor(value);
+                    if (col.HasValue)
+                        maniaConfig.ColourHold = col.Value;
+                }
+            }
+            else if (key.StartsWith("Colour", StringComparison.OrdinalIgnoreCase))
+            {
+                string idxStr = key["Colour".Length..];
+                if (int.TryParse(idxStr, out int idx))
+                {
+                    if (idx >= 1)
+                    {
+                        var col = ParseColor(value);
+                        if (col.HasValue)
+                            maniaConfig.ColumnColorsMap[idx - 1] = col.Value;
+                    }
+                }
+            }
+            else if (key.StartsWith("NoteImage", StringComparison.OrdinalIgnoreCase))
+            {
+                string suffix = "";
+                string indexStr = key["NoteImage".Length..];
+                if (indexStr.EndsWith("H", StringComparison.OrdinalIgnoreCase)) { suffix = "H"; indexStr = indexStr[..^1]; }
+                else if (indexStr.EndsWith("L", StringComparison.OrdinalIgnoreCase)) { suffix = "L"; indexStr = indexStr[..^1]; }
+                else if (indexStr.EndsWith("T", StringComparison.OrdinalIgnoreCase)) { suffix = "T"; indexStr = indexStr[..^1]; }
+
+                if (int.TryParse(indexStr, out int idx) && idx >= 0)
+                {
+                    if (suffix == "H") maniaConfig.NoteHeadImages[idx] = value;
+                    else if (suffix == "L") maniaConfig.NoteBodyImages[idx] = value;
+                    else if (suffix == "T") maniaConfig.NoteTailImages[idx] = value;
+                    else maniaConfig.NoteImages[idx] = value;
+                }
+            }
+            else if (key.StartsWith("KeyImage", StringComparison.OrdinalIgnoreCase))
+            {
+                string suffix = "";
+                string indexStr = key["KeyImage".Length..];
+                if (indexStr.EndsWith("D", StringComparison.OrdinalIgnoreCase)) { suffix = "D"; indexStr = indexStr[..^1]; }
+
+                if (int.TryParse(indexStr, out int idx) && idx >= 0)
+                {
+                    if (suffix == "D") maniaConfig.KeyPressedImages[idx] = value;
+                    else maniaConfig.KeyImages[idx] = value;
+                }
             }
         }
 
-        private static void ParseImageKey(string key, string value, Dictionary<int, string> dict, string prefix, string stripSuffix = "")
+        private static float[] ParseFloatArray(string value)
         {
-            string indexStr = key[prefix.Length..];
+            return value.Split(',')
+                .Select(s => float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float w) ? w : 0f)
+                .ToArray();
+        }
 
-            if (!string.IsNullOrEmpty(stripSuffix) && indexStr.EndsWith(stripSuffix))
-                indexStr = indexStr[..^stripSuffix.Length];
+        private static bool[] ParseBoolArray(string value)
+        {
+            return value.Split(',')
+                .Select(s => s.Trim() == "1" || s.Trim().ToLower() == "true")
+                .ToArray();
+        }
 
-            if (int.TryParse(indexStr, out int index))
-                dict[index] = value;
+        private static (byte R, byte G, byte B, byte A)? ParseColor(string value)
+        {
+            var parts = value.Split(',');
+            if (parts.Length < 3) return null;
+            byte r = byte.TryParse(parts[0].Trim(), out byte vr) ? vr : (byte)255;
+            byte g = byte.TryParse(parts[1].Trim(), out byte vg) ? vg : (byte)255;
+            byte b = byte.TryParse(parts[2].Trim(), out byte vb) ? vb : (byte)255;
+            byte a = parts.Length > 3 && byte.TryParse(parts[3].Trim(), out byte va) ? va : (byte)255;
+            return (r, g, b, a);
         }
     }
 }

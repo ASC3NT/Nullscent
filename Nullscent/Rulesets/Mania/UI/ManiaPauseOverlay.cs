@@ -4,11 +4,12 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Nullscent.Audio;
+using System;
 using Nullscent.UI;
 
 namespace Nullscent.Rulesets.Mania.UI
 {
-    public class ManiaPauseOverlay
+    public class ManiaPauseOverlay : IDisposable
     {
         private readonly GraphicsDevice _graphicsDevice;
         private readonly SpriteBatch _spriteBatch;

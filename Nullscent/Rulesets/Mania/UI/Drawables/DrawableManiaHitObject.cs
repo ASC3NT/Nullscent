@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Nullscent.Beatmap;
 using Nullscent.Rulesets.Mania.Judgements;
 using Nullscent.Rulesets.Mania.Objects;
+using Nullscent.Skin;
 using System;
 
 namespace Nullscent.Rulesets.Mania.UI.Drawables
@@ -125,7 +126,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         /// <summary>
         /// Draws the hit object.
         /// </summary>
-        public abstract void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime, 
+        public abstract void Draw(SpriteBatch spriteBatch, Texture2D pixel, SkinManager? skinManager, int keyCount, int columnIndex, int columnX, double currentTime, 
             double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth);
 
         /// <summary>
@@ -197,11 +198,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         private const int NOTE_HEIGHT = 12;
         private const int BORDER_THICKNESS = 2;
 
+
         public DrawableNote(Note note) : base(note)
         {
         }
 
-        public override void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime, 
+        public override void Draw(SpriteBatch spriteBatch, Texture2D pixel, SkinManager? skinManager, int keyCount, int columnIndex, int columnX, double currentTime, 
             double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth)
         {
             if (!IsVisible() || IsJudged) return;
@@ -214,35 +216,83 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             double alpha = GetHiddenAlpha(y, downScroll, receptorY, screenHeight, CurrentCombo);
             if (alpha <= 0.0) return;
 
-            int padding = 4;
-            // Draw note body
-            var noteRect = new Rectangle(
-                padding, 
-                y - NOTE_HEIGHT / 2, 
-                columnWidth - padding * 2, 
-                NOTE_HEIGHT
-            );
+            Texture2D? noteTexture = skinManager?.GetNoteTexture(keyCount, columnIndex);
+            if (noteTexture != null)
+            {
+                float userScale = (float)Core.SettingsService.Instance.SkinNoteHeightScale;
+                float baseWidth = columnWidth;
+                float? widthForScale = skinManager?.GetWidthForNoteHeightScale(keyCount);
+                if (widthForScale.HasValue)
+                {
+                    float scale = (float)screenHeight / 480f;
+                    baseWidth = widthForScale.Value * scale;
+                }
+                else
+                {
+                    var config = skinManager?.CurrentSkinConfig?.GetConfigForKeyCount(keyCount);
+                    if (config?.ColumnWidths != null && config.ColumnWidths.Length > 0)
+                    {
+                        float minVal = config.ColumnWidths[0];
+                        for (int i = 1; i < config.ColumnWidths.Length; i++)
+                        {
+                            if (config.ColumnWidths[i] < minVal)
+                                minVal = config.ColumnWidths[i];
+                        }
+                        float scale = (float)screenHeight / 480f;
+                        baseWidth = minVal * scale;
+                    }
+                }
 
-            Color noteColor = new Color(100, 180, 255) * (float)alpha;
-            spriteBatch.Draw(pixel, noteRect, noteColor);
+                float aspect = (float)noteTexture.Height / noteTexture.Width;
+                int noteHeight = (int)(baseWidth * aspect * userScale);
 
-            // Draw top border
-            var borderTop = new Rectangle(
-                padding,
-                y - NOTE_HEIGHT / 2,
-                columnWidth - padding * 2,
-                BORDER_THICKNESS
-            );
-            spriteBatch.Draw(pixel, borderTop, Color.White * (float)alpha);
+                // ALINEACIÓN DE BORDE DELANTERO (osu!stable style):
+                // En downScroll, el borde inferior coincide con y.
+                // En upScroll, el borde superior coincide con y.
+                int noteY = downScroll ? y - noteHeight : y;
 
-            // Draw bottom border
-            var borderBottom = new Rectangle(
-                padding,
-                y + NOTE_HEIGHT / 2 - BORDER_THICKNESS,
-                columnWidth - padding * 2,
-                BORDER_THICKNESS
-            );
-            spriteBatch.Draw(pixel, borderBottom, Color.White * (float)alpha);
+                var noteRect = new Rectangle(
+                    columnX, 
+                    noteY, 
+                    columnWidth, 
+                    noteHeight
+                );
+                spriteBatch.Draw(noteTexture, noteRect, Color.White * (float)alpha);
+            }
+            else
+            {
+                int padding = 4;
+                int noteY = downScroll ? y - NOTE_HEIGHT : y;
+
+                // Draw note body
+                var noteRect = new Rectangle(
+                    columnX + padding, 
+                    noteY, 
+                    columnWidth - padding * 2, 
+                    NOTE_HEIGHT
+                );
+
+                Color noteColor = new Color(100, 180, 255) * (float)alpha;
+                spriteBatch.Draw(pixel, noteRect, noteColor);
+
+                // Draw top border
+                var borderTop = new Rectangle(
+                    columnX + padding,
+                    noteY,
+                    columnWidth - padding * 2,
+                    BORDER_THICKNESS
+                );
+                spriteBatch.Draw(pixel, borderTop, Color.White * (float)alpha);
+
+                // Draw bottom border
+                var borderBottom = new Rectangle(
+                    columnX + padding,
+                    noteY + NOTE_HEIGHT - BORDER_THICKNESS,
+                    columnWidth - padding * 2,
+                    BORDER_THICKNESS
+                );
+                spriteBatch.Draw(pixel, borderBottom, Color.White * (float)alpha);
+            }
         }
 
         public override void CheckForResult(double currentTime, ManiaHitWindows hitWindows)
@@ -251,115 +301,6 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
 
             // Only check for auto-miss during frame updates
             double offset = currentTime - HitObject.StartTime;
-            if (offset > hitWindows.WindowFor(HitResult.Miss))
-            {
-                OnJudged(HitResult.Miss);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Drawable representation of a hold note (LN).
-    /// </summary>
-    public class DrawableHoldNote : DrawableManiaHitObject
-    {
-        private readonly HoldNote _holdNote;
-        private const int HEAD_HEIGHT = 12;
-        private const int TAIL_HEIGHT = 6;
-
-        public DrawableHoldNote(HoldNote holdNote) : base(holdNote)
-        {
-            _holdNote = holdNote;
-        }
-
-        public override void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime, 
-            double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth)
-        {
-            if (!IsVisible() || IsJudged) return;
-
-            int padding = 4;
-
-            // Calculate head and tail positions
-            int headY = CalculateYPosition(_holdNote.StartTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
-            int tailY = CalculateYPosition(_holdNote.EndTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
-
-            int topY = Math.Min(headY, tailY);
-            int bottomY = Math.Max(headY, tailY);
-
-            // Culling
-            if (bottomY < -50 || topY > screenHeight + 50) return;
-
-            // Clamp to screen
-            int clampedTopY = Math.Max(-50, topY);
-            int clampedBottomY = Math.Min(screenHeight + 50, bottomY);
-            int bodyHeight = clampedBottomY - clampedTopY;
-
-            if (bodyHeight > 0)
-            {
-                // Draw body in segments to allow gradual fade out for Hidden
-                int segmentHeight = 8;
-                Color baseBodyColor = new Color(255, 180, 100);
-
-                for (int currY = clampedTopY; currY < clampedBottomY; currY += segmentHeight)
-                {
-                    int h = Math.Min(segmentHeight, clampedBottomY - currY);
-                    double bodyAlpha = GetHiddenAlpha(currY + h / 2, downScroll, receptorY, screenHeight, CurrentCombo);
-                    if (bodyAlpha <= 0.0) continue;
-
-                    var bodyRect = new Rectangle(padding, currY, columnWidth - padding * 2, h);
-                    spriteBatch.Draw(pixel, bodyRect, baseBodyColor * (float)(bodyAlpha * 0.7f));
-
-                    // Draw left border segment
-                    var leftBorder = new Rectangle(padding, currY, 2, h);
-                    spriteBatch.Draw(pixel, leftBorder, Color.White * (float)bodyAlpha);
-
-                    // Draw right border segment
-                    var rightBorder = new Rectangle(columnWidth - padding - 2, currY, 2, h);
-                    spriteBatch.Draw(pixel, rightBorder, Color.White * (float)bodyAlpha);
-                }
-            }
-
-            // Draw head if visible
-            if (headY >= -50 && headY <= screenHeight + 50)
-            {
-                double headAlpha = GetHiddenAlpha(headY, downScroll, receptorY, screenHeight, CurrentCombo);
-                if (headAlpha > 0.0)
-                {
-                    var headRect = new Rectangle(
-                        padding,
-                        headY - HEAD_HEIGHT / 2,
-                        columnWidth - padding * 2,
-                        HEAD_HEIGHT
-                    );
-                    Color headColor = new Color(255, 200, 100) * (float)headAlpha;
-                    spriteBatch.Draw(pixel, headRect, headColor);
-                }
-            }
-
-            // Draw tail if visible
-            if (tailY >= -50 && tailY <= screenHeight + 50)
-            {
-                double tailAlpha = GetHiddenAlpha(tailY, downScroll, receptorY, screenHeight, CurrentCombo);
-                if (tailAlpha > 0.0)
-                {
-                    var tailRect = new Rectangle(
-                        padding,
-                        tailY - TAIL_HEIGHT / 2,
-                        columnWidth - padding * 2,
-                        TAIL_HEIGHT
-                    );
-                    Color tailColor = new Color(255, 160, 80) * (float)tailAlpha;
-                    spriteBatch.Draw(pixel, tailRect, tailColor);
-                }
-            }
-        }
-
-        public override void CheckForResult(double currentTime, ManiaHitWindows hitWindows)
-        {
-            if (IsJudged) return;
-
-            // Only check for auto-miss during frame updates
-            double offset = currentTime - _holdNote.StartTime;
             if (offset > hitWindows.WindowFor(HitResult.Miss))
             {
                 OnJudged(HitResult.Miss);

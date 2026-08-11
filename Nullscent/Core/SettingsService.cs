@@ -101,6 +101,20 @@ namespace Nullscent.Core
             }
         }
 
+        public bool ScaleScrollSpeedWithBPM
+        {
+            get => Settings.ScaleScrollSpeedWithBPM;
+            set
+            {
+                if (Settings.ScaleScrollSpeedWithBPM != value)
+                {
+                    Settings.ScaleScrollSpeedWithBPM = value;
+                    RaisePropertyChanged(nameof(ScaleScrollSpeedWithBPM));
+                    RaiseSettingChanged(nameof(ScaleScrollSpeedWithBPM), value);
+                }
+            }
+        }
+
         public int GlobalOffsetMs
         {
             get => (int)Settings.GlobalAudioOffset;
@@ -184,6 +198,76 @@ namespace Nullscent.Core
                     Settings.ShowHitErrorBar = value;
                     RaisePropertyChanged(nameof(ShowHitErrorBar));
                     RaiseSettingChanged(nameof(ShowHitErrorBar), value);
+                }
+            }
+        }
+
+        public bool HighResolutionSkins
+        {
+            get => Settings.HighResolutionSkins;
+            set
+            {
+                if (Settings.HighResolutionSkins != value)
+                {
+                    Settings.HighResolutionSkins = value;
+                    RaisePropertyChanged(nameof(HighResolutionSkins));
+                    RaiseSettingChanged(nameof(HighResolutionSkins), value);
+                }
+            }
+        }
+
+        public float SkinNoteHeightScale
+        {
+            get => Settings.SkinNoteHeightScale;
+            set
+            {
+                if (Settings.SkinNoteHeightScale != value)
+                {
+                    Settings.SkinNoteHeightScale = value;
+                    RaisePropertyChanged(nameof(SkinNoteHeightScale));
+                    RaiseSettingChanged(nameof(SkinNoteHeightScale), value);
+                }
+            }
+        }
+
+        public float SkinReceptorHeightScale
+        {
+            get => Settings.SkinReceptorHeightScale;
+            set
+            {
+                if (Settings.SkinReceptorHeightScale != value)
+                {
+                    Settings.SkinReceptorHeightScale = value;
+                    RaisePropertyChanged(nameof(SkinReceptorHeightScale));
+                    RaiseSettingChanged(nameof(SkinReceptorHeightScale), value);
+                }
+            }
+        }
+
+        public bool OverrideMapHitsounds
+        {
+            get => Settings.OverrideMapHitsounds;
+            set
+            {
+                if (Settings.OverrideMapHitsounds != value)
+                {
+                    Settings.OverrideMapHitsounds = value;
+                    RaisePropertyChanged(nameof(OverrideMapHitsounds));
+                    RaiseSettingChanged(nameof(OverrideMapHitsounds), value);
+                }
+            }
+        }
+
+        public bool ShowHitLighting
+        {
+            get => Settings.ShowHitLighting;
+            set
+            {
+                if (Settings.ShowHitLighting != value)
+                {
+                    Settings.ShowHitLighting = value;
+                    RaisePropertyChanged(nameof(ShowHitLighting));
+                    RaiseSettingChanged(nameof(ShowHitLighting), value);
                 }
             }
         }

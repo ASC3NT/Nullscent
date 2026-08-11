@@ -14,6 +14,7 @@ x64/
 
 # Runtime files
 settings.json
+scores.json
 nullscent_log.txt
 *.log
 
@@ -25,9 +26,16 @@ nullscent_log.txt
 # Beatmaps (local library)
 Songs/
 
-# Generated skins/cache if any
-Skins/Cache/
+# Top-level Skin folder (user skin library)
+Skin/
+
+# User skin subfolders inside the project (local content, not source)
+Nullscent/Skin/*/
 
 # OS files
 Thumbs.db
 Desktop.ini
+
+# Dev scratch / local notes
+scratch/
+ultimos_logs/

@@ -84,7 +84,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 Date = System.DateTime.Now
             };
 
-            LocalScoreManager.AddScore(_beatmap.FilePath, localScore);
+            LocalScoreManager.AddScore(_beatmap.FilePath, localScore, _beatmap.Hash);
         }
 
         public void Update(GameTime gameTime)

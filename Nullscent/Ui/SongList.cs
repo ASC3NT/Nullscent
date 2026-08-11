@@ -90,6 +90,11 @@ namespace Nullscent.UI
     public class BeatmapDifficulty
     {
         /// <summary>
+        /// Hash MD5 único del contenido del archivo .osu
+        /// </summary>
+        public string Hash { get; set; } = string.Empty;
+
+        /// <summary>
         /// Ruta completa al archivo .osu.
         /// </summary>
         public string FilePath { get; set; } = string.Empty;

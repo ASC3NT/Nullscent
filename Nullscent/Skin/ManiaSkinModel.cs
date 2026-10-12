@@ -257,7 +257,7 @@ namespace Nullscent.Skin
                 UsesStableLegacyUnits = true,
                 LegacyVersion = version,
                 LegacyHudScale = config.IsVersionAtLeast(2.4) ? 1f : StableScale,
-                AnimationFramerate = config.AnimationFramerate > 0 ? config.AnimationFramerate : null,
+                AnimationFramerate = config.AnimationFramerate,
                 ComboPrefix = config.ComboPrefix,
                 ComboOverlap = config.ComboOverlap,
                 Keymodes = modes

@@ -265,6 +265,8 @@ namespace Nullscent.Skin
             if (internalOnly)
                 profile = _internalDefinition.Keymodes.TryGetValue(keyCount, out var fallback)
                     ? fallback : CreateFallbackMode(keyCount);
+            ManiaSkinDefinition sourceDefinition = internalOnly ? _internalDefinition : _currentDefinition;
+            int generalAnimationFramerate = sourceDefinition.AnimationFramerate ?? -1;
 
             var lanes = new List<ResolvedManiaLane>(profile.Lanes.Count);
             for (int i = 0; i < profile.Lanes.Count; i++)
@@ -278,10 +280,10 @@ namespace Nullscent.Skin
 
                 string? receptorName = First(lane.ReceptorAsset, profile.ReceptorStyle.Asset,
                     legacy ? $"mania-key{suffix}" : null);
-                var receptor = ResolveAnimation(receptorName, "bar-key", profile.ReceptorStyle.FramesPerSecond ?? 60, internalOnly);
+                var receptor = ResolveAnimation(receptorName, "bar-key", profile.ReceptorStyle.FramesPerSecond ?? generalAnimationFramerate, internalOnly);
                 string? pressedName = First(lane.PressedReceptorAsset, profile.ReceptorStyle.PressedAsset,
                     legacy ? $"mania-key{suffix}D" : null);
-                var pressed = ResolveAnimation(pressedName, "bar-key-pressed", profile.ReceptorStyle.FramesPerSecond ?? 60, internalOnly)
+                var pressed = ResolveAnimation(pressedName, "bar-key-pressed", profile.ReceptorStyle.FramesPerSecond ?? generalAnimationFramerate, internalOnly)
                     ?? receptor;
 
                 string? headName = First(lane.LongHeadAsset, profile.LongHeadStyle.Asset,
@@ -298,8 +300,10 @@ namespace Nullscent.Skin
 
                 string lightSuffix = First(profile.LightingNoteAsset, legacy ? $"lightingN-{i}" : null) ?? "bar-light-note";
                 string holdLightSuffix = First(profile.LightingHoldAsset, legacy ? $"lightingL-{i}" : null) ?? "bar-light-hold";
-                var noteLight = ResolveAnimation(lightSuffix, "bar-light-note", profile.LightFramesPerSecond, internalOnly);
-                var holdLight = ResolveAnimation(holdLightSuffix, "bar-light-hold", profile.LightFramesPerSecond, internalOnly);
+                // LightFramePerSecond belongs to StageLight. Mania note and hold
+                // lighting use their own fixed 60 FPS path, separate from General.
+                var noteLight = ResolveAnimation(lightSuffix, "bar-light-note", 60, internalOnly);
+                var holdLight = ResolveAnimation(holdLightSuffix, "bar-light-hold", 60, internalOnly);
                 lanes.Add(new ResolvedManiaLane(lane, note, receptor, pressed, head, body, tail, noteLight, holdLight));
             }
 
@@ -310,7 +314,9 @@ namespace Nullscent.Skin
                 string conventional = $"mania-stage-{part}";
                 string? name = First(configured, conventional);
                 string? emergency = part == "hint" ? "bar-stage-hint" : null;
-                ResolvedSkinAnimation? animation = ResolveAnimation(name, emergency, 60, internalOnly);
+                int frameRate = part.Equals("light", StringComparison.OrdinalIgnoreCase)
+                    ? profile.LightFramesPerSecond : generalAnimationFramerate;
+                ResolvedSkinAnimation? animation = ResolveAnimation(name, emergency, frameRate, internalOnly);
                 if (animation != null) stage[part] = animation;
             }
 
@@ -319,7 +325,8 @@ namespace Nullscent.Skin
             {
                 string? configured = profile.JudgementAssets.TryGetValue(key, out string? hit) ? hit : null;
                 string suffix = key[3..];
-                var animation = ResolveAnimation(First(configured, $"mania-hit{suffix}", $"hit{suffix}"), null, 60, internalOnly);
+                var animation = ResolveAnimation(First(configured, $"mania-hit{suffix}", $"hit{suffix}"), null,
+                    generalAnimationFramerate, internalOnly);
                 if (animation != null) judgements[suffix] = animation;
             }
 
@@ -463,15 +470,9 @@ namespace Nullscent.Skin
 
             if (timeMs < 0) return animation[0];
 
-            int fps = framesPerSecond ?? _currentDefinition.AnimationFramerate ?? -1;
-            if (fps <= 0)
-                fps = 15; // default en osu!mania
-
-            double frameDuration = 1000.0 / fps;
-            if (frameDuration <= 0) return animation[0];
-
-            int frameIdx = (int)(timeMs / frameDuration) % animation.Count;
-            return animation[Math.Clamp(frameIdx, 0, animation.Count - 1)];
+            int fps = ResolvedSkinAnimation.ResolveFrameRate(
+                framesPerSecond ?? _currentDefinition.AnimationFramerate ?? -1, animation.Count);
+            return animation[Math.Clamp((int)(timeMs * fps / 1000d) % animation.Count, 0, animation.Count - 1)];
         }
 
         private string GetDefaultStyleSuffix(int keyCount, int columnIndex)

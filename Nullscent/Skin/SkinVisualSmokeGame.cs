@@ -103,7 +103,7 @@ internal sealed class SkinVisualSmokeGame : Game
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(new Color(6, 9, 16));
-        playfield!.Draw(1040, 8, 0.83f, downScroll);
+        playfield!.Draw(1040, 8, null, downScroll);
         if (captureStage == 0)
         {
             SaveBackbuffer(outputPath);

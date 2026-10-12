@@ -86,6 +86,10 @@ namespace Nullscent.Skin
             {
                 left = DesignWidth - totalWidth;
             }
+            else if (placement.Equals("left", StringComparison.OrdinalIgnoreCase))
+            {
+                left = 0;
+            }
             else
             {
                 left = (DesignWidth - totalWidth) / 2f;

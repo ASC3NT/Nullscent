@@ -12,10 +12,13 @@ namespace Nullscent.Skin
             TestLegacyNormalizationAndTextAlias();
             TestSkinWithoutIniHasConventionalKeymodes();
             TestResponsiveLayoutAndScrollMirror();
+            TestNativeLeftPlacement();
             TestNativeManifests();
             TestUserOverridePrecedence();
             TestSkinScrollPreferenceAndLegacyFlips();
-            Console.WriteLine("[SkinTests] 6 pruebas deterministas pasaron.");
+            TestCatalogReflectsAppliedColumnHoldColour();
+            TestLegacyAnimationRateSemantics();
+            Console.WriteLine("[SkinTests] 9 pruebas deterministas pasaron.");
         }
 
         private static void TestLegacyNormalizationAndTextAlias()
@@ -28,6 +31,7 @@ namespace Nullscent.Skin
                     [General]
                     Name: Test Legacy
                     Version: 2.5
+                    AnimationFramerate: 24
                     [Mania]
                     Keys: 4
                     ColumnStart: 336
@@ -53,6 +57,8 @@ namespace Nullscent.Skin
                 AssertNear(mode.ColumnStart!.Value, 537.6f, "ColumnStart should be normalized into stable design units.");
                 AssertNear(mode.HitPosition!.Value, 640f, "HitPosition should be normalized into stable design units.");
                 Assert(mode.BodyMode == NoteBodyRenderMode.Stretch, "The textual stretch alias should parse.");
+                Assert(skin.AnimationFramerate == 24 && mode.NoteStyle.FramesPerSecond == 60,
+                    "General animation speed should normalize without overriding mania note animation speed.");
                 Assert(mode.Lanes[2].BodyMode == NoteBodyRenderMode.TileFromHead, "Per-column body style should survive normalization.");
                 Assert(mode.UpsideDown == true, "The skin orientation preference should survive normalization.");
                 Assert(mode.SupportsFlipOverrides && mode.NoteFlipWhenUpsideDown == false && mode.KeyFlipWhenUpsideDown == false,
@@ -122,6 +128,21 @@ namespace Nullscent.Skin
                 "Native note and receptor widths should remain independent.");
         }
 
+        private static void TestNativeLeftPlacement()
+        {
+            var profile = new ManiaKeymodeDefinition
+            {
+                KeyCount = 4,
+                Placement = "left",
+                Lanes = new System.Collections.Generic.List<ManiaLaneDefinition>
+                {
+                    new() { Width = 48 }, new() { Width = 48 }, new() { Width = 48 }, new() { Width = 48 }
+                }
+            };
+            ManiaLayoutResult layout = ManiaLayoutEngine.Calculate(profile, 4, 1920, 1080, true);
+            AssertNear(layout.Playfield.X, 0f, "Native left placement should anchor the playfield to the logical design area's left edge.");
+        }
+
         private static void TestUserOverridePrecedence()
         {
             var profile = new ManiaKeymodeDefinition
@@ -148,6 +169,32 @@ namespace Nullscent.Skin
                 "An explicit user scroll direction should take precedence over the skin.");
             Assert(!ManiaSkinRules.ResolveDownScroll(false, true, skinUpsideDown: null),
                 "When the skin does not specify orientation, preserve the user direction.");
+        }
+
+        private static void TestCatalogReflectsAppliedColumnHoldColour()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "NullscentSkinTest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 4
+                    ColourHold1: 255,128,32
+                    """);
+                SkinValidation validation = new SkinCatalog(Path.GetTempPath()).Validate(temp);
+                Assert(!validation.Unsupported.Contains("ColourHold1"),
+                    "The catalogue should not label per-column hold colours unsupported when the adapter applies them.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyAnimationRateSemantics()
+        {
+            Assert(ResolvedSkinAnimation.ResolveFrameRate(-1, 8) == 8,
+                "AnimationFramerate -1 should play the complete animation in one second.");
+            Assert(ResolvedSkinAnimation.ResolveFrameRate(24, 8) == 24,
+                "An explicit positive animation frame rate should be preserved.");
         }
 
         private static void Assert(bool condition, string message)

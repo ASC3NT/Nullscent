@@ -19,8 +19,17 @@ namespace Nullscent.Skin
         {
             Textures = frames.ToList();
             Frames = Textures.AsReadOnly();
-            FramesPerSecond = Math.Clamp(framesPerSecond, 1, 1000);
+            FramesPerSecond = ResolveFrameRate(framesPerSecond, Frames.Count);
         }
+
+        /// <summary>
+        /// osu! skin.ini uses -1 to play all frames over one second. Convert that
+        /// convention to a stable frame rate when creating the resolved animation.
+        /// </summary>
+        public static int ResolveFrameRate(int configuredFramesPerSecond, int frameCount) =>
+            configuredFramesPerSecond == -1
+                ? Math.Clamp(frameCount, 1, 1000)
+                : Math.Clamp(configuredFramesPerSecond, 1, 1000);
 
         public Texture2D? FrameAt(double timeMs)
         {

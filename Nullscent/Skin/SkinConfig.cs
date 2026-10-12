@@ -263,7 +263,7 @@ namespace Nullscent.Skin
                     break;
                 case "AnimationFramerate":
                     if (int.TryParse(value, out int fps))
-                        config.AnimationFramerate = fps;
+                        config.AnimationFramerate = fps == -1 || fps > 0 ? fps : -1;
                     break;
             }
         }

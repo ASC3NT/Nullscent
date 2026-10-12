@@ -215,6 +215,7 @@ namespace Nullscent.Skin
             || Matches(key, @"^KeyImage\d+D?$")
             || Matches(key, @"^Hit(?:0|50|100|200|300|300g)$")
             || Matches(key, @"^Colour(?:\d+|Light\d+)$")
+            || Matches(key, @"^ColourHold\d+$")
             || Matches(key, @"^NoteBodyStyle\d+$")
             || Matches(key, @"^(?:Note|Key)FlipWhenUpsideDown(?:\d+[HLT]?|\d+D)?$")
             || key.Equals("NoteFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase)

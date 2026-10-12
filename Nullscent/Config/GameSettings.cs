@@ -22,10 +22,24 @@ namespace Nullscent.Config
         public string SongsDirectory { get; set; } = "./Songs/";
 
         /// <summary>
-        /// Directorio donde se encuentra la skin actual.
-        /// Default: ./Skin/
+        /// Ruta heredada de instalaciones anteriores. Se conserva para migración.
         /// </summary>
         public string SkinDirectory { get; set; } = "./Skin/";
+
+        public string? SkinsRootDirectory { get; set; }
+        public string? SelectedSkinDirectory { get; set; }
+
+        public (string Root, string? Selected) ResolveSkinPaths()
+        {
+            if (!string.IsNullOrWhiteSpace(SkinsRootDirectory))
+                return (Path.GetFullPath(SkinsRootDirectory), string.IsNullOrWhiteSpace(SelectedSkinDirectory) ? null : Path.GetFullPath(SelectedSkinDirectory));
+
+            string legacy = Path.GetFullPath(string.IsNullOrWhiteSpace(SkinDirectory) ? "./Skin/" : SkinDirectory);
+            string name = Path.GetFileName(legacy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (name.Equals("Skin", StringComparison.OrdinalIgnoreCase) || name.Equals("Skins", StringComparison.OrdinalIgnoreCase))
+                return (legacy, null);
+            return (Path.GetDirectoryName(legacy) ?? Path.GetFullPath("./Skin/"), legacy);
+        }
 
         // === AUDIO ===
 
@@ -205,7 +219,7 @@ namespace Nullscent.Config
         public bool UseSkinHitsounds { get; set; } = true;
 
         /// <summary>
-        /// Usar skin del beatmap si está disponible.
+        /// Reservado para una fase posterior. No se presenta ni se aplica todavía.
         /// </summary>
         public bool UseBeatmapSkin { get; set; } = false;
 
@@ -250,6 +264,12 @@ namespace Nullscent.Config
         /// </summary>
         public void Save()
         {
+            TrySave();
+        }
+
+        public bool TrySave()
+        {
+            string? temporaryPath = null;
             try
             {
                 var options = new JsonSerializerOptions 
@@ -266,13 +286,18 @@ namespace Nullscent.Config
                     Directory.CreateDirectory(directory);
                 }
 
-                File.WriteAllText(ConfigFilePath, json);
+                temporaryPath = ConfigFilePath + ".writing";
+                File.WriteAllText(temporaryPath, json);
+                File.Move(temporaryPath, ConfigFilePath, true);
 
                 Console.WriteLine($"[GameSettings] Settings saved to {ConfigFilePath}");
+                return true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[GameSettings] Failed to save settings: {ex.Message}");
+                try { if (temporaryPath != null && File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch { }
+                return false;
             }
         }
 

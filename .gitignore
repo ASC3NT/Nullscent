@@ -27,7 +27,7 @@ nullscent_log.txt
 Songs/
 
 # Top-level Skin folder (user skin library)
-Skin/
+/Skin/
 
 # User skin subfolders inside the project (local content, not source)
 Nullscent/Skin/*/

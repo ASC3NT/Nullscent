@@ -41,6 +41,23 @@ namespace Nullscent
 
             try
             {
+#if DEBUG
+                if (args.Length is 6 or 7 && args[0] == "--skin-visual-switch-smoke" && int.TryParse(args[3], out int switchKeyCount))
+                {
+                    bool switchDownScroll = args.Length == 6 || !args[6].Equals("up", StringComparison.OrdinalIgnoreCase);
+                    using var switchSmoke = new Skin.SkinVisualSmokeGame(
+                        args[1], switchKeyCount, args[2], switchDownScroll, args[4], args[5]);
+                    switchSmoke.Run();
+                    return;
+                }
+                if (args.Length is 4 or 5 && args[0] == "--skin-visual-smoke" && int.TryParse(args[2], out int keyCount))
+                {
+                    bool downScroll = args.Length == 4 || !args[4].Equals("up", StringComparison.OrdinalIgnoreCase);
+                    using var smoke = new Skin.SkinVisualSmokeGame(args[1], keyCount, args[3], downScroll);
+                    smoke.Run();
+                    return;
+                }
+#endif
                 using var game = new Nullscent.Game1();
                 game.Run();
             }
@@ -48,6 +65,9 @@ namespace Nullscent
             {
                 Console.WriteLine($"[FATAL] Unhandled Crash: {ex.GetType().Name} - {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
+#if DEBUG
+                if (args.Length > 0 && (args[0] == "--skin-visual-smoke" || args[0] == "--skin-visual-switch-smoke")) Environment.ExitCode = 1;
+#endif
             }
             finally
             {

@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Nullscent.Rulesets.Mania.Judgements;
 using Nullscent.UI; // Import TrueTypeFontRenderer
+using Nullscent.Skin;
 using System;
 
 namespace Nullscent.Rulesets.Mania.UI.Drawables
@@ -48,7 +49,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
         }
 
-        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime, System.Collections.Generic.List<Texture2D>? skinnedExplosionFrames = null)
+        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime, System.Collections.Generic.List<Texture2D>? skinnedExplosionFrames = null,
+            SkinManager? skinManager = null, float legacyScale = 1f, float? configuredWidth = null)
         {
             if (!_isActive) return;
 
@@ -82,9 +84,18 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             bool isSkinned = skinnedExplosionFrames != null && skinnedExplosionFrames.Count > 0;
             if (isSkinned)
             {
-                int frameIdx = (int)((elapsed / _duration) * skinnedExplosionFrames!.Count);
+                double frameDuration = Math.Max(1000d / 60d, 170d / skinnedExplosionFrames!.Count);
+                int frameIdx = (int)(elapsed / frameDuration);
                 frameIdx = Math.Clamp(frameIdx, 0, skinnedExplosionFrames.Count - 1);
                 activeTexture = skinnedExplosionFrames[frameIdx];
+                Vector2 logicalSize = skinManager?.GetLogicalSize(activeTexture)
+                    ?? new Vector2(activeTexture.Width, activeTexture.Height);
+                float assetScale = configuredWidth is > 0 ? configuredWidth.Value / 30f : 1f;
+                width = Math.Max(1, (int)MathF.Round(logicalSize.X * legacyScale * assetScale));
+                height = Math.Max(1, (int)MathF.Round(logicalSize.Y * legacyScale * assetScale));
+                explosionRect = new Rectangle(columnX + (columnWidth - width) / 2, receptorY - height / 2, width, height);
+                alpha = elapsed < 80 ? (float)Math.Clamp(elapsed / 80d, 0, 1)
+                    : (float)Math.Clamp((200d - elapsed) / 120d, 0, 1);
             }
             
             // Draw texture

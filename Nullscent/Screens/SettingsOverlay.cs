@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework.Input;
 using Nullscent.Config;
 using Nullscent.Core;
 using Nullscent.UI;
+using Nullscent.Skin;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -25,6 +26,8 @@ namespace Nullscent.Screens
         private readonly GameSettings _settings;
 
         private readonly List<OverlaySettingItem> _settingItems = new();
+        private OverlaySettingItem? _skinSelector;
+        private List<(string Name, string? Path)> _skins = new();
         private int _selectedIndex = 0;
         private int _scrollOffset = 0;
 
@@ -56,45 +59,19 @@ namespace Nullscent.Screens
             _inputManager = inputManager;
             _fontRenderer = fontRenderer;
             _settings = game.Settings;
+            _game.SkinCatalog.CatalogChanged += RefreshSkinSelector;
         }
 
-        private List<(string Name, string Path)> GetAvailableSkins()
+        private void RefreshSkinSelector()
         {
-            var list = new List<(string Name, string Path)>();
-            list.Add(("Default", "Skin"));
-
-            try
+            _skins = new List<(string Name, string? Path)> { ("Nullscent (interna)", null) };
+            foreach (var entry in _game.SkinCatalog.Entries)
             {
-                string skinsRoot = _settings.SkinDirectory;
-                string normalized = skinsRoot.Replace('\\', '/').TrimEnd('/');
-                if (!normalized.EndsWith("/Skin", StringComparison.OrdinalIgnoreCase))
-                {
-                    string? parent = Path.GetDirectoryName(skinsRoot);
-                    if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
-                    {
-                        skinsRoot = parent;
-                    }
-                }
-
-                if (Directory.Exists(skinsRoot))
-                {
-                    var dirs = Directory.GetDirectories(skinsRoot);
-                    foreach (var dir in dirs)
-                    {
-                        string name = Path.GetFileName(dir) ?? "Unknown";
-                        if (!string.Equals(name, "Skin", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(name))
-                        {
-                            list.Add((name, dir));
-                        }
-                    }
-                }
+                string prefix = entry.Status == SkinValidity.Invalid ? "[inválida] "
+                    : entry.Status == SkinValidity.Partial ? "[parcial] " : "";
+                _skins.Add((prefix + Path.GetFileName(entry.Directory), entry.Directory));
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[SettingsOverlay] Failed to get skins: {ex.Message}");
-            }
-
-            return list;
+            if (_skinSelector != null) _skinSelector.SelectorOptions = _skins.ConvertAll(s => s.Name).ToArray();
         }
 
         public void Initialize()
@@ -102,6 +79,7 @@ namespace Nullscent.Screens
             Console.WriteLine("[SettingsOverlay] Initializing global settings panel...");
 
             _settingItems.Clear();
+            RefreshSkinSelector();
 
             // --- CATEGORÍA: GAMEPLAY ---
             _settingItems.Add(OverlaySettingItem.CreateHeader("GAMEPLAY"));
@@ -284,19 +262,14 @@ namespace Nullscent.Screens
             ));
 
             // Selector de Skins
-            var skinsList = GetAvailableSkins();
-            string[] skinNames = new string[skinsList.Count];
-            for (int i = 0; i < skinsList.Count; i++) skinNames[i] = skinsList[i].Name;
-
-            _settingItems.Add(OverlaySettingItem.CreateSelector(
+            _skinSelector = OverlaySettingItem.CreateSelector(
                 "Current Skin",
-                skinNames,
+                _skins.ConvertAll(s => s.Name).ToArray(),
                 () => {
-                    string currentFull = Path.GetFullPath(_settings.SkinDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    for (int i = 0; i < skinsList.Count; i++)
+                    string currentFull = _game.SkinManager.CurrentSkinDirectory;
+                    for (int i = 1; i < _skins.Count; i++)
                     {
-                        string pathFull = Path.GetFullPath(skinsList[i].Path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                        if (string.Equals(pathFull, currentFull, StringComparison.OrdinalIgnoreCase))
+                        if (string.Equals(_skins[i].Path, currentFull, StringComparison.OrdinalIgnoreCase))
                         {
                             return i;
                         }
@@ -304,18 +277,13 @@ namespace Nullscent.Screens
                     return 0;
                 },
                 (index) => {
-                    if (index >= 0 && index < skinsList.Count)
+                    if (index >= 0 && index < _skins.Count)
                     {
-                        string nextSkin = skinsList[index].Path;
-                        _settings.SkinDirectory = nextSkin;
-                        _settings.Save();
-                        _game.SkinManager.LoadSkin(nextSkin);
-                        _game.HitSoundPlayer.SkinDirectory = nextSkin;
-                        _game.HitSoundPlayer.ClearCache();
-                        Console.WriteLine($"[SettingsOverlay] Changed skin to: {nextSkin}");
+                        _game.SelectSkin(_skins[index].Path);
                     }
                 }
-            ));
+            );
+            _settingItems.Add(_skinSelector);
 
             _settingItems.Add(OverlaySettingItem.CreateToggle(
                 "HD Skin Assets",
@@ -324,8 +292,8 @@ namespace Nullscent.Screens
                     _settings.HighResolutionSkins = !_settings.HighResolutionSkins;
                     _settings.Save();
                     Core.SettingsService.Instance.HighResolutionSkins = _settings.HighResolutionSkins;
-                    _game.SkinManager.UnloadSkin();
-                    _game.SkinManager.LoadSkin(_settings.SkinDirectory);
+                    string current = _game.SkinManager.CurrentSkinDirectory;
+                    if (current.Length > 0) _game.SkinManager.LoadSkin(current);
                 }
             ));
 
@@ -585,7 +553,9 @@ namespace Nullscent.Screens
                         var selectorRect = new Rectangle(lx + lw - 180, yPos + 1, 165, 22);
                         int optionH = 26;
                         int dropdownH = openSelector.SelectorOptions.Length * optionH;
-                        var dropdownRect = new Rectangle(selectorRect.X, selectorRect.Y + selectorRect.Height, selectorRect.Width, dropdownH);
+                        var dropdownRect = openSelector == _skinSelector
+                            ? new Rectangle(lx, selectorRect.Y + selectorRect.Height, lw, dropdownH)
+                            : new Rectangle(selectorRect.X, selectorRect.Y + selectorRect.Height, selectorRect.Width, dropdownH);
 
                         if (dropdownRect.Contains(currentMouseState.X, currentMouseState.Y))
                         {
@@ -765,7 +735,7 @@ namespace Nullscent.Screens
                     _fontRenderer.DrawBoxBorder(selectorRect, progress > 0.5f || item.IsSelectorOpen ? Color.HotPink : Color.White * 0.3f, 1);
 
                     _fontRenderer.SetFontSize(12);
-                    _fontRenderer.DrawTextCentered(item.GetValue(), selectorRect.X + (selectorRect.Width - 16) / 2, selectorRect.Y + selectorRect.Height / 2, Color.White);
+                    _fontRenderer.DrawTextCentered(FitSelectorText(item.GetValue(), selectorRect.Width - 24), selectorRect.X + (selectorRect.Width - 16) / 2, selectorRect.Y + selectorRect.Height / 2, Color.White);
 
                     int arrowX = selectorRect.X + selectorRect.Width - 14;
                     int arrowY = selectorRect.Y + (selectorRect.Height - 10) / 2;
@@ -873,7 +843,9 @@ namespace Nullscent.Screens
                 var selectorRect = new Rectangle(lx + standardOffset + lw - 180, yPos + 1, 165, 22);
                 int optionH = 26;
                 int dropdownH = activeOpenSelector.SelectorOptions.Length * optionH;
-                var dropdownRect = new Rectangle(selectorRect.X, selectorRect.Y + selectorRect.Height, selectorRect.Width, dropdownH);
+                var dropdownRect = activeOpenSelector == _skinSelector
+                    ? new Rectangle(lx + standardOffset, selectorRect.Y + selectorRect.Height, lw, dropdownH)
+                    : new Rectangle(selectorRect.X, selectorRect.Y + selectorRect.Height, selectorRect.Width, dropdownH);
 
                 // Dibujar caja de fondo del menú flotante con sombra y bordes neón
                 _fontRenderer.DrawBox(dropdownRect, new Color(22, 22, 28, 255));
@@ -896,11 +868,20 @@ namespace Nullscent.Screens
 
                     _fontRenderer.SetFontSize(12);
                     Color optColor = optHovered || optSelected ? Color.White : new Color(200, 200, 200);
-                    _fontRenderer.DrawTextCentered(activeOpenSelector.SelectorOptions[o], optRect.X + optRect.Width / 2, optRect.Y + optRect.Height / 2, optColor);
+                    _fontRenderer.DrawTextCentered(FitSelectorText(activeOpenSelector.SelectorOptions[o], optRect.Width - 14), optRect.X + optRect.Width / 2, optRect.Y + optRect.Height / 2, optColor);
                 }
             }
 
             spriteBatch.End();
+        }
+
+        private string FitSelectorText(string value, int maxWidth)
+        {
+            if (_fontRenderer.MeasureText(value).X <= maxWidth) return value;
+            const string ellipsis = "...";
+            while (value.Length > 0 && _fontRenderer.MeasureText(value + ellipsis).X > maxWidth)
+                value = value[..^1];
+            return value + ellipsis;
         }
 
         private void DrawSlider(Rectangle bounds, float value, float min, float max, string displayValue, bool highlighted)
@@ -993,9 +974,10 @@ namespace Nullscent.Screens
 
         public static OverlaySettingItem CreateSelector(string name, string[] options, Func<int> getIndex, Action<int> onChanged)
         {
-            var item = new OverlaySettingItem(name, () => {
+            OverlaySettingItem? item = null;
+            item = new OverlaySettingItem(name, () => {
                 int idx = getIndex();
-                return idx >= 0 && idx < options.Length ? options[idx] : "";
+                return idx >= 0 && idx < item!.SelectorOptions.Length ? item.SelectorOptions[idx] : "";
             }, false, 0, 0, () => 0, _ => {}, false, () => {}, false);
             item.IsSelector = true;
             item.SelectorOptions = options;

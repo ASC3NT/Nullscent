@@ -48,6 +48,7 @@ namespace Nullscent.Rulesets.Mania.UI
         private readonly bool _isFlashlightActive;
         private int _currentCombo;
         private readonly SkinManager? _skinManager;
+        private bool _layoutDirty;
 
         // Propiedades visuales de la pista (stage)
         private int _stageX;
@@ -133,6 +134,7 @@ namespace Nullscent.Rulesets.Mania.UI
             _fontRenderer = fontRenderer;
             _overallDifficulty = overallDifficulty;
             _skinManager = skinManager;
+            if (_skinManager != null) _skinManager.SkinChanged += OnSkinChanged;
 
             _isHiddenActive = activeMods != null && activeMods.Any(m => m is ManiaModHidden);
             _isFlashlightActive = activeMods != null && activeMods.Any(m => m is ManiaModFlashlight);
@@ -154,6 +156,7 @@ namespace Nullscent.Rulesets.Mania.UI
 
             // Crear el gestor central de juicios
             _judgementDisplayManager = new JudgementDisplayManager(_graphicsDevice, _spriteBatch, _fontRenderer);
+            _judgementDisplayManager.KeyCount = _columnCount;
 
             // Calcular layout con anchos y espaciados de la skin
             CalculateLayout(screenWidth, screenHeight);
@@ -194,10 +197,11 @@ namespace Nullscent.Rulesets.Mania.UI
             float[]? customWidths = null;
             float? customStart = null;
             float[]? customSpacing = null;
+            bool hasManiaLayout = false;
 
-            if (_skinManager != null && _skinManager.CurrentSkinConfig != null)
+            if (_skinManager?.GetManiaConfig(_columnCount) is { } config)
             {
-                var config = _skinManager.CurrentSkinConfig.GetConfigForKeyCount(_columnCount);
+                hasManiaLayout = true;
                 customWidths = config.ColumnWidths;
                 customStart = config.ColumnStart;
                 customSpacing = config.ColumnSpacing;
@@ -212,16 +216,12 @@ namespace Nullscent.Rulesets.Mania.UI
             for (int i = 0; i < _columnCount; i++)
             {
                 // Si la skin no provee anchos, usamos el fallback de osu! (30) para mantener proporción, o 80px físicos si no hay skin activa
-                float w = (customWidths != null) ? 30f : 80f / scale;
-                if (customWidths != null && customWidths.Length > i)
+                float w = hasManiaLayout ? 30f : 80f / scale;
+                if (customWidths != null && customWidths.Length > i && float.IsFinite(customWidths[i]))
                 {
                     w = customWidths[i];
                 }
-                else if (customWidths != null && customWidths.Length > 0)
-                {
-                    w = customWidths[customWidths.Length - 1];
-                }
-                w = Math.Max(5f, w);
+                w = Math.Max(0f, w);
                 colWidths[i] = w * scale;
                 totalWidth += colWidths[i];
             }
@@ -232,23 +232,21 @@ namespace Nullscent.Rulesets.Mania.UI
             for (int i = 0; i < colSpacings.Length; i++)
             {
                 float s = 0f;
-                if (customSpacing != null && customSpacing.Length > i)
+                if (customSpacing != null && customSpacing.Length > i && float.IsFinite(customSpacing[i]))
                 {
                     s = customSpacing[i];
                 }
-                s = Math.Max(0f, s);
                 colSpacings[i] = s * scale;
                 totalSpacing += colSpacings[i];
             }
 
             _stageWidth = (int)(totalWidth + totalSpacing);
 
-            // Centrado de la caja virtual de 640x480 en pantallas widescreen
-            float playfieldOffset = (screenWidth - 640f * scale) / 2f;
-
-            if (customStart.HasValue)
+            if (hasManiaLayout)
             {
-                _stageX = (int)(playfieldOffset + customStart.Value * scale);
+                // ColumnStart is measured from the left edge in the 480-high
+                // legacy coordinate space. Stable does not centre a 640-wide box.
+                _stageX = (int)((customStart ?? 136f) * scale);
             }
             else
             {
@@ -274,19 +272,16 @@ namespace Nullscent.Rulesets.Mania.UI
 
             if (_judgementDisplayManager != null)
             {
-                float comboY = screenHeight * 0.45f; // Fallback por defecto (45% de la pantalla)
-                if (_skinManager != null && _skinManager.CurrentSkinConfig != null)
-                {
-                    var config = _skinManager.CurrentSkinConfig.GetConfigForKeyCount(_columnCount);
-                    if (config.ComboPosition.HasValue)
-                    {
-                        // Escalar el combo Y según la resolución (osu!mania utiliza alto de 480 virtual)
-                        comboY = config.ComboPosition.Value * scale;
-                    }
-                }
-                _judgementDisplayManager.Position = new Vector2(_stageX + _stageWidth / 2f, comboY);
+                var mode = _skinManager?.GetManiaConfig(_columnCount);
+                float scoreY = (mode?.ScorePosition ?? 300) * scale;
+                float comboY = (mode?.ComboPosition ?? 111) * scale;
+                float centerX = _stageX + _stageWidth / 2f;
+                _judgementDisplayManager.Position = new Vector2(centerX, scoreY);
+                _judgementDisplayManager.ComboPosition = new Vector2(centerX, comboY);
             }
         }
+
+        private void OnSkinChanged(long version) => _layoutDirty = true;
 
         public void Update(double currentTime, ManiaScoreProcessor scoreProcessor, double scrollSpeed, float receptorPosition, bool downScroll)
         {
@@ -295,14 +290,15 @@ namespace Nullscent.Rulesets.Mania.UI
             int currentHeight = _graphicsDevice.Viewport.Height;
 
             // Check if window was resized and update layout
-            if (_screenHeight != currentHeight || _screenWidth != currentWidth)
+            if (_layoutDirty || _screenHeight != currentHeight || _screenWidth != currentWidth)
             {
                 _screenWidth = currentWidth;
                 CalculateLayout(currentWidth, currentHeight);
+                _layoutDirty = false;
             }
 
             // Actualizar la posición de los receptores en el eje Y (con soporte de HitPosition absoluto del skin)
-            int hitPos = _skinManager?.GetHitPosition(_columnCount) ?? -1;
+            int hitPos = _skinManager?.GetManiaConfig(_columnCount) != null ? (_skinManager.GetHitPosition(_columnCount) ?? 402) : -1;
             if (hitPos > 0)
             {
                 float scale = (float)_screenHeight / 480f;
@@ -318,6 +314,17 @@ namespace Nullscent.Rulesets.Mania.UI
             else
             {
                 ReceptorY = (int)(receptorPosition * _screenHeight);
+            }
+
+            if (_judgementDisplayManager != null && _skinManager?.GetManiaConfig(_columnCount) is { } mode)
+            {
+                float scale = _screenHeight / 480f;
+                float scorePosition = mode.ScorePosition ?? 300;
+                float comboPosition = mode.ComboPosition ?? 111;
+                _judgementDisplayManager.Position = new Vector2(_judgementDisplayManager.Position.X,
+                    (downScroll ? scorePosition : 480 - scorePosition) * scale);
+                _judgementDisplayManager.ComboPosition = new Vector2(_judgementDisplayManager.ComboPosition.X,
+                    (downScroll ? comboPosition : 480 - comboPosition) * scale);
             }
 
             // Propagar actualización a cada columna
@@ -354,11 +361,14 @@ namespace Nullscent.Rulesets.Mania.UI
 
             DrawStageBackground(downScroll);
 
-            // Dibujar las columnas
+            // Stage background and scrolling notes/keys are separate from
+            // top-level effects. osu! draws StageBottom between these layers.
             foreach (var column in _columns)
             {
-                column.Draw(_spriteBatch, _whitePixel, _radialGlow, _linearGradient, _fontRenderer, currentTime, scrollSpeed, receptorPosition, downScroll, ReceptorY);
+                column.Draw(_spriteBatch, _whitePixel, currentTime, scrollSpeed, downScroll, ReceptorY);
             }
+
+            DrawStageBottom(downScroll, currentTime);
 
             // Dibujar el desvanecimiento de Flashlight si está activo
             if (_isFlashlightActive)
@@ -367,9 +377,24 @@ namespace Nullscent.Rulesets.Mania.UI
             }
 
             // Dibujar el gestor de juicios por encima de la pista
-            _judgementDisplayManager?.Draw(currentTime, _skinManager);
+            Color? holdComboColour = GetHoldComboColour();
+            _judgementDisplayManager?.Draw(currentTime, _skinManager, holdComboColour);
+
+            // osu! places column hit explosions and active LN lighting in the
+            // top-level container after the judgement layer.
+            foreach (var column in _columns)
+                column.DrawForeground(_spriteBatch, _radialGlow, currentTime, ReceptorY);
 
             _spriteBatch.End();
+        }
+
+        private Color? GetHoldComboColour()
+        {
+            if (_skinManager?.CurrentSkinConfig == null || !_columns.Exists(column => column.IsHolding))
+                return null;
+
+            var configured = _skinManager.GetGlobalColourHold(_columnCount) ?? (255, 191, 51, 255);
+            return new Color(configured.R, configured.G, configured.B, configured.A);
         }
 
         private void DrawFlashlightMask(bool downScroll)
@@ -445,127 +470,82 @@ namespace Nullscent.Rulesets.Mania.UI
 
             // Fondo oscuro para la pista
             var stageRect = new Rectangle(_stageX, 0, _stageWidth, _screenHeight);
-            _spriteBatch.Draw(_whitePixel, stageRect, new Color(15, 15, 20, 220));
+            if (_skinManager?.GetManiaConfig(_columnCount) == null)
+                _spriteBatch.Draw(_whitePixel, stageRect, new Color(15, 15, 20, 220));
 
-            // Dibujar StageBottom si está disponible en la skin (sin estirar horizontalmente, centrado)
-            Texture2D? stageBottom = _skinManager?.GetStageTexture(_columnCount, "bottom");
-            if (stageBottom != null)
-            {
-                float texScale = _skinManager != null ? _skinManager.GetTextureScale(stageBottom) : 1.0f;
-                int bottomW = (int)(stageBottom.Width * texScale);
-                int bottomH = (int)(stageBottom.Height * texScale);
-                
-                int bottomX = _stageX + (_stageWidth - bottomW) / 2;
-                int bottomY = downScroll ? _screenHeight - bottomH : 0;
-                var bottomRect = new Rectangle(bottomX, bottomY, bottomW, bottomH);
-                SpriteEffects effects = downScroll ? SpriteEffects.None : SpriteEffects.FlipVertically;
-                
-                _spriteBatch.Draw(stageBottom, bottomRect, null, Color.White, 0f, Vector2.Zero, effects, 0f);
-            }
+            foreach (var column in _columns)
+                column.DrawBackground(_spriteBatch, _whitePixel);
 
             // Dibujar StageHint (línea de impacto visual)
             Texture2D? stageHint = _skinManager?.GetStageTexture(_columnCount, "hint");
             if (stageHint != null)
             {
-                float aspect = (float)stageHint.Height / stageHint.Width;
-                int hintH = (int)(_stageWidth * aspect);
+                Vector2 hintSize = _skinManager!.GetLogicalSize(stageHint);
+                float aspect = hintSize.Y / hintSize.X;
+                int hintH = (int)MathF.Round(_stageWidth * aspect * 0.9f * 1.6025f);
                 var hintRect = new Rectangle(_stageX, ReceptorY - hintH / 2, _stageWidth, hintH);
                 _spriteBatch.Draw(stageHint, hintRect, Color.White);
             }
 
             // Dibujar Judgement Line si está activa (blanca por defecto o tintada según skin.ini)
-            bool drawJudgementLine = _skinManager?.CurrentSkinConfig?.GetConfigForKeyCount(_columnCount).JudgementLine ?? true;
-            if (drawJudgementLine && stageHint == null)
+            bool drawJudgementLine = _skinManager?.GetManiaConfig(_columnCount)?.JudgementLine ?? true;
+            if (drawJudgementLine)
             {
-                var lineRect = new Rectangle(_stageX, ReceptorY - 1, _stageWidth, 2);
+                int lineHeight = Math.Max(1, (int)MathF.Round(_screenHeight / 768f));
+                var lineRect = new Rectangle(_stageX, ReceptorY - lineHeight / 2, _stageWidth, lineHeight);
                 Color lineColor = Color.White;
                 
                 var customJudgementColor = _skinManager?.GetColourJudgementLine(_columnCount);
                 if (customJudgementColor.HasValue)
                 {
-                    lineColor = new Color(customJudgementColor.Value.R, customJudgementColor.Value.G, customJudgementColor.Value.B, customJudgementColor.Value.A);
+                    byte alpha = customJudgementColor.Value.A == 0 ? (byte)1 : customJudgementColor.Value.A;
+                    lineColor = new Color(customJudgementColor.Value.R, customJudgementColor.Value.G, customJudgementColor.Value.B,
+                        (byte)Math.Clamp((int)MathF.Round(alpha * 0.9f), 0, 255));
                 }
                 
-                _spriteBatch.Draw(_whitePixel, lineRect, lineColor * 0.8f);
+                _spriteBatch.Draw(_whitePixel, lineRect, lineColor);
             }
 
             // Dibujar separadores de columnas y bordes laterales sin estiramiento vertical (Vertical Tiling)
             Texture2D? stageLeft = _skinManager?.GetStageTexture(_columnCount, "left");
             Texture2D? stageRight = _skinManager?.GetStageTexture(_columnCount, "right");
-            float scale = (float)_screenHeight / 480f;
+            float unscaledSpriteScale = (float)_screenHeight / 768f;
 
             if (stageLeft != null)
             {
-                float texScale = _skinManager != null ? _skinManager.GetTextureScale(stageLeft) : 1.0f;
-                int borderW = (int)(stageLeft.Width * texScale * scale);
-                int texHeight = (int)(stageLeft.Height * texScale * scale);
-                
-                if (texHeight > 0)
-                {
-                    for (int drawY = 0; drawY < _screenHeight; drawY += texHeight)
-                    {
-                        int drawH = Math.Min(texHeight, _screenHeight - drawY);
-                        var destRect = new Rectangle(_stageX - borderW, drawY, borderW, drawH);
-                        int srcH = (int)(drawH / (texScale * scale));
-                        var srcRect = new Rectangle(0, 0, stageLeft.Width, srcH);
-                        _spriteBatch.Draw(stageLeft, destRect, srcRect, Color.White);
-                    }
-                }
-                else
-                {
-                    _spriteBatch.Draw(stageLeft, new Rectangle(_stageX - borderW, 0, borderW, _screenHeight), Color.White);
-                }
+                Vector2 leftSize = _skinManager!.GetLogicalSize(stageLeft);
+                int borderW = (int)MathF.Round(leftSize.X * unscaledSpriteScale);
+                _spriteBatch.Draw(stageLeft, new Rectangle(_stageX - borderW, 0, borderW, _screenHeight), Color.White);
             }
             if (stageRight != null)
             {
-                float texScale = _skinManager != null ? _skinManager.GetTextureScale(stageRight) : 1.0f;
-                int borderW = (int)(stageRight.Width * texScale * scale);
-                int texHeight = (int)(stageRight.Height * texScale * scale);
-                
-                if (texHeight > 0)
-                {
-                    for (int drawY = 0; drawY < _screenHeight; drawY += texHeight)
-                    {
-                        int drawH = Math.Min(texHeight, _screenHeight - drawY);
-                        var destRect = new Rectangle(_stageX + _stageWidth, drawY, borderW, drawH);
-                        int srcH = (int)(drawH / (texScale * scale));
-                        var srcRect = new Rectangle(0, 0, stageRight.Width, srcH);
-                        _spriteBatch.Draw(stageRight, destRect, srcRect, Color.White);
-                    }
-                }
-                else
-                {
-                    _spriteBatch.Draw(stageRight, new Rectangle(_stageX + _stageWidth, 0, borderW, _screenHeight), Color.White);
-                }
+                Vector2 rightSize = _skinManager!.GetLogicalSize(stageRight);
+                int borderW = (int)MathF.Round(rightSize.X * unscaledSpriteScale);
+                _spriteBatch.Draw(stageRight, new Rectangle(_stageX + _stageWidth, 0, borderW, _screenHeight), Color.White);
             }
 
             // Dibujar lineas de columna (Column Lines)
-            var columnLines = _skinManager?.GetColumnLines(_columnCount);
-            if (columnLines != null)
+            if (_skinManager?.GetManiaConfig(_columnCount) != null)
             {
-                for (int i = 0; i < columnLines.Length && i < _columns.Count - 1; i++)
+                float[]? widths = _skinManager.GetColumnLineWidths(_columnCount);
+                var colour = _skinManager.GetColourColumnLine(_columnCount);
+                Color lineColor = colour.HasValue
+                    ? new Color(colour.Value.R, colour.Value.G, colour.Value.B, colour.Value.A) : Color.White;
+                bool drawBothEdges = _skinManager.CurrentSkinConfig?.IsVersionAtLeast(2.4) == true;
+                for (int i = 0; i < _columns.Count; i++)
                 {
-                    if (columnLines[i])
+                    float leftWidth = widths != null && i < widths.Length && float.IsFinite(widths[i]) ? widths[i] : 2f;
+                    int leftPixels = (int)MathF.Round(leftWidth * 0.740f * unscaledSpriteScale);
+                    if (leftPixels > 0)
+                        _spriteBatch.Draw(_whitePixel, new Rectangle(_columns[i].X, 0, leftPixels, _screenHeight), GetDoubledAlphaColour(lineColor));
+
+                    if (i == _columns.Count - 1 || drawBothEdges)
                     {
-                        int lineX = _columns[i].X + _columns[i].Width;
-                        var lineRect = new Rectangle(lineX, 0, 2, _screenHeight);
-                        Color lineColor = new Color(150, 150, 150, 150);
-                        
-                        var customLineColor = _skinManager?.GetColourColumnLine(_columnCount);
-                        if (customLineColor.HasValue)
-                        {
-                            lineColor = new Color(customLineColor.Value.R, customLineColor.Value.G, customLineColor.Value.B, customLineColor.Value.A);
-                        }
-                        else
-                        {
-                            var barlineColor = _skinManager?.GetColourBarline(_columnCount);
-                            if (barlineColor.HasValue)
-                            {
-                                lineColor = new Color(barlineColor.Value.R, barlineColor.Value.G, barlineColor.Value.B, barlineColor.Value.A);
-                            }
-                        }
-                        
-                        _spriteBatch.Draw(_whitePixel, lineRect, lineColor);
+                        float rightWidth = widths != null && i + 1 < widths.Length && float.IsFinite(widths[i + 1]) ? widths[i + 1] : 2f;
+                        int rightPixels = (int)MathF.Round(rightWidth * 0.740f * unscaledSpriteScale);
+                        if (rightPixels > 0)
+                            _spriteBatch.Draw(_whitePixel, new Rectangle(_columns[i].X + _columns[i].Width - rightPixels,
+                                0, rightPixels, _screenHeight), GetDoubledAlphaColour(lineColor));
                     }
                 }
             }
@@ -592,8 +572,29 @@ namespace Nullscent.Rulesets.Mania.UI
             }
         }
 
+        private void DrawStageBottom(bool downScroll, double currentTime)
+        {
+            Texture2D? stageBottom = _skinManager?.GetAnimationFrame(_skinManager.GetStageAnimation(_columnCount, "bottom"), currentTime, 60);
+            if (stageBottom == null) return;
+
+            Vector2 size = _skinManager!.GetLogicalSize(stageBottom);
+            float scale = (float)_screenHeight / 480f;
+            int width = (int)(size.X * scale);
+            int height = (int)(size.Y * scale);
+            int x = _stageX + (_stageWidth - width) / 2;
+            int y = downScroll ? _screenHeight - height : 0;
+            _spriteBatch.Draw(stageBottom, new Rectangle(x, y, width, height), Color.White);
+        }
+
+        internal static Color GetDoubledAlphaColour(Color color)
+        {
+            byte alpha = (byte)Math.Clamp((int)MathF.Round(color.A * (color.A / 255f)), 0, 255);
+            return new Color(color.R, color.G, color.B, alpha);
+        }
+
         public void Dispose()
         {
+            if (_skinManager != null) _skinManager.SkinChanged -= OnSkinChanged;
             _whitePixel?.Dispose();
             _radialGlow?.Dispose();
             _linearGradient?.Dispose();
@@ -610,6 +611,13 @@ namespace Nullscent.Rulesets.Mania.UI
     /// </summary>
     public class Column : IDisposable
     {
+        private static readonly BlendState StageLightBlend = new()
+        {
+            ColorSourceBlend = Blend.DestinationColor,
+            ColorDestinationBlend = Blend.InverseSourceAlpha,
+            AlphaSourceBlend = Blend.One,
+            AlphaDestinationBlend = Blend.InverseSourceAlpha
+        };
         public Nullscent.Beatmap.Beatmap? Beatmap { get; set; }
         private readonly int _index;
         private int _x;
@@ -628,6 +636,8 @@ namespace Nullscent.Rulesets.Mania.UI
         private bool _isPressed;
         private bool _isHolding;
         private double _lightingEndTime;
+        private double _stageLightEndTime;
+        private double _holdLightingEndTime;
         private int _totalColumnCount;
         private readonly HitSoundPlayer? _hitSoundPlayer;
 
@@ -636,6 +646,7 @@ namespace Nullscent.Rulesets.Mania.UI
         public int ScreenHeight { get => _screenHeight; set => _screenHeight = value; }
         public bool IsHiddenActive { get; set; }
         public bool IsPressed => _isPressed;
+        public bool IsHolding => _isHolding;
 
         private void AddExplosion(HitResult result, double currentTime)
         {
@@ -840,6 +851,8 @@ namespace Nullscent.Rulesets.Mania.UI
         public void OnKeyPress(double currentTime, ManiaScoreProcessor scoreProcessor)
         {
             _isPressed = true;
+            _stageLightEndTime = 0;
+            _holdLightingEndTime = 0;
             bool hitSuccess = false;
 
             // Encontrar la primera nota pendiente (o candidata válida para LN)
@@ -942,6 +955,8 @@ namespace Nullscent.Rulesets.Mania.UI
         public void OnKeyRelease(double currentTime, ManiaScoreProcessor scoreProcessor)
         {
             _isPressed = false;
+            _stageLightEndTime = currentTime + 250;
+            _holdLightingEndTime = currentTime + 120;
 
             // Evaluar los resultados de soltar el teclado para las colas de las LN
             for (int i = 0; i < _drawableHitObjects.Count; i++)
@@ -1000,45 +1015,63 @@ namespace Nullscent.Rulesets.Mania.UI
             }
         }
 
-        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D radialGlow, Texture2D linearGradient, TrueTypeFontRenderer? fontRenderer,
-            double currentTime, double scrollSpeed, float receptorPosition, bool downScroll, int receptorY)
+        public void DrawBackground(SpriteBatch spriteBatch, Texture2D pixel)
         {
             // Fondo de la columna alternando colores para distinguir separación
             Color columnBg = _index % 2 == 0 ? new Color(20, 20, 25, 180) : new Color(25, 25, 30, 180);
+            if (_skinManager?.GetManiaConfig(_totalColumnCount) != null)
+                columnBg = Color.Black;
             
             // Si la skin define un color específico para esta columna, lo usamos
             var customColColor = _skinManager?.GetColumnColorMap(_totalColumnCount, _index);
             if (customColColor.HasValue)
             {
-                columnBg = new Color(customColColor.Value.R, customColColor.Value.G, customColColor.Value.B, (byte)(customColColor.Value.A * 0.7f));
+                columnBg = ManiaPlayfield.GetDoubledAlphaColour(new Color(customColColor.Value.R, customColColor.Value.G,
+                    customColColor.Value.B, customColColor.Value.A));
             }
             
             var columnRect = new Rectangle(_x, 0, _width, _screenHeight);
             spriteBatch.Draw(pixel, columnRect, columnBg);
+        }
 
-            // DIBUJAR STAGELIGHT (ILUMINACIÓN DE CARRIL DEBAJO DE LAS NOTAS) AL PULSAR LA TECLA
-            if (_isPressed)
+        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime, double scrollSpeed, bool downScroll, int receptorY)
+        {
+
+            // StageLight is part of the column background, below notes and keys.
+            float stageLightProgress = _isPressed ? 1f : (float)Math.Clamp((_stageLightEndTime - currentTime) / 250d, 0, 1);
+            if (stageLightProgress > 0)
             {
-                Texture2D? stageLight = _skinManager?.GetStageTexture(_totalColumnCount, "light");
+                Texture2D? stageLight = _skinManager?.GetAnimationFrame(
+                    _skinManager.GetStageAnimation(_totalColumnCount, "light"), currentTime,
+                    _skinManager.GetLightFramePerSecond(_totalColumnCount));
                 if (stageLight != null)
                 {
                     Color lightTint = Color.White;
                     var customLightColor = _skinManager?.GetColourLight(_totalColumnCount, _index);
                     if (customLightColor.HasValue)
                     {
-                        lightTint = new Color(customLightColor.Value.R, customLightColor.Value.G, customLightColor.Value.B, customLightColor.Value.A);
+                        byte alpha = customLightColor.Value.A == 0 ? (byte)1 : customLightColor.Value.A;
+                        lightTint = new Color(customLightColor.Value.R, customLightColor.Value.G, customLightColor.Value.B, alpha);
                     }
-                    
-                    int lightPos = _skinManager?.GetLightPosition(_totalColumnCount) ?? (receptorY + 11);
-                    float aspect = (float)stageLight.Height / stageLight.Width;
+
+                    int lightPos = _skinManager?.GetLightPosition(_totalColumnCount) is int configuredLightPosition
+                        ? (int)((downScroll ? configuredLightPosition : 480 - configuredLightPosition) * _screenHeight / 480f)
+                        : (downScroll ? _screenHeight : 0);
+                    Vector2 lightSize = _skinManager!.GetLogicalSize(stageLight);
+                    float aspect = lightSize.Y / lightSize.X;
                     int lightW = _width;
-                    int lightH = (int)(_width * aspect);
+                    int fullLightHeight = Math.Max(1, (int)MathF.Round(_width * aspect));
+                    int lightH = Math.Max(1, (int)MathF.Round(fullLightHeight * stageLightProgress));
                     
                     int lightY = downScroll ? lightPos - lightH : lightPos;
                     var lightRect = new Rectangle(_x, lightY, lightW, lightH);
                     
-                    SpriteEffects effects = downScroll ? SpriteEffects.FlipVertically : SpriteEffects.None;
-                    spriteBatch.Draw(stageLight, lightRect, null, lightTint, 0f, Vector2.Zero, effects, 0f);
+                    SpriteEffects effects = downScroll ? SpriteEffects.None : SpriteEffects.FlipVertically;
+                    spriteBatch.End();
+                    spriteBatch.Begin(SpriteSortMode.Deferred, StageLightBlend);
+                    spriteBatch.Draw(stageLight, lightRect, null, lightTint * stageLightProgress, 0f, Vector2.Zero, effects, 0f);
+                    spriteBatch.End();
+                    spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
                 }
             }
 
@@ -1075,17 +1108,17 @@ namespace Nullscent.Rulesets.Mania.UI
             // Local function to draw Receptor
             void DrawReceptor()
             {
-                var keyAnim = _skinManager?.GetKeyAnimation(_totalColumnCount, _index, _isPressed);
-                Texture2D? keyTexture = _skinManager?.GetAnimationFrame(keyAnim, currentTime);
+                Texture2D? keyTexture = _skinManager?.GetKeyTexture(_totalColumnCount, _index, _isPressed);
                 if (keyTexture != null)
                 {
                     float userScale = (float)Core.SettingsService.Instance.SkinReceptorHeightScale;
-                    float scale = (float)_screenHeight / 480f;
-                    int keyHeight = (int)(keyTexture.Height * scale * userScale);
+                    Vector2 keySize = _skinManager!.GetLogicalSize(keyTexture);
+                    int keyHeight = (int)(_width * keySize.Y / keySize.X * userScale);
 
                     int keyY = downScroll ? receptorY - keyHeight : receptorY;
                     var keyRect = new Rectangle(_x, keyY, _width, keyHeight);
-                    SpriteEffects effects = downScroll ? SpriteEffects.None : SpriteEffects.FlipVertically;
+                    SpriteEffects effects = _skinManager.FlipKey(_totalColumnCount, _index, _isPressed, downScroll)
+                        ? SpriteEffects.FlipVertically : SpriteEffects.None;
                     spriteBatch.Draw(keyTexture, keyRect, null, Color.White, 0f, Vector2.Zero, effects, 0f);
                 }
                 else
@@ -1104,88 +1137,6 @@ namespace Nullscent.Rulesets.Mania.UI
                 }
             }
 
-            // Local function to draw Lighting
-            void DrawLighting()
-            {
-                var lightingAnim = _isHolding
-                    ? _skinManager?.GetLightingLAnimation(_totalColumnCount, _index)
-                    : _skinManager?.GetLightingAnimation(_totalColumnCount, _index);
-                Texture2D? lightingTexture = _skinManager?.GetAnimationFrame(lightingAnim, currentTime);
-                bool isLightingEnabled = _skinManager?.IsLightingEnabled(_totalColumnCount) ?? true;
-                if (lightingTexture != null && isLightingEnabled)
-                {
-                    if (_isPressed || currentTime < _lightingEndTime)
-                    {
-                        float age = (float)(_lightingEndTime - currentTime);
-                        float alpha = _isPressed ? 0.4f : Math.Clamp(age / 150f * 0.4f, 0.0f, 0.4f);
-                        
-                        float texScale = _skinManager != null ? _skinManager.GetTextureScale(lightingTexture) : 1.0f;
-                        float aspect = (float)lightingTexture.Height / lightingTexture.Width;
-                        
-                        int lightX = _x;
-                        int lightW = _width;
-                        
-                        float[]? lightingWidths = _isHolding
-                            ? _skinManager?.GetLightingLWidths(_totalColumnCount)
-                            : _skinManager?.GetLightingNWidths(_totalColumnCount);
-                            
-                        if (lightingWidths != null && _index < lightingWidths.Length && lightingWidths[_index] > 0)
-                        {
-                            lightW = (int)lightingWidths[_index];
-                            lightX = _x + (_width - lightW) / 2;
-                        }
-                        
-                        int lightH = (int)(lightW * aspect * texScale);
-                        if (lightH <= 0) lightH = 220;
-                        
-                        int lightY = downScroll ? receptorY - lightH : receptorY;
-                        Rectangle lightRect = new Rectangle(lightX, lightY, lightW, lightH);
-                        
-                        SpriteEffects effects = downScroll ? SpriteEffects.FlipVertically : SpriteEffects.None;
-
-                        // Apply custom light color if defined in the skin
-                        Color lightTint = Color.White;
-                        var customLightColor = _skinManager?.GetColourLight(_totalColumnCount, _index);
-                        if (customLightColor.HasValue)
-                        {
-                            lightTint = new Color(customLightColor.Value.R, customLightColor.Value.G, customLightColor.Value.B, customLightColor.Value.A);
-                        }
-                        
-                        spriteBatch.Draw(lightingTexture, lightRect, null, lightTint * alpha, 0f, Vector2.Zero, effects, 0f);
-                    }
-                }
-                else
-                {
-                    if (_isPressed || currentTime < _lightingEndTime)
-                    {
-                        float age = (float)(_lightingEndTime - currentTime);
-                        float alpha = _isPressed ? 0.35f : Math.Clamp(age / 150f * 0.35f, 0.0f, 0.35f);
-                        
-                        Color laneColor = GetLaneColor(_index);
-                        var customLightColor = _skinManager?.GetColourLight(_totalColumnCount, _index);
-                        if (customLightColor.HasValue)
-                        {
-                            laneColor = new Color(customLightColor.Value.R, customLightColor.Value.G, customLightColor.Value.B, customLightColor.Value.A);
-                        }
-                        
-                        Rectangle lightRect;
-                        SpriteEffects effects;
-                        if (downScroll)
-                        {
-                            lightRect = new Rectangle(_x + 2, receptorY - 220, _width - 4, 220);
-                            effects = SpriteEffects.FlipVertically;
-                        }
-                        else
-                        {
-                            lightRect = new Rectangle(_x + 2, receptorY, _width - 4, 220);
-                            effects = SpriteEffects.None;
-                        }
-
-                        spriteBatch.Draw(linearGradient, lightRect, null, laneColor * alpha, 0f, Vector2.Zero, effects, 0f);
-                    }
-                }
-            }
-
             if (keysUnderNotes)
             {
                 DrawReceptor();
@@ -1196,16 +1147,65 @@ namespace Nullscent.Rulesets.Mania.UI
                 DrawNotes();
                 DrawReceptor();
             }
+        }
 
-            DrawLighting();
+        public void DrawForeground(SpriteBatch spriteBatch, Texture2D radialGlow, double currentTime, int receptorY)
+        {
+            DrawHoldLighting(spriteBatch, currentTime, receptorY);
 
-            // Renderizar explosiones de acierto
             var skinnedExplosionFrames = _skinManager?.GetHitExplosionAnimation(_totalColumnCount, _index);
             int explosionCount = _explosions.Count;
+            bool additiveExplosions = skinnedExplosionFrames is { Count: > 0 } && explosionCount > 0;
+            if (additiveExplosions)
+            {
+                spriteBatch.End();
+                spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive);
+            }
             for (int i = 0; i < explosionCount; i++)
             {
-                _explosions[i].Draw(spriteBatch, pixel, radialGlow, _x, _width, receptorY, currentTime, skinnedExplosionFrames);
+                float[]? normalLightingWidths = _skinManager?.GetLightingNWidths(_totalColumnCount);
+                float? normalLightingWidth = normalLightingWidths != null && _index < normalLightingWidths.Length
+                    ? normalLightingWidths[_index] : null;
+                _explosions[i].Draw(spriteBatch, _pixel, radialGlow, _x, _width, receptorY, currentTime,
+                    skinnedExplosionFrames, _skinManager, _screenHeight / 768f, normalLightingWidth);
             }
+            if (additiveExplosions)
+            {
+                spriteBatch.End();
+                spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
+            }
+        }
+
+        private void DrawHoldLighting(SpriteBatch spriteBatch, double currentTime, int receptorY)
+        {
+            if (!_isHolding && currentTime >= _holdLightingEndTime) return;
+
+            var lightingAnim = _skinManager?.GetLightingLAnimation(_totalColumnCount, _index);
+            int lightingFps = lightingAnim == null ? 60
+                : (int)Math.Min(60, Math.Max(1, lightingAnim.Count * 1000d / 170d));
+            Texture2D? lightingTexture = _skinManager?.GetAnimationFrame(lightingAnim, currentTime, lightingFps);
+            bool isLightingEnabled = _skinManager?.IsLightingEnabled(_totalColumnCount) ?? true;
+            if (lightingTexture == null || !isLightingEnabled) return;
+
+            float alpha = _isHolding ? 0.4f : Math.Clamp((float)((_holdLightingEndTime - currentTime) / 120d) * 0.4f, 0f, 0.4f);
+            Vector2 logicalSize = _skinManager!.GetLogicalSize(lightingTexture);
+            float widthScale = 1f;
+            float[]? configuredWidths = _skinManager.GetLightingLWidths(_totalColumnCount);
+            if (configuredWidths != null && _index < configuredWidths.Length && configuredWidths[_index] > 0)
+                widthScale = configuredWidths[_index] / 30f;
+
+            float textureScale = _screenHeight / 768f * widthScale;
+            int lightW = Math.Max(1, (int)MathF.Round(logicalSize.X * textureScale));
+            int lightH = Math.Max(1, (int)MathF.Round(logicalSize.Y * textureScale));
+            int lightX = _x + (_width - lightW) / 2;
+            int lightY = receptorY - lightH / 2;
+            Rectangle lightRect = new Rectangle(lightX, lightY, lightW, lightH);
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive);
+            spriteBatch.Draw(lightingTexture, lightRect, null, Color.White * alpha);
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
         }
 
         public void Dispose()

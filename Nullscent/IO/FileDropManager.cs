@@ -6,6 +6,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Windows.Forms;
+using Nullscent.Skin;
 
 namespace Nullscent.IO
 {
@@ -18,19 +19,22 @@ namespace Nullscent.IO
     {
         private readonly string _songsDirectory;
         private readonly string _skinsDirectory;
+        private readonly SkinCatalog _skinCatalog;
 
         public event Action<string>? OnBeatmapImported;
-        public event Action<string>? OnSkinImported;
+        public event Action<SkinValidation>? OnSkinImported;
         public event Action<string>? OnImportError;
 
-        public FileDropManager(GameWindow window, string songsDirectory, string skinsDirectory)
+        public FileDropManager(GameWindow window, string songsDirectory, string skinsDirectory, SkinCatalog skinCatalog)
         {
             _songsDirectory = songsDirectory;
             _skinsDirectory = skinsDirectory;
+            _skinCatalog = skinCatalog;
 
             // Asegurar que las carpetas existan
             Directory.CreateDirectory(_songsDirectory);
-            Directory.CreateDirectory(_skinsDirectory);
+            try { Directory.CreateDirectory(_skinsDirectory); }
+            catch (Exception ex) { Console.WriteLine($"[FileDropManager] Skin imports unavailable: {ex.Message}"); }
 
             Console.WriteLine($"[FileDropManager] Songs directory: {_songsDirectory}");
             Console.WriteLine($"[FileDropManager] Skins directory: {_skinsDirectory}");
@@ -141,8 +145,6 @@ namespace Nullscent.IO
         {
             string fileName = Path.GetFileNameWithoutExtension(oskPath);
             string targetDirectory = Path.Combine(_skinsDirectory, SanitizeFolderName(fileName));
-
-            // Si ya existe, agregar número
             int counter = 1;
             string baseDirectory = targetDirectory;
             while (Directory.Exists(targetDirectory))
@@ -150,68 +152,45 @@ namespace Nullscent.IO
                 targetDirectory = $"{baseDirectory} ({counter})";
                 counter++;
             }
-
-            Directory.CreateDirectory(targetDirectory);
-
+            string staging = Path.Combine(_skinsDirectory, ".import-" + Guid.NewGuid().ToString("N"));
             try
             {
-                // Extraer .osk (es un ZIP)
-                ZipFile.ExtractToDirectory(oskPath, targetDirectory);
-
-                // Resolver anidación innecesaria (aplanar carpetas únicas contenedoras)
+                Directory.CreateDirectory(staging);
+                ZipFile.ExtractToDirectory(oskPath, staging);
+                string root = staging;
                 while (true)
                 {
-                    try
-                    {
-                        var files = Directory.GetFiles(targetDirectory);
-                        var directories = Directory.GetDirectories(targetDirectory);
-
-                        // Si no hay archivos en la raíz y hay exactamente un subdirectorio, subimos su contenido
-                        if (files.Length == 0 && directories.Length == 1)
-                        {
-                            string singleSubdir = directories[0];
-                            
-                            foreach (var file in Directory.GetFiles(singleSubdir))
-                            {
-                                string destFile = Path.Combine(targetDirectory, Path.GetFileName(file));
-                                if (File.Exists(destFile)) File.Delete(destFile);
-                                File.Move(file, destFile);
-                            }
-                            
-                            foreach (var dir in Directory.GetDirectories(singleSubdir))
-                            {
-                                string destDir = Path.Combine(targetDirectory, Path.GetFileName(dir));
-                                if (Directory.Exists(destDir)) Directory.Delete(destDir, true);
-                                Directory.Move(dir, destDir);
-                            }
-                            
-                            Directory.Delete(singleSubdir, true);
-                            Console.WriteLine($"[FileDropManager] Flattened nested skin subdirectory: {singleSubdir}");
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[FileDropManager] Error flattening skin directories: {ex.Message}");
-                        break;
-                    }
+                    string[] files = Directory.GetFiles(root);
+                    string[] dirs = Directory.GetDirectories(root);
+                    if (files.Length != 0 || dirs.Length != 1) break;
+                    root = dirs[0];
                 }
-
+                var checkedSkin = _skinCatalog.Validate(root);
+                if (checkedSkin.Status == SkinValidity.Invalid)
+                    throw new InvalidDataException(checkedSkin.Summary);
+                if (!IsWithin(staging, root) && !Path.GetFullPath(root).Equals(Path.GetFullPath(staging), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("La raíz de skin sale de la carpeta temporal.");
+                if (!IsWithin(_skinsDirectory, targetDirectory))
+                    throw new InvalidDataException("El destino de la skin sale de la biblioteca.");
+                Directory.Move(root, targetDirectory);
+                _skinCatalog.Refresh();
+                var installed = _skinCatalog.Validate(targetDirectory);
                 Console.WriteLine($"[FileDropManager] Imported skin: {fileName} -> {targetDirectory}");
-                OnSkinImported?.Invoke(targetDirectory);
+                OnSkinImported?.Invoke(installed);
             }
             catch (Exception ex)
             {
-                // Limpiar si falla
-                if (Directory.Exists(targetDirectory) && !Directory.EnumerateFiles(targetDirectory).Any())
-                    Directory.Delete(targetDirectory);
-
                 throw new Exception($"Failed to extract skin: {ex.Message}", ex);
             }
+            finally
+            {
+                if (IsWithin(_skinsDirectory, staging) && Directory.Exists(staging)) Directory.Delete(staging, true);
+            }
         }
+
+        private static bool IsWithin(string parent, string child) => Path.GetFullPath(child).StartsWith(
+            Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// Importa un archivo .osu suelto creando una carpeta para él.

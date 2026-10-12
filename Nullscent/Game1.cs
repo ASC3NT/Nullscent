@@ -14,6 +14,7 @@ using Nullscent.UI;
 using Nullscent.Screens;
 using System;
 using System.IO;
+using System.Linq;
 
 namespace Nullscent
 {
@@ -34,6 +35,7 @@ namespace Nullscent
         private InputManager? _inputManager;
         private GameStateManager? _stateManager;
         private SkinManager? _skinManager;
+        private SkinCatalog? _skinCatalog;
         private GameSettings? _settings;
         private FileDropManager? _fileDropManager;
         private TrueTypeFontRenderer? _fontRenderer;
@@ -68,6 +70,54 @@ namespace Nullscent
         public GameSettings Settings => _settings!;
         public FileDropManager FileDropManager => _fileDropManager!;
         public SkinManager SkinManager => _skinManager!;
+        public SkinCatalog SkinCatalog => _skinCatalog!;
+        public string? SkinNotice { get; private set; }
+        private double _skinNoticeTimer;
+
+        public bool SelectSkin(string? path)
+        {
+            if (_skinManager == null || _skinCatalog == null || _settings == null) return false;
+            SkinValidation? validation = path == null ? null : _skinCatalog.Validate(path);
+            if (validation?.Status == SkinValidity.Invalid)
+            {
+                ShowSkinNotice(validation.Summary);
+                return false;
+            }
+            bool PersistSelection()
+            {
+                string? oldRoot = _settings.SkinsRootDirectory;
+                string? oldSelection = _settings.SelectedSkinDirectory;
+                _settings.SkinsRootDirectory = _skinCatalog.Root;
+                _settings.SelectedSkinDirectory = path;
+                if (_settings.TrySave()) return true;
+                _settings.SkinsRootDirectory = oldRoot;
+                _settings.SelectedSkinDirectory = oldSelection;
+                return false;
+            }
+            bool activated = validation == null
+                ? _skinManager.TryActivateInternal(PersistSelection)
+                : _skinManager.TryActivate(validation, PersistSelection);
+            if (!activated)
+            {
+                ShowSkinNotice(validation?.Errors.LastOrDefault() ?? "No se pudo activar la skin interna; se conservó la skin anterior.");
+                return false;
+            }
+            if (_hitSoundPlayer != null)
+            {
+                _hitSoundPlayer.SkinDirectory = _skinManager.CurrentSkinDirectory;
+                _hitSoundPlayer.ClearCache();
+            }
+            if (validation?.Status == SkinValidity.Partial) ShowSkinNotice(validation.Summary);
+            else ShowSkinNotice(path == null ? "Skin interna de Nullscent activa." : "Skin activada.");
+            return true;
+        }
+
+        private void ShowSkinNotice(string message)
+        {
+            SkinNotice = message;
+            _skinNoticeTimer = 8.0;
+            Console.WriteLine($"[Skin] {message}");
+        }
         public GraphicsDeviceManager Graphics => _graphics;
         public int WindowWidth => _graphics.PreferredBackBufferWidth;
         public int WindowHeight => _graphics.PreferredBackBufferHeight;
@@ -156,21 +206,12 @@ namespace Nullscent
                 _settings.Save();
             }
 
-            try
-            {
-                Directory.CreateDirectory(_settings.SkinDirectory);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Game1] Warning: Failed to create Skin directory at {_settings.SkinDirectory}: {ex.Message}");
-                string appDataSkin = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Nullscent", "Skin");
-                _settings.SkinDirectory = appDataSkin;
-                Directory.CreateDirectory(appDataSkin);
-                _settings.Save();
-            }
+            var (skinsRoot, _) = _settings.ResolveSkinPaths();
+            try { Directory.CreateDirectory(skinsRoot); }
+            catch (Exception ex) { Console.WriteLine($"[Game1] Skins directory unavailable; using internal skin: {ex.Message}"); }
 
             Console.WriteLine($"[Game1] Songs: {Path.GetFullPath(_settings.SongsDirectory)}");
-            Console.WriteLine($"[Game1] Skins: {Path.GetFullPath(_settings.SkinDirectory)}");
+            Console.WriteLine($"[Game1] Skins: {skinsRoot}");
 
             // Inicializar AudioEngine (BASS)
             _audioEngine = new AudioEngine();
@@ -236,49 +277,19 @@ namespace Nullscent
             // Inicializar SkinManager
             _skinManager = new SkinManager(GraphicsDevice);
 
-            // Cargar skin por defecto
-            if (Directory.Exists(_settings!.SkinDirectory))
+            var (skinsRoot, selectedSkin) = _settings!.ResolveSkinPaths();
+            _skinCatalog = new SkinCatalog(skinsRoot);
+            _skinCatalog.Refresh();
+            if (selectedSkin != null)
             {
-                bool success = _skinManager.LoadSkin(_settings.SkinDirectory);
-                if (success && _skinManager.CurrentSkinConfig != null)
-                {
-                    Console.WriteLine($"[Game1] Loaded default skin from {_skinManager.CurrentSkinDirectory}");
-                    if (_hitSoundPlayer != null)
-                    {
-                        _hitSoundPlayer.SkinDirectory = _skinManager.CurrentSkinDirectory;
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("[Game1] No skin.ini found in Skin directory or subdirectories, using fallback rendering");
-                    if (_hitSoundPlayer != null)
-                    {
-                        _hitSoundPlayer.SkinDirectory = _settings.SkinDirectory;
-                    }
-                }
+                var validation = _skinCatalog.Validate(selectedSkin);
+                if (!_skinManager.TryActivate(validation)) ShowSkinNotice($"La skin guardada no está disponible. {validation.Summary} Se usa la skin interna.");
+                else if (validation.Status == SkinValidity.Partial) ShowSkinNotice(validation.Summary);
             }
-
-            // Resolver la carpeta raíz de skins (padre de la skin activa si no es el directorio raíz "Skin")
-            string skinsRoot = _settings.SkinDirectory;
-            try
-            {
-                string normalizedSkins = skinsRoot.Replace('\\', '/').TrimEnd('/');
-                if (!normalizedSkins.EndsWith("/Skin", StringComparison.OrdinalIgnoreCase) && !normalizedSkins.EndsWith("/Skins", StringComparison.OrdinalIgnoreCase))
-                {
-                    string? parent = Path.GetDirectoryName(skinsRoot);
-                    if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
-                    {
-                        skinsRoot = parent;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Game1] Error resolving skins root directory: {ex.Message}");
-            }
+            _hitSoundPlayer!.SkinDirectory = _skinManager.CurrentSkinDirectory;
 
             // Inicializar FileDropManager para drag-and-drop de .osz y .osk
-            _fileDropManager = new FileDropManager(Window, _settings.SongsDirectory, skinsRoot);
+            _fileDropManager = new FileDropManager(Window, _settings.SongsDirectory, skinsRoot, _skinCatalog);
             _fileDropManager.OnBeatmapImported += path =>
             {
                 Console.WriteLine($"[FileDropManager] Beatmap imported: {path}");
@@ -288,22 +299,15 @@ namespace Nullscent
                     songSelect.TriggerRescan(path);
                 }
             };
-            _fileDropManager.OnSkinImported += path =>
+            _fileDropManager.OnSkinImported += validation =>
             {
-                Console.WriteLine($"[FileDropManager] Skin imported: {path}");
-                // Auto-load si el usuario lo desea
-                _skinManager.LoadSkin(path);
-                _settings.SkinDirectory = path;
-                _settings.Save();
-                if (_hitSoundPlayer != null)
-                {
-                    _hitSoundPlayer.SkinDirectory = path;
-                    _hitSoundPlayer.ClearCache();
-                }
+                Console.WriteLine($"[FileDropManager] Skin imported: {validation.Directory}");
+                SelectSkin(validation.Directory);
             };
             _fileDropManager.OnImportError += error =>
             {
                 Console.WriteLine($"[FileDropManager] ERROR: {error}");
+                ShowSkinNotice(error);
             };
 
             Console.WriteLine("[Game1] File drop manager initialized (drag .osz or .osk files to import!)");
@@ -416,6 +420,8 @@ namespace Nullscent
                 {
                     _volumeOverlayTimer = Math.Max(0.0, _volumeOverlayTimer - gameTime.ElapsedGameTime.TotalSeconds);
                 }
+                if (_skinNoticeTimer > 0)
+                    _skinNoticeTimer = Math.Max(0.0, _skinNoticeTimer - gameTime.ElapsedGameTime.TotalSeconds);
 
                 // Actualizar transición de fundido
                 if (_transitionAlpha > 0)
@@ -468,6 +474,20 @@ namespace Nullscent
 
                 // Dibujar settings overlay deslizable por encima
                 _settingsOverlay?.Draw(gameTime);
+
+                if (_skinNoticeTimer > 0 && SkinNotice != null && _spriteBatch != null && _fontRenderer != null)
+                {
+                    _spriteBatch.Begin();
+                    _fontRenderer.SetFontSize(14);
+                    _fontRenderer.DrawBox(new Rectangle(8, WindowHeight - 55, Math.Max(100, WindowWidth - 16), 46), new Color(25, 25, 35, 230));
+                    string visibleNotice = SkinNotice;
+                    while (visibleNotice.Length > 0 && _fontRenderer.MeasureText(visibleNotice).X > WindowWidth - 36)
+                        visibleNotice = visibleNotice[..^1];
+                    if (visibleNotice.Length < SkinNotice.Length && visibleNotice.Length > 3)
+                        visibleNotice = visibleNotice[..^3] + "...";
+                    _fontRenderer.DrawText(visibleNotice, 18, WindowHeight - 41, Color.White);
+                    _spriteBatch.End();
+                }
 
                 // Dibujar transición de fundido
                 if (_transitionAlpha > 0 && _fadeTexture != null && _spriteBatch != null)
@@ -532,16 +552,16 @@ namespace Nullscent
                 {
                     IsMouseVisible = false;
                     var mouseState = Mouse.GetState();
-                    _spriteBatch.Begin();
-                    float cursorScale = _skinManager != null ? _skinManager.GetTextureScale(cursorTex) : 1.0f;
+                    _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
+                    var cursorSize = _skinManager!.GetLogicalSize(cursorTex);
                     _spriteBatch.Draw(
                         cursorTex, 
-                        new Vector2(mouseState.X, mouseState.Y), 
+                        new Rectangle((int)(mouseState.X - cursorSize.X / 2), (int)(mouseState.Y - cursorSize.Y / 2),
+                            (int)cursorSize.X, (int)cursorSize.Y),
                         null, 
                         Color.White, 
                         0f, 
-                        new Vector2(cursorTex.Width / 2f, cursorTex.Height / 2f), 
-                        cursorScale, 
+                        Vector2.Zero,
                         SpriteEffects.None, 
                         0f
                     );

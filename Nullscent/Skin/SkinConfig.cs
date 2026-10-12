@@ -15,9 +15,16 @@ namespace Nullscent.Skin
     public class SkinConfig
     {
         public string SkinDirectory { get; set; } = string.Empty;
+        public string? ParseError { get; set; }
         public string Name { get; set; } = "Default";
         public string Author { get; set; } = "Unknown";
-        public string Version { get; set; } = "1.0";
+        public string ComboPrefix { get; set; } = "score";
+        public float ComboOverlap { get; set; }
+        // A folder without skin.ini uses the newest legacy rules. An ini without
+        // Version uses 1.0, as specified by the osu! skinning contract.
+        public string Version { get; set; } = "latest";
+        public bool IsVersionAtLeast(double minimum) => Version.Equals("latest", StringComparison.OrdinalIgnoreCase)
+            || (double.TryParse(Version, NumberStyles.Float, CultureInfo.InvariantCulture, out double version) && version >= minimum);
         public int AnimationFramerate { get; set; } = -1; // -1 significa auto-calcular o fallback
 
         /// <summary>
@@ -49,14 +56,18 @@ namespace Nullscent.Skin
     {
         public float[]? ColumnWidths { get; set; }
         public float[]? ColumnSpacing { get; set; }
+        public float[]? ColumnLineWidths { get; set; }
         public bool[]? ColumnLines { get; set; }
         public float[]? LightingNWidths { get; set; }
         public float[]? LightingLWidths { get; set; }
         public float? ColumnStart { get; set; }
+        public float? ColumnRight { get; set; }
+        public float? BarlineHeight { get; set; }
         public float? WidthForNoteHeightScale { get; set; }
         public (byte R, byte G, byte B, byte A)[]? ColumnColors { get; set; } // Obsoleto, usar ColumnColorsMap
         public int? HitPosition { get; set; }
         public int? LightPosition { get; set; }
+        public int LightFramePerSecond { get; set; } = 60;
         public bool ColumnLighting { get; set; } = true;
         public bool JudgementLine { get; set; } = true;
         public int SpecialStyle { get; set; } = 0;
@@ -66,6 +77,10 @@ namespace Nullscent.Skin
         public int? ComboPosition { get; set; }
         public int NoteBodyStyle { get; set; } = 1;
         public Dictionary<int, int> NoteBodyStyles { get; set; } = new();
+        public bool? NoteFlipWhenUpsideDown { get; set; }
+        public bool? KeyFlipWhenUpsideDown { get; set; }
+        public Dictionary<string, bool> NoteFlips { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, bool> KeyFlips { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         // Colores ColourX, ColourLightX, ColourHoldX (0-indexed para ColumnIndex)
         public Dictionary<int, (byte R, byte G, byte B, byte A)> ColumnColorsMap { get; set; } = new();
@@ -93,6 +108,7 @@ namespace Nullscent.Skin
         public Dictionary<int, string> NoteTailImages { get; set; } = new();
         public Dictionary<int, string> KeyImages { get; set; } = new();
         public Dictionary<int, string> KeyPressedImages { get; set; } = new();
+        public Dictionary<string, string> HitImages { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -109,40 +125,15 @@ namespace Nullscent.Skin
         public static SkinConfig Parse(string skinDirectory)
         {
             string iniPath = Path.Combine(skinDirectory, "skin.ini");
-            string resolvedSkinDir = skinDirectory;
-
-            if (!File.Exists(iniPath))
-            {
-                try
-                {
-                    if (Directory.Exists(skinDirectory))
-                    {
-                        var subDirs = Directory.GetDirectories(skinDirectory);
-                        foreach (var subDir in subDirs)
-                        {
-                            if (File.Exists(Path.Combine(subDir, "skin.ini")))
-                            {
-                                resolvedSkinDir = subDir;
-                                iniPath = Path.Combine(resolvedSkinDir, "skin.ini");
-                                Console.WriteLine($"[SkinConfigParser] Found skin.ini in subdirectory: {resolvedSkinDir}");
-                                break;
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[SkinConfigParser] Error searching subdirectories: {ex.Message}");
-                }
-            }
-
-            var config = new SkinConfig { SkinDirectory = resolvedSkinDir };
+            var config = new SkinConfig { SkinDirectory = skinDirectory };
 
             if (!File.Exists(iniPath))
             {
                 Console.WriteLine($"[SkinConfigParser] No skin.ini found in {skinDirectory}, using defaults");
                 return config;
             }
+
+            config.Version = "1.0";
 
             try
             {
@@ -189,14 +180,27 @@ namespace Nullscent.Skin
                 // Procesar cada sección recolectada
                 foreach (var section in sections)
                 {
-                    if (section.Name == "General")
+                    if (section.Name.Equals("General", StringComparison.OrdinalIgnoreCase))
                     {
                         foreach (var kvp in section.KeyValues)
                         {
                             ParseGeneralSection(kvp.Key, kvp.Value, config);
                         }
                     }
-                    else if (section.Name == "Mania" || (section.Name.StartsWith("Mania") && section.Name.EndsWith("K")))
+                    else if (section.Name.Equals("Fonts", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var kvp in section.KeyValues)
+                        {
+                            if (kvp.Key.Equals("ComboPrefix", StringComparison.OrdinalIgnoreCase))
+                                config.ComboPrefix = kvp.Value;
+                            else if (kvp.Key.Equals("ComboOverlap", StringComparison.OrdinalIgnoreCase)
+                                && float.TryParse(kvp.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float overlap))
+                                config.ComboOverlap = overlap;
+                        }
+                    }
+                    else if (section.Name.Equals("Mania", StringComparison.OrdinalIgnoreCase)
+                        || (section.Name.StartsWith("Mania", StringComparison.OrdinalIgnoreCase)
+                            && section.Name.EndsWith("K", StringComparison.OrdinalIgnoreCase)))
                     {
                         // 1. Determinar keyCount. Primero ver si está la clave 'Keys' en la sección.
                         int? keyCount = null;
@@ -206,7 +210,8 @@ namespace Nullscent.Skin
                             keyCount = parsedKeys;
                         }
                         // Si no, intentar obtenerlo del nombre de la sección (ej: [Mania4K] -> 4)
-                        else if (section.Name.StartsWith("Mania") && section.Name.EndsWith("K"))
+                        else if (section.Name.StartsWith("Mania", StringComparison.OrdinalIgnoreCase)
+                            && section.Name.EndsWith("K", StringComparison.OrdinalIgnoreCase))
                         {
                             string keyStr = section.Name[5..^1];
                             if (int.TryParse(keyStr, out int parsedKeysSec))
@@ -216,19 +221,12 @@ namespace Nullscent.Skin
                         }
 
                         // 2. Obtener o crear configuración correspondiente
-                        ManiaKeyConfig maniaConfig;
-                        if (keyCount.HasValue)
+                        if (!keyCount.HasValue || keyCount.Value < 1 || keyCount.Value > 18)
+                            continue;
+                        if (!config.ManiaConfigs.TryGetValue(keyCount.Value, out var maniaConfig))
                         {
-                            if (!config.ManiaConfigs.TryGetValue(keyCount.Value, out var specificConfig))
-                            {
-                                specificConfig = new ManiaKeyConfig();
-                                config.ManiaConfigs[keyCount.Value] = specificConfig;
-                            }
-                            maniaConfig = specificConfig;
-                        }
-                        else
-                        {
-                            maniaConfig = config.DefaultConfig;
+                            maniaConfig = new ManiaKeyConfig();
+                            config.ManiaConfigs[keyCount.Value] = maniaConfig;
                         }
 
                         // 3. Parsear todas las claves de esta sección
@@ -245,6 +243,7 @@ namespace Nullscent.Skin
             catch (Exception ex)
             {
                 Console.WriteLine($"[SkinConfigParser] Failed to parse skin.ini: {ex.Message}");
+                config.ParseError = ex.Message;
                 return config;
             }
         }
@@ -279,6 +278,10 @@ namespace Nullscent.Skin
             {
                 maniaConfig.ColumnSpacing = ParseFloatArray(value);
             }
+            else if (key.Equals("ColumnLineWidth", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.ColumnLineWidths = ParseFloatArray(value);
+            }
             else if (key.Equals("ColumnLine", StringComparison.OrdinalIgnoreCase))
             {
                 maniaConfig.ColumnLines = ParseBoolArray(value);
@@ -287,6 +290,16 @@ namespace Nullscent.Skin
             {
                 if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float start))
                     maniaConfig.ColumnStart = start;
+            }
+            else if (key.Equals("ColumnRight", StringComparison.OrdinalIgnoreCase))
+            {
+                if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float right))
+                    maniaConfig.ColumnRight = right;
+            }
+            else if (key.Equals("BarlineHeight", StringComparison.OrdinalIgnoreCase))
+            {
+                if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float height))
+                    maniaConfig.BarlineHeight = height;
             }
             else if (key.Equals("WidthForNoteHeightScale", StringComparison.OrdinalIgnoreCase))
             {
@@ -302,6 +315,11 @@ namespace Nullscent.Skin
             {
                 if (int.TryParse(value, out int lightPos))
                     maniaConfig.LightPosition = lightPos;
+            }
+            else if (key.Equals("LightFramePerSecond", StringComparison.OrdinalIgnoreCase))
+            {
+                if (int.TryParse(value, out int fps))
+                    maniaConfig.LightFramePerSecond = fps > 0 ? fps : 60;
             }
             else if (key.Equals("LightingNWidth", StringComparison.OrdinalIgnoreCase))
             {
@@ -329,6 +347,12 @@ namespace Nullscent.Skin
             {
                 if (int.TryParse(value, out int style))
                     maniaConfig.SpecialStyle = style;
+                else if (value.Equals("Left", StringComparison.OrdinalIgnoreCase))
+                    maniaConfig.SpecialStyle = 1;
+                else if (value.Equals("Right", StringComparison.OrdinalIgnoreCase))
+                    maniaConfig.SpecialStyle = 2;
+                else if (value.Equals("None", StringComparison.OrdinalIgnoreCase))
+                    maniaConfig.SpecialStyle = 0;
             }
             else if (key.Equals("UpsideDown", StringComparison.OrdinalIgnoreCase))
             {
@@ -370,6 +394,15 @@ namespace Nullscent.Skin
             {
                 maniaConfig.StageLight = value;
             }
+            else if (key.Equals("Hit0", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("Hit50", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("Hit100", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("Hit200", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("Hit300", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("Hit300g", StringComparison.OrdinalIgnoreCase))
+            {
+                maniaConfig.HitImages[key] = value;
+            }
             else if (key.Equals("ColourBarline", StringComparison.OrdinalIgnoreCase))
             {
                 var col = ParseColor(value);
@@ -408,6 +441,24 @@ namespace Nullscent.Skin
                         if (bodyStyle >= 0 && bodyStyle <= 2)
                             maniaConfig.NoteBodyStyle = bodyStyle;
                     }
+                }
+            }
+            else if (key.StartsWith("NoteFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase))
+            {
+                string suffix = key["NoteFlipWhenUpsideDown".Length..];
+                if (value is "0" or "1")
+                {
+                    if (suffix.Length == 0) maniaConfig.NoteFlipWhenUpsideDown = value == "1";
+                    else maniaConfig.NoteFlips[suffix] = value == "1";
+                }
+            }
+            else if (key.StartsWith("KeyFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase))
+            {
+                string suffix = key["KeyFlipWhenUpsideDown".Length..];
+                if (value is "0" or "1")
+                {
+                    if (suffix.Length == 0) maniaConfig.KeyFlipWhenUpsideDown = value == "1";
+                    else maniaConfig.KeyFlips[suffix] = value == "1";
                 }
             }
             else if (key.StartsWith("ColourLight", StringComparison.OrdinalIgnoreCase))
@@ -488,7 +539,7 @@ namespace Nullscent.Skin
         private static float[] ParseFloatArray(string value)
         {
             return value.Split(',')
-                .Select(s => float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float w) ? w : 0f)
+                .Select(s => float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float w) && float.IsFinite(w) ? w : 0f)
                 .ToArray();
         }
 

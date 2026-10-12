@@ -36,7 +36,7 @@ namespace Nullscent.Rulesets.Mania.UI
             int screenWidth = _graphicsDevice.Viewport.Width;
             int screenHeight = _graphicsDevice.Viewport.Height;
 
-            _spriteBatch.Begin();
+            _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
 
             _fontRenderer.SetFontSize(24);
 
@@ -90,18 +90,18 @@ namespace Nullscent.Rulesets.Mania.UI
                 int x = 20;
                 int y = 20;
 
-                float bgScale = skinManager != null ? skinManager.GetTextureScale(bgTex) : 1.0f;
-                float colScale = skinManager != null ? skinManager.GetTextureScale(colTex) : 1.0f;
+                Vector2 bgSize = skinManager!.GetLogicalSize(bgTex);
+                Vector2 colSize = skinManager.GetLogicalSize(colTex);
 
                 // Draw background
-                _spriteBatch.Draw(bgTex, new Vector2(x, y), null, Color.White, 0f, Vector2.Zero, bgScale, SpriteEffects.None, 0f);
+                _spriteBatch.Draw(bgTex, new Rectangle(x, y, (int)bgSize.X, (int)bgSize.Y), Color.White);
 
                 // Draw color fill cropped by health percentage (from left to right)
                 int fillWidth = (int)(colTex.Width * Math.Clamp(health, 0.0, 1.0));
                 if (fillWidth > 0)
                 {
                     var srcRect = new Rectangle(0, 0, fillWidth, colTex.Height);
-                    _spriteBatch.Draw(colTex, new Vector2(x, y), srcRect, Color.White, 0f, Vector2.Zero, colScale, SpriteEffects.None, 0f);
+                    _spriteBatch.Draw(colTex, new Rectangle(x, y, (int)(colSize.X * health), (int)colSize.Y), srcRect, Color.White);
                 }
             }
             else

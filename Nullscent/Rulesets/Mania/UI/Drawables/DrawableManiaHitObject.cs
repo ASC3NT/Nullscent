@@ -7,6 +7,7 @@ using Nullscent.Rulesets.Mania.Judgements;
 using Nullscent.Rulesets.Mania.Objects;
 using Nullscent.Skin;
 using System;
+using System.Collections.Generic;
 
 namespace Nullscent.Rulesets.Mania.UI.Drawables
 {
@@ -216,34 +217,15 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             double alpha = GetHiddenAlpha(y, downScroll, receptorY, screenHeight, CurrentCombo);
             if (alpha <= 0.0) return;
 
-            Texture2D? noteTexture = skinManager?.GetNoteTexture(keyCount, columnIndex);
+            List<Texture2D>? noteFrames = skinManager?.GetNoteAnimation(keyCount, columnIndex);
+            Texture2D? noteTexture = skinManager?.GetAnimationFrame(noteFrames, currentTime, 60);
             if (noteTexture != null)
             {
                 float userScale = (float)Core.SettingsService.Instance.SkinNoteHeightScale;
-                float baseWidth = columnWidth;
-                float? widthForScale = skinManager?.GetWidthForNoteHeightScale(keyCount);
-                if (widthForScale.HasValue)
-                {
-                    float scale = (float)screenHeight / 480f;
-                    baseWidth = widthForScale.Value * scale;
-                }
-                else
-                {
-                    var config = skinManager?.CurrentSkinConfig?.GetConfigForKeyCount(keyCount);
-                    if (config?.ColumnWidths != null && config.ColumnWidths.Length > 0)
-                    {
-                        float minVal = config.ColumnWidths[0];
-                        for (int i = 1; i < config.ColumnWidths.Length; i++)
-                        {
-                            if (config.ColumnWidths[i] < minVal)
-                                minVal = config.ColumnWidths[i];
-                        }
-                        float scale = (float)screenHeight / 480f;
-                        baseWidth = minVal * scale;
-                    }
-                }
+                float baseWidth = skinManager!.GetNoteHeightReferenceWidth(keyCount) * screenHeight / 480f;
 
-                float aspect = (float)noteTexture.Height / noteTexture.Width;
+                Vector2 noteSize = skinManager!.GetLogicalSize(noteTexture);
+                float aspect = noteSize.Y / noteSize.X;
                 int noteHeight = (int)(baseWidth * aspect * userScale);
 
                 // ALINEACIÓN DE BORDE DELANTERO (osu!stable style):
@@ -257,7 +239,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                     columnWidth, 
                     noteHeight
                 );
-                spriteBatch.Draw(noteTexture, noteRect, Color.White * (float)alpha);
+                SpriteEffects effects = skinManager.FlipNote(keyCount, columnIndex, "", downScroll)
+                    ? SpriteEffects.FlipVertically : SpriteEffects.None;
+                spriteBatch.Draw(noteTexture, noteRect, null, Color.White * (float)alpha,
+                    0f, Vector2.Zero, effects, 0f);
             }
             else
             {

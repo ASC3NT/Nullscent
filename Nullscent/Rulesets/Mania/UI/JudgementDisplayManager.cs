@@ -25,12 +25,16 @@ namespace Nullscent.Rulesets.Mania.UI
         private bool _hasActiveJudgement;
         private readonly object _lock = new(); // Objeto para control de concurrencia
         private int _currentCombo;
+        private int _comboBreakValue;
+        private double _comboBreakTime = double.NegativeInfinity;
         private int _cachedComboValue = -1;
         private string _cachedComboString = "";
         private double _lastJudgementTime;
 
         // Posición en pantalla (generalmente el centro del playfield)
         public Vector2 Position { get; set; }
+        public Vector2 ComboPosition { get; set; }
+        public int KeyCount { get; set; }
 
         // Tiempo de vida visual de cada juicio en pantalla (en milisegundos)
         private const double DISPLAY_LIFETIME = 800;
@@ -57,6 +61,11 @@ namespace Nullscent.Rulesets.Mania.UI
             lock (_lock)
             {
                 _currentCombo = combo;
+                if (combo == 0 && _activeJudgement.Combo > 0)
+                {
+                    _comboBreakValue = _activeJudgement.Combo;
+                    _comboBreakTime = time;
+                }
                 _lastJudgementTime = time;
                 _activeJudgement.Result = result;
                 _activeJudgement.Column = column;
@@ -81,7 +90,7 @@ namespace Nullscent.Rulesets.Mania.UI
             }
         }
 
-        public void Draw(double currentTime, SkinManager? skinManager)
+        public void Draw(double currentTime, SkinManager? skinManager, Color? holdComboColour = null)
         {
             // Dibujar el juicio activo
             lock (_lock)
@@ -120,14 +129,32 @@ namespace Nullscent.Rulesets.Mania.UI
                         float driftY = (float)(age / DISPLAY_LIFETIME) * 40.0f;
                         int textY = (int)(Position.Y + 15 - driftY);
 
-                        Texture2D? judgementTexture = skinManager?.GetJudgementTexture(_activeJudgement.Result.ToString());
+                        var judgementFrames = skinManager?.GetJudgementAnimation(KeyCount, _activeJudgement.Result.ToString());
+                        Texture2D? judgementTexture = judgementFrames is { Count: > 0 }
+                            ? judgementFrames[Math.Clamp((int)(age / 50d), 0, judgementFrames.Count - 1)] : null;
                         if (judgementTexture != null)
                         {
-                            float texScale = skinManager != null ? skinManager.GetTextureScale(judgementTexture) : 1.0f;
-                            int texW = (int)(judgementTexture.Width * scale * texScale);
-                            int texH = (int)(judgementTexture.Height * scale * texScale);
-                            var destRect = new Rectangle((int)Position.X - texW / 2, textY - texH / 2, texW, texH);
-                            _spriteBatch.Draw(judgementTexture, destRect, Color.White * alpha);
+                            // Legacy hitbursts have their own short animation and are
+                            // centred on ScorePosition. General HUD drift/pop is internal.
+                            float skinScale = skinManager!.GetLegacyHudScale(_graphicsDevice.Viewport.Height);
+                            float hitScale;
+                            if (_activeJudgement.Result == HitResult.Miss)
+                                hitScale = age < 100 ? MathHelper.Lerp(1.2f, 1f, (float)(age / 100d)) : 1f;
+                            else if (age < 40)
+                                hitScale = MathHelper.Lerp(0.8f, 1f, (float)(age / 40d));
+                            else if (age < 80)
+                                hitScale = MathHelper.Lerp(0.85f, 0.7f, (float)((age - 40d) / 40d));
+                            else if (age < 180)
+                                hitScale = 0.7f;
+                            else
+                                hitScale = MathHelper.Lerp(0.7f, 0.4f, (float)Math.Clamp((age - 180d) / 40d, 0, 1));
+                            float hitAlpha = age < 20 ? (float)(age / 20d)
+                                : age < 180 ? 1f : (float)Math.Clamp((220d - age) / 40d, 0, 1);
+                            Vector2 logicalSize = skinManager!.GetLogicalSize(judgementTexture);
+                            int texW = (int)(logicalSize.X * skinScale * hitScale);
+                            int texH = (int)(logicalSize.Y * skinScale * hitScale);
+                            var destRect = new Rectangle((int)Position.X - texW / 2, (int)Position.Y - texH / 2, texW, texH);
+                            _spriteBatch.Draw(judgementTexture, destRect, Color.White * hitAlpha);
                         }
                         else if (_fontRenderer != null)
                         {
@@ -140,8 +167,35 @@ namespace Nullscent.Rulesets.Mania.UI
                 }
             }
 
-            // Dibujar el contador de combo (si combo > 1)
-            if (_currentCombo > 1)
+            // osu! shows the previous combo briefly when it breaks.
+            double breakAge = currentTime - _comboBreakTime;
+            if (_comboBreakValue > 0 && breakAge >= 0 && breakAge < 200)
+            {
+                float progress = (float)(breakAge / 200d);
+                float breakAlpha = 0.8f * (1f - progress);
+                float breakScale = (1f + 3f * progress) * (skinManager?.GetLegacyHudScale(_graphicsDevice.Viewport.Height) ?? 1f);
+                var configuredBreakColour = skinManager?.GetColourBreak(KeyCount);
+                Color breakColour = configuredBreakColour is { } custom
+                    ? new Color(custom.R, custom.G, custom.B, custom.A) : Color.Red;
+                string breakText = _comboBreakValue.ToString();
+
+                _spriteBatch.End();
+                _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive);
+                bool drawn = skinManager?.DrawNumber(_spriteBatch, breakText, ComboPosition,
+                    skinManager.GetComboPrefix(), breakScale, breakAlpha,
+                    spacing: -skinManager.GetComboOverlap() * breakScale, tint: breakColour) ?? false;
+                _spriteBatch.End();
+                _spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
+                if (!drawn && _fontRenderer != null)
+                {
+                    _fontRenderer.SetFontSize(36);
+                    _fontRenderer.DrawTextCentered(breakText, (int)ComboPosition.X, (int)ComboPosition.Y,
+                        breakColour * breakAlpha, breakScale);
+                }
+            }
+
+            // The skin's hold colour applies while a long note is being held.
+            if (_currentCombo > 0)
             {
                 double timeSinceLastHit = currentTime - _lastJudgementTime;
                 float comboAlpha = 1.0f;
@@ -169,11 +223,15 @@ namespace Nullscent.Rulesets.Mania.UI
                         _cachedComboString = _currentCombo.ToString();
                     }
 
-                    bool drawn = skinManager != null && skinManager.DrawNumber(_spriteBatch, _cachedComboString, new Vector2(Position.X, Position.Y - 35), "default", comboScale * 0.75f, comboAlpha);
+                    float drawScale = comboScale * (skinManager?.GetLegacyHudScale(_graphicsDevice.Viewport.Height) ?? 1f);
+                    bool drawn = skinManager != null && skinManager.DrawNumber(_spriteBatch, _cachedComboString,
+                        ComboPosition, skinManager.GetComboPrefix(), drawScale, comboAlpha,
+                        spacing: -skinManager.GetComboOverlap() * drawScale, tint: holdComboColour ?? Color.White);
                     if (!drawn && _fontRenderer != null)
                     {
                         _fontRenderer.SetFontSize(36);
-                        _fontRenderer.DrawTextCentered(_cachedComboString, (int)Position.X, (int)Position.Y - 30, Color.White * comboAlpha, comboScale);
+                        _fontRenderer.DrawTextCentered(_cachedComboString, (int)ComboPosition.X, (int)ComboPosition.Y,
+                            (holdComboColour ?? Color.White) * comboAlpha, comboScale);
                     }
                 }
             }

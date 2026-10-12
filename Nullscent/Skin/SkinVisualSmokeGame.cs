@@ -28,27 +28,44 @@ internal sealed class SkinVisualSmokeGame : Game
     private readonly bool downScroll;
     private readonly string? switchSkinPath;
     private readonly string? switchOutputPath;
+    private readonly int viewportWidth;
+    private readonly int viewportHeight;
+    private readonly string? resizeOutputPath;
+    private readonly int? resizedViewportWidth;
+    private readonly int? resizedViewportHeight;
     private SpriteBatch? batch;
     private SkinManager? skin;
     private ManiaPlayfield? playfield;
     private ManiaScoreProcessor? score;
     private int captureStage;
+    private bool resizeApplied;
 
     public SkinVisualSmokeGame(string skinPath, int keyCount, string outputPath, bool downScroll,
-        string? switchSkinPath = null, string? switchOutputPath = null)
+        string? switchSkinPath = null, string? switchOutputPath = null, int viewportWidth = 1280, int viewportHeight = 720,
+        string? resizeOutputPath = null, int? resizedViewportWidth = null, int? resizedViewportHeight = null)
     {
         if (keyCount < 1 || keyCount > 18) throw new ArgumentOutOfRangeException(nameof(keyCount));
+        if (viewportWidth < 640 || viewportHeight < 480) throw new ArgumentOutOfRangeException(nameof(viewportWidth), "La resolución de smoke debe ser de al menos 640x480.");
         if ((switchSkinPath == null) != (switchOutputPath == null)) throw new ArgumentException("El cambio de skin requiere skin destino y captura de salida.");
+        if ((resizeOutputPath == null) != (resizedViewportWidth == null) || (resizeOutputPath == null) != (resizedViewportHeight == null))
+            throw new ArgumentException("El resize smoke requiere ruta de salida y ambas dimensiones destino.");
+        if (resizedViewportWidth is < 640 || resizedViewportHeight is < 480)
+            throw new ArgumentOutOfRangeException(nameof(resizedViewportWidth), "La resoluciÃ³n destino debe ser de al menos 640x480.");
         this.skinPath = skinPath;
         this.keyCount = keyCount;
         this.outputPath = Path.GetFullPath(outputPath);
         this.downScroll = downScroll;
         this.switchSkinPath = switchSkinPath;
         this.switchOutputPath = switchOutputPath == null ? null : Path.GetFullPath(switchOutputPath);
+        this.viewportWidth = viewportWidth;
+        this.viewportHeight = viewportHeight;
+        this.resizeOutputPath = resizeOutputPath == null ? null : Path.GetFullPath(resizeOutputPath);
+        this.resizedViewportWidth = resizedViewportWidth;
+        this.resizedViewportHeight = resizedViewportHeight;
         graphics = new GraphicsDeviceManager(this)
         {
-            PreferredBackBufferWidth = 1280,
-            PreferredBackBufferHeight = 720
+            PreferredBackBufferWidth = viewportWidth,
+            PreferredBackBufferHeight = viewportHeight
         };
         IsFixedTimeStep = false;
         IsMouseVisible = false;
@@ -62,26 +79,30 @@ internal sealed class SkinVisualSmokeGame : Game
         if (!ActivateSkin(skinPath)) throw new InvalidDataException($"No se pudo activar skin inicial: {skin.CurrentValidation?.Summary ?? skinPath}");
         ReportResolvedHighResolutionAssets();
 
-        playfield = new ManiaPlayfield(GraphicsDevice, batch, keyCount, 1280, 720, skinManager: skin);
+        playfield = new ManiaPlayfield(GraphicsDevice, batch, keyCount, viewportWidth, viewportHeight, skinManager: skin);
         score = new ManiaScoreProcessor(keyCount, keyCount, 5, false, new List<Nullscent.Rulesets.Mania.Mods.ManiaMod>());
         for (int column = 0; column < keyCount; column++)
         {
             double noteTime = column == keyCount - 1 && keyCount > 1 ? 1000 : 1200 + column * 75;
             playfield.AddHitObject(new Note { StartTime = noteTime, Column = column });
+            if (column % 2 == 0)
+                playfield.AddHitObject(new Note { StartTime = 1550, Column = column });
+            if (column % 2 != 0 && (column == 1 || column == keyCount / 2))
+                playfield.AddHitObject(new Note { StartTime = 1550, Column = column });
 
-            double longNoteStart = column == 0 ? 1000 : 1400 + column * 75;
+            double longNoteStart = column == 0 || column == keyCount - 1 ? 1000 : 1400 + column * 75;
             double longNoteDuration = column % 2 == 0 ? 300 : 1100;
             playfield.AddHitObject(new LongNote(longNoteStart, longNoteStart + longNoteDuration, column));
         }
         if (keyCount > 1) playfield.HandleKeyPress(keyCount - 1, 1000, score);
         playfield.HandleKeyPress(0, 1000, score);
         playfield.JudgementDisplayManager?.EnqueueJudgement(HitResult.Perfect, 0, 0, 12, 1000);
-        playfield.Update(1040, score, 8, 0.83f, downScroll);
+        playfield.Update(1040, score, 8, null, downScroll);
     }
 
     protected override void Draw(GameTime gameTime)
     {
-        GraphicsDevice.Clear(Color.CornflowerBlue);
+        GraphicsDevice.Clear(new Color(6, 9, 16));
         playfield!.Draw(1040, 8, 0.83f, downScroll);
         if (captureStage == 0)
         {
@@ -90,7 +111,7 @@ internal sealed class SkinVisualSmokeGame : Game
             captureStage = 1;
             if (switchSkinPath == null)
             {
-                Exit();
+                if (resizeOutputPath == null) Exit();
             }
             else
             {
@@ -98,7 +119,7 @@ internal sealed class SkinVisualSmokeGame : Game
                 if (!ActivateSkin(switchSkinPath)) throw new InvalidDataException($"No se pudo activar skin destino: {skin.CurrentValidation?.Summary ?? switchSkinPath}");
                 ReportResolvedHighResolutionAssets();
                 if (skin.Version != previousVersion + 1) throw new InvalidOperationException("La versión de skin no avanzó exactamente una vez.");
-                playfield!.Update(1040, score!, 8, 0.83f, downScroll);
+                playfield!.Update(1040, score!, 8, null, downScroll);
                 Console.WriteLine($"[SkinVisualSmoke] cambio runtime aplicado: v{previousVersion} -> v{skin.Version}; {switchOutputPath}");
             }
         }
@@ -109,7 +130,28 @@ internal sealed class SkinVisualSmokeGame : Game
             captureStage = 2;
             Exit();
         }
+        else if (captureStage == 1 && resizeOutputPath != null && resizeApplied)
+        {
+            SaveBackbuffer(resizeOutputPath);
+            Console.WriteLine($"[SkinVisualSmoke] tras resize {resizedViewportWidth}x{resizedViewportHeight}: {resizeOutputPath}");
+            captureStage = 2;
+            Exit();
+        }
         base.Draw(gameTime);
+    }
+
+    protected override void Update(GameTime gameTime)
+    {
+        if (captureStage == 1 && resizeOutputPath != null && !resizeApplied)
+        {
+            graphics.PreferredBackBufferWidth = resizedViewportWidth!.Value;
+            graphics.PreferredBackBufferHeight = resizedViewportHeight!.Value;
+            graphics.ApplyChanges();
+            resizeApplied = true;
+            Console.WriteLine($"[SkinVisualSmoke] viewport cambiado en runtime: {viewportWidth}x{viewportHeight} -> {resizedViewportWidth}x{resizedViewportHeight}");
+        }
+
+        base.Update(gameTime);
     }
 
     private bool ActivateSkin(string path)
@@ -127,13 +169,15 @@ internal sealed class SkinVisualSmokeGame : Game
     {
         if (skin == null) return;
 
-        var config = skin.CurrentSkinConfig?.GetConfigForKeyCount(keyCount);
+        ManiaKeymodeDefinition profile = skin.GetManiaProfile(keyCount);
         var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            $"{skin.GetComboPrefix()}-1"
+            $"{skin.GetComboPrefix()}-1",
+            "mania-stage-bottom"
         };
-        if (!string.IsNullOrWhiteSpace(config?.StageHint) && !config.StageHint.Equals("_blank", StringComparison.OrdinalIgnoreCase))
-            candidates.Add(config.StageHint);
+        if (profile.StageAssets.TryGetValue("hint", out string? stageHint)
+            && !string.IsNullOrWhiteSpace(stageHint) && !stageHint.Equals("_blank", StringComparison.OrdinalIgnoreCase))
+            candidates.Add(stageHint);
         else
             candidates.Add("mania-stage-hint");
 

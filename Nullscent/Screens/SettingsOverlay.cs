@@ -53,6 +53,17 @@ namespace Nullscent.Screens
         public bool IsFullyOpen => IsOpen && Math.Abs(_currentX) < 1.0f;
         public bool IsVisible => _currentX > -PANEL_WIDTH + 1.0f;
 
+        private bool EffectiveDownScroll
+        {
+            get
+            {
+                int keyCount = Math.Clamp(_inputManager.ActiveKeyCount, 1, 18);
+                bool? skinUpsideDown = _game.SkinManager.GetUpsideDownPreference(keyCount);
+                return ManiaSkinRules.ResolveDownScroll(_settings.DownScroll,
+                    _settings.UseSkinScrollDirection, skinUpsideDown);
+            }
+        }
+
         public SettingsOverlay(Game1 game, InputManager inputManager, TrueTypeFontRenderer fontRenderer)
         {
             _game = game;
@@ -99,11 +110,22 @@ namespace Nullscent.Screens
 
             _settingItems.Add(OverlaySettingItem.CreateToggle(
                 "Down Scroll",
-                () => _settings.DownScroll ? "ON" : "OFF",
-                () => { 
-                    _settings.DownScroll = !_settings.DownScroll; 
-                    _settings.Save(); 
-                    Core.SettingsService.Instance.DownScroll = _settings.DownScroll;
+                () => EffectiveDownScroll ? "ON" : "OFF",
+                () => {
+                    var settings = Core.SettingsService.Instance;
+                    bool nextDownScroll = !EffectiveDownScroll;
+                    settings.UseSkinScrollDirection = false;
+                    settings.DownScroll = nextDownScroll;
+                    _settings.Save();
+                }
+            ));
+
+            _settingItems.Add(OverlaySettingItem.CreateToggle(
+                "Use Skin Scroll Direction",
+                () => _settings.UseSkinScrollDirection ? "ON" : "OFF",
+                () => {
+                    Core.SettingsService.Instance.UseSkinScrollDirection = !_settings.UseSkinScrollDirection;
+                    _settings.Save();
                 }
             ));
 
@@ -122,11 +144,20 @@ namespace Nullscent.Screens
                 0.1f, 0.95f,
                 () => _settings.ReceptorPosition,
                 (val) => { 
-                    _settings.ReceptorPosition = val; 
-                    _settings.Save(); 
                     Core.SettingsService.Instance.ReceptorPosition = val;
+                    Core.SettingsService.Instance.UseSkinReceptorPosition = false;
+                    _settings.Save();
                 },
                 () => $"{(int)(_settings.ReceptorPosition * 100)}%"
+            ));
+
+            _settingItems.Add(OverlaySettingItem.CreateToggle(
+                "Use Skin Hit Position",
+                () => _settings.UseSkinReceptorPosition ? "ON" : "OFF",
+                () => {
+                    Core.SettingsService.Instance.UseSkinReceptorPosition = !_settings.UseSkinReceptorPosition;
+                    _settings.Save();
+                }
             ));
 
             _settingItems.Add(OverlaySettingItem.CreateSlider(

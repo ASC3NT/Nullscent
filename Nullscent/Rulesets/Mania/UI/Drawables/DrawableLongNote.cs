@@ -50,7 +50,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             _longNote = longNote;
         }
 
-        public override void Update(double currentTime, double scrollSpeed, float receptorPosition, bool downScroll, int screenHeight)
+        public override void Update(double currentTime, double scrollSpeed, float receptorPosition, bool downScroll,
+            int screenHeight, int? layoutReceptorY = null, int scrollTop = 0, int? scrollBottom = null)
         {
             // Guardar estados de fallo
             bool isBrokenOrMissed = _longNote.State == LongNoteState.Broken || 
@@ -63,12 +64,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
 
             // Actualizar visibilidad de la clase base
-            base.Update(currentTime, scrollSpeed, receptorPosition, downScroll, screenHeight);
+            base.Update(currentTime, scrollSpeed, receptorPosition, downScroll, screenHeight, layoutReceptorY, scrollTop, scrollBottom);
 
             // Determinar si la nota ya salió físicamente de los límites de la pantalla
-            int receptorY = (int)(screenHeight * receptorPosition);
-            if (!downScroll)
-                receptorY = (int)(screenHeight * (1 - receptorPosition));
+            int receptorY = layoutReceptorY ?? (int)(downScroll ? screenHeight * receptorPosition : screenHeight * (1 - receptorPosition));
 
             double bottomTime = (_longNote.TailReleaseTime > 0) ? _longNote.TailReleaseTime : _longNote.StartTime;
             int headY = CalculateYPosition(bottomTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
@@ -101,7 +100,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         }
 
         public override void Draw(SpriteBatch spriteBatch, Texture2D pixel, SkinManager? skinManager, int keyCount, int columnIndex, int columnX, double currentTime, 
-            double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth)
+            double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth, float layoutScale, float noteHeightScale)
         {
             if (IsJudged) return;
 
@@ -129,14 +128,33 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
 
             // Obtener texturas de cabeza y cola para calcular su altura real
-            var headFrames = skinManager?.GetLNHeadAnimation(keyCount, columnIndex);
-            var tailFrames = skinManager?.GetLNTailAnimation(keyCount, columnIndex);
-            Texture2D? headTexture = headFrames is { Count: > 0 } ? headFrames[0] : null;
-            Texture2D? tailTexture = tailFrames is { Count: > 0 } ? tailFrames[0] : null;
-            float userScale = (float)Core.SettingsService.Instance.SkinNoteHeightScale;
+            ResolvedManiaLane? resolvedLane = skinManager != null && columnIndex >= 0 && columnIndex < skinManager.GetResolvedKeymode(keyCount).Lanes.Count
+                ? skinManager.GetResolvedKeymode(keyCount).Lanes[columnIndex] : null;
+            ResolvedSkinAnimation? headAnimation = resolvedLane?.LongHead;
+            ResolvedSkinAnimation? tailAnimation = resolvedLane?.LongTail;
+            Texture2D? headTexture = headAnimation?.FrameAt(currentTime);
+            Texture2D? tailTexture = tailAnimation?.FrameAt(currentTime);
+            SkinSpriteMetrics headMetrics = skinManager?.GetSpriteMetrics(keyCount, columnIndex, "head") ?? default;
+            SkinSpriteMetrics tailMetrics = skinManager?.GetSpriteMetrics(keyCount, columnIndex, "tail") ?? default;
+            SkinSpriteMetrics bodyMetrics = skinManager?.GetSpriteMetrics(keyCount, columnIndex, "body") ?? default;
+            float headWidth = Math.Max(1f, columnWidth * (headMetrics.WidthRatio > 0 ? headMetrics.WidthRatio : 1f));
+            float tailWidth = Math.Max(1f, columnWidth * (tailMetrics.WidthRatio > 0 ? tailMetrics.WidthRatio : 1f));
+            float bodyWidth = Math.Max(1f, columnWidth * (bodyMetrics.WidthRatio > 0 ? bodyMetrics.WidthRatio : 1f));
+            int headX = (int)MathF.Round(columnX + (columnWidth - headWidth) / 2f + columnWidth * headMetrics.OffsetXRatio);
+            int tailX = (int)MathF.Round(columnX + (columnWidth - tailWidth) / 2f + columnWidth * tailMetrics.OffsetXRatio);
+            int bodyX = (int)MathF.Round(columnX + (columnWidth - bodyWidth) / 2f + columnWidth * bodyMetrics.OffsetXRatio);
 
-            float baseWidth = skinManager != null
-                ? skinManager.GetNoteHeightReferenceWidth(keyCount) * screenHeight / 480f : columnWidth;
+            float PieceHeight(Texture2D texture, SkinSpriteMetrics metrics, float drawWidth)
+            {
+                Vector2 logicalSize = skinManager!.GetLogicalSize(texture);
+                float aspect = logicalSize.Y / logicalSize.X;
+                return metrics.HeightMode switch
+                {
+                    SpriteHeightMode.ReferenceWidthAspect when metrics.ReferenceWidth > 0f => metrics.ReferenceWidth * layoutScale * aspect,
+                    SpriteHeightMode.LaneWidthFraction => columnWidth * metrics.HeightValue,
+                    _ => drawWidth * aspect
+                } * noteHeightScale;
+            }
 
             int headHeight = HEAD_HEIGHT;
             if (headTexture != null)
@@ -147,9 +165,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 }
                 else
                 {
-                    Vector2 headSize = skinManager!.GetLogicalSize(headTexture);
-                    float aspect = headSize.Y / headSize.X;
-                    headHeight = (int)(baseWidth * aspect * userScale);
+                    headHeight = Math.Max(1, (int)MathF.Round(PieceHeight(headTexture, headMetrics, headWidth)));
                 }
             }
 
@@ -162,9 +178,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 }
                 else
                 {
-                    Vector2 tailSize = skinManager!.GetLogicalSize(tailTexture);
-                    float aspect = tailSize.Y / tailSize.X;
-                    tailHeight = (int)(baseWidth * aspect * userScale);
+                    tailHeight = Math.Max(1, (int)MathF.Round(PieceHeight(tailTexture, tailMetrics, tailWidth)));
                 }
             }
             else
@@ -210,13 +224,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
 
             if (bodyHeight > 0)
             {
-                var bodyFrames = skinManager?.GetLNBodyAnimation(keyCount, columnIndex);
-                Texture2D? bodyTexture = bodyFrames is { Count: > 0 } ? bodyFrames[0] : null;
-                if (_longNote.State == LongNoteState.Holding && bodyFrames is { Count: > 1 })
-                {
-                    int frame = (int)Math.Max(0, (currentTime - _longNote.HeadHitTime) / 30d) % bodyFrames.Count;
-                    bodyTexture = bodyFrames[frame];
-                }
+                ResolvedSkinAnimation? bodyAnimation = resolvedLane?.LongBody;
+                double animationTime = _longNote.State == LongNoteState.Holding
+                    ? Math.Max(0, currentTime - _longNote.HeadHitTime) : currentTime;
+                Texture2D? bodyTexture = bodyAnimation?.FrameAt(animationTime);
                 if (bodyTexture != null)
                 {
                     int totalLNHeight = bottomY - topY;
@@ -230,9 +241,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                         // The texture may have been reduced for GPU upload. Its source
                         // coordinates are physical; its display height is still based on
                         // the original legacy image dimensions.
-                        // The body fills its lane width. WidthForNoteHeightScale
-                        // applies to heads and tap notes, not to the body's tile unit.
-                        int blockH = (int)MathF.Round(bodySize.Y * (columnWidth / bodySize.X));
+                        int blockH = (int)MathF.Round(bodySize.Y * (bodyWidth / bodySize.X) * noteHeightScale);
                         if (blockH <= 0) blockH = 1;
                         float sourcePixelsPerDisplayPixel = (float)bodyTexture.Height / blockH;
 
@@ -247,7 +256,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                 double bodyAlpha = GetHiddenAlpha(currY + h / 2, downScroll, receptorY, screenHeight, CurrentCombo) * stateAlphaMult;
                                 if (bodyAlpha <= 0.0) continue;
 
-                                var bodyRect = new Rectangle(columnX, currY, columnWidth, h);
+                                var bodyRect = new Rectangle(bodyX, currY, (int)MathF.Round(bodyWidth), h);
                                 SpriteEffects effects;
                                 Rectangle srcRect = GetSourceRectForSegment(currY, h, topY, bottomY, totalLNHeight, bodyStyle, bodyTexture, sourcePixelsPerDisplayPixel, blockH, downScroll, flipBody, out effects);
 
@@ -261,7 +270,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             {
                                 if (bodyStyle == 0) // Stretch
                                 {
-                                    var bodyRect = new Rectangle(columnX, clampedTopY, columnWidth, bodyHeight);
+                                    var bodyRect = new Rectangle(bodyX, clampedTopY, (int)MathF.Round(bodyWidth), bodyHeight);
                                     var srcRect = GetSourceRectForSegment(clampedTopY, bodyHeight, topY, bottomY,
                                         totalLNHeight, bodyStyle, bodyTexture, sourcePixelsPerDisplayPixel, blockH,
                                         downScroll, flipBody, out SpriteEffects effects);
@@ -296,7 +305,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                                 srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
                                                 srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
 
-                                                var blockRect = new Rectangle(columnX, finalY, columnWidth, finalH);
+                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
                                                 var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
                                                 spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha);
                                             }
@@ -323,7 +332,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                                 srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
                                                 srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
 
-                                                var blockRect = new Rectangle(columnX, finalY, columnWidth, finalH);
+                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
                                                 var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
                                                 spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha);
                                             }
@@ -355,7 +364,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                                 srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
                                                 srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
 
-                                                var blockRect = new Rectangle(columnX, finalY, columnWidth, finalH);
+                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
                                                 var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
                                                 spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha,
                                                     0f, Vector2.Zero, flipBody ? SpriteEffects.FlipVertically : SpriteEffects.None, 0f);
@@ -383,7 +392,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                                 srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
                                                 srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
 
-                                                var blockRect = new Rectangle(columnX, finalY, columnWidth, finalH);
+                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
                                                 var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
                                                 spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha,
                                                     0f, Vector2.Zero, flipBody ? SpriteEffects.FlipVertically : SpriteEffects.None, 0f);
@@ -455,12 +464,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 {
                     if (headTexture != null)
                     {
-                        Texture2D? headFrame = skinManager!.GetAnimationFrame(headFrames, currentTime, 60) ?? headTexture;
-                        int headRenderY = downScroll ? headY - headHeight : headY;
+                        Texture2D? headFrame = headAnimation?.FrameAt(currentTime) ?? headTexture;
+                        int headRenderY = (int)MathF.Round(downScroll ? headY - headHeight + headMetrics.OffsetY * layoutScale : headY + headMetrics.OffsetY * layoutScale);
                         var headRect = new Rectangle(
-                            columnX,
+                            headX,
                             headRenderY,
-                            columnWidth,
+                            (int)MathF.Round(headWidth),
                             headHeight
                         );
                         SpriteEffects effects = skinManager!.FlipNote(keyCount, columnIndex, "H", downScroll)
@@ -497,12 +506,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 {
                     if (tailTexture != null && tailHeight > 0)
                     {
-                        Texture2D? tailFrame = skinManager!.GetAnimationFrame(tailFrames, currentTime, 60) ?? tailTexture;
-                        int tailRenderY = downScroll ? tailY : tailY - tailHeight;
+                        Texture2D? tailFrame = tailAnimation?.FrameAt(currentTime) ?? tailTexture;
+                        int tailRenderY = (int)MathF.Round(downScroll ? tailY + tailMetrics.OffsetY * layoutScale : tailY - tailHeight + tailMetrics.OffsetY * layoutScale);
                         var tailRect = new Rectangle(
-                            columnX,
+                            tailX,
                             tailRenderY,
-                            columnWidth,
+                            (int)MathF.Round(tailWidth),
                             tailHeight
                         );
                         SpriteEffects effects = skinManager!.FlipNote(keyCount, columnIndex, "T", downScroll)

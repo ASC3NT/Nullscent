@@ -42,6 +42,21 @@ namespace Nullscent
             try
             {
 #if DEBUG
+                if (args.Length == 1 && args[0] == "--skin-tests")
+                {
+                    Skin.SkinCoreSelfTests.RunAll();
+                    return;
+                }
+                if (args.Length == 9 && args[0] == "--skin-visual-resize-smoke" && int.TryParse(args[2], out int resizeKeyCount)
+                    && int.TryParse(args[5], out int initialWidth) && int.TryParse(args[6], out int initialHeight)
+                    && int.TryParse(args[7], out int resizedWidth) && int.TryParse(args[8], out int resizedHeight))
+                {
+                    using var resizeSmoke = new Skin.SkinVisualSmokeGame(args[1], resizeKeyCount, args[3], true,
+                        viewportWidth: initialWidth, viewportHeight: initialHeight,
+                        resizeOutputPath: args[4], resizedViewportWidth: resizedWidth, resizedViewportHeight: resizedHeight);
+                    resizeSmoke.Run();
+                    return;
+                }
                 if (args.Length is 6 or 7 && args[0] == "--skin-visual-switch-smoke" && int.TryParse(args[3], out int switchKeyCount))
                 {
                     bool switchDownScroll = args.Length == 6 || !args[6].Equals("up", StringComparison.OrdinalIgnoreCase);
@@ -50,10 +65,13 @@ namespace Nullscent
                     switchSmoke.Run();
                     return;
                 }
-                if (args.Length is 4 or 5 && args[0] == "--skin-visual-smoke" && int.TryParse(args[2], out int keyCount))
+                if (args.Length is >= 4 and <= 7 && args[0] == "--skin-visual-smoke" && int.TryParse(args[2], out int keyCount))
                 {
                     bool downScroll = args.Length == 4 || !args[4].Equals("up", StringComparison.OrdinalIgnoreCase);
-                    using var smoke = new Skin.SkinVisualSmokeGame(args[1], keyCount, args[3], downScroll);
+                    int width = args.Length >= 6 && int.TryParse(args[5], out int parsedWidth) ? parsedWidth : 1280;
+                    int height = args.Length >= 7 && int.TryParse(args[6], out int parsedHeight) ? parsedHeight : 720;
+                    using var smoke = new Skin.SkinVisualSmokeGame(args[1], keyCount, args[3], downScroll,
+                        viewportWidth: width, viewportHeight: height);
                     smoke.Run();
                     return;
                 }

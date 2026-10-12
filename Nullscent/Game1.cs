@@ -88,7 +88,7 @@ namespace Nullscent
                 string? oldRoot = _settings.SkinsRootDirectory;
                 string? oldSelection = _settings.SelectedSkinDirectory;
                 _settings.SkinsRootDirectory = _skinCatalog.Root;
-                _settings.SelectedSkinDirectory = path;
+                _settings.SelectedSkinDirectory = path == null ? null : GetBuiltInSkinKey(path) ?? path;
                 if (_settings.TrySave()) return true;
                 _settings.SkinsRootDirectory = oldRoot;
                 _settings.SelectedSkinDirectory = oldSelection;
@@ -110,6 +110,16 @@ namespace Nullscent
             if (validation?.Status == SkinValidity.Partial) ShowSkinNotice(validation.Summary);
             else ShowSkinNotice(path == null ? "Skin interna de Nullscent activa." : "Skin activada.");
             return true;
+        }
+
+        private string? GetBuiltInSkinKey(string directory)
+        {
+            if (_skinCatalog?.BuiltInRoot == null) return null;
+            string full = Path.GetFullPath(directory);
+            SkinValidation? entry = _skinCatalog.Entries.FirstOrDefault(candidate => candidate.IsNative
+                && string.Equals(candidate.Directory, full, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(Path.GetDirectoryName(full), _skinCatalog.BuiltInRoot, StringComparison.OrdinalIgnoreCase));
+            return entry == null ? null : $"builtin:{Path.GetFileName(full)}";
         }
 
         private void ShowSkinNotice(string message)
@@ -278,11 +288,21 @@ namespace Nullscent
             _skinManager = new SkinManager(GraphicsDevice);
 
             var (skinsRoot, selectedSkin) = _settings!.ResolveSkinPaths();
-            _skinCatalog = new SkinCatalog(skinsRoot);
+            string builtInSkinsRoot = Path.Combine(AppContext.BaseDirectory, "Skins");
+            _skinCatalog = new SkinCatalog(skinsRoot, builtInSkinsRoot);
             _skinCatalog.Refresh();
-            if (selectedSkin != null)
+            string? resolvedSelection = selectedSkin;
+            if (selectedSkin?.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase) == true)
             {
-                var validation = _skinCatalog.Validate(selectedSkin);
+                string key = selectedSkin["builtin:".Length..];
+                resolvedSelection = _skinCatalog.Entries.FirstOrDefault(entry => entry.IsNative
+                    && string.Equals(Path.GetFileName(entry.Directory), key, StringComparison.OrdinalIgnoreCase))?.Directory;
+                if (resolvedSelection == null)
+                    ShowSkinNotice($"La skin interna guardada '{key}' no está disponible; se usa la skin interna predeterminada.");
+            }
+            if (resolvedSelection != null)
+            {
+                var validation = _skinCatalog.Validate(resolvedSelection);
                 if (!_skinManager.TryActivate(validation)) ShowSkinNotice($"La skin guardada no está disponible. {validation.Summary} Se usa la skin interna.");
                 else if (validation.Status == SkinValidity.Partial) ShowSkinNotice(validation.Summary);
             }

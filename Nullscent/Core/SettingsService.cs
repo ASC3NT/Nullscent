@@ -87,6 +87,34 @@ namespace Nullscent.Core
             }
         }
 
+        public bool UseSkinReceptorPosition
+        {
+            get => Settings.UseSkinReceptorPosition;
+            set
+            {
+                if (Settings.UseSkinReceptorPosition != value)
+                {
+                    Settings.UseSkinReceptorPosition = value;
+                    RaisePropertyChanged(nameof(UseSkinReceptorPosition));
+                    RaiseSettingChanged(nameof(UseSkinReceptorPosition), value);
+                }
+            }
+        }
+
+        public bool UseSkinScrollDirection
+        {
+            get => Settings.UseSkinScrollDirection;
+            set
+            {
+                if (Settings.UseSkinScrollDirection != value)
+                {
+                    Settings.UseSkinScrollDirection = value;
+                    RaisePropertyChanged(nameof(UseSkinScrollDirection));
+                    RaiseSettingChanged(nameof(UseSkinScrollDirection), value);
+                }
+            }
+        }
+
         public bool DownScroll
         {
             get => Settings.DownScroll;

@@ -32,7 +32,12 @@ namespace Nullscent.Config
         public (string Root, string? Selected) ResolveSkinPaths()
         {
             if (!string.IsNullOrWhiteSpace(SkinsRootDirectory))
-                return (Path.GetFullPath(SkinsRootDirectory), string.IsNullOrWhiteSpace(SelectedSkinDirectory) ? null : Path.GetFullPath(SelectedSkinDirectory));
+            {
+                string? selected = string.IsNullOrWhiteSpace(SelectedSkinDirectory) ? null
+                    : SelectedSkinDirectory.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase)
+                        ? SelectedSkinDirectory : Path.GetFullPath(SelectedSkinDirectory);
+                return (Path.GetFullPath(SkinsRootDirectory), selected);
+            }
 
             string legacy = Path.GetFullPath(string.IsNullOrWhiteSpace(SkinDirectory) ? "./Skin/" : SkinDirectory);
             string name = Path.GetFileName(legacy.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -78,6 +83,15 @@ namespace Nullscent.Config
         /// Default: 0.88 (88% desde arriba = cerca de la parte inferior).
         /// </summary>
         public float ReceptorPosition { get; set; } = 0.88f;
+
+        /// <summary>
+        /// Use the active skin's hit position. When disabled, ReceptorPosition is the
+        /// explicit user override and takes precedence over the skin.
+        /// </summary>
+        public bool UseSkinReceptorPosition { get; set; } = true;
+
+        /// <summary>Use the active skin's stage orientation when it defines one.</summary>
+        public bool UseSkinScrollDirection { get; set; } = true;
 
         /// <summary>
         /// Indica si el scroll es hacia abajo (true) o hacia arriba (false).
@@ -367,6 +381,8 @@ namespace Nullscent.Config
             GlobalAudioOffset = defaults.GlobalAudioOffset;
             ScrollSpeed = defaults.ScrollSpeed;
             ReceptorPosition = defaults.ReceptorPosition;
+            UseSkinReceptorPosition = defaults.UseSkinReceptorPosition;
+            UseSkinScrollDirection = defaults.UseSkinScrollDirection;
             DownScroll = defaults.DownScroll;
             HealthDrainEnabled = defaults.HealthDrainEnabled;
             WindowWidth = defaults.WindowWidth;

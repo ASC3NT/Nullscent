@@ -1,0 +1,63 @@
+{
+  "formatVersion": 1,
+  "id": "nullscent:bars",
+  "name": "Nullscent Bars",
+  "author": "Nullscent",
+  "keymodes": {
+    "4": {
+      "keyCount": 4,
+      "placement": "center",
+      "defaultHitPositionRatio": 0.84,
+      "judgementLine": true,
+      "columnLighting": true,
+      "columnLineWidths": [1.2, 1.2, 1.2, 1.2, 1.2],
+      "columnLines": [true, true, true, true, true],
+      "columnLineColor": { "r": 110, "g": 190, "b": 255, "a": 90 },
+      "judgementLineColor": { "r": 165, "g": 230, "b": 255, "a": 235 },
+      "bodyMode": "Stretch",
+      "noteStyle": { "asset": "bar-note", "laneWidthRatio": 0.94, "heightMode": "TextureAspect", "framesPerSecond": 60 },
+      "receptorStyle": { "asset": "bar-key", "pressedAsset": "bar-key-pressed", "laneWidthRatio": 0.9, "heightMode": "LaneWidthFraction", "heightValue": 0.17 },
+      "longHeadStyle": { "asset": "bar-hold-head", "laneWidthRatio": 0.94, "heightMode": "TextureAspect", "framesPerSecond": 60 },
+      "longBodyStyle": { "asset": "bar-hold-body", "laneWidthRatio": 0.88, "heightMode": "TextureAspect", "framesPerSecond": 30 },
+      "longTailStyle": { "asset": "bar-hold-tail", "laneWidthRatio": 0.94, "heightMode": "TextureAspect", "framesPerSecond": 60 },
+      "stageAssets": { "hint": "bar-stage-hint", "light": "bar-light-note" },
+      "lightingNoteAsset": "bar-light-note",
+      "lightingHoldAsset": "bar-light-hold",
+      "lanes": [
+        { "width": 64, "gapAfter": 5, "laneColor": { "r": 7, "g": 15, "b": 29, "a": 255 }, "lightColor": { "r": 75, "g": 205, "b": 255, "a": 235 }, "holdColor": { "r": 115, "g": 225, "b": 255, "a": 255 } },
+        { "width": 64, "gapAfter": 5, "laneColor": { "r": 9, "g": 17, "b": 33, "a": 255 }, "lightColor": { "r": 90, "g": 155, "b": 255, "a": 235 }, "holdColor": { "r": 120, "g": 190, "b": 255, "a": 255 } },
+        { "width": 64, "gapAfter": 5, "laneColor": { "r": 7, "g": 15, "b": 29, "a": 255 }, "lightColor": { "r": 170, "g": 130, "b": 255, "a": 235 }, "holdColor": { "r": 195, "g": 155, "b": 255, "a": 255 } },
+        { "width": 64, "laneColor": { "r": 9, "g": 17, "b": 33, "a": 255 }, "lightColor": { "r": 75, "g": 205, "b": 255, "a": 235 }, "holdColor": { "r": 115, "g": 225, "b": 255, "a": 255 } }
+      ]
+    },
+    "7": {
+      "keyCount": 7,
+      "placement": "center",
+      "defaultHitPositionRatio": 0.84,
+      "judgementLine": true,
+      "columnLighting": true,
+      "columnLineWidths": [1, 1, 1, 1, 1, 1, 1, 1],
+      "columnLines": [true, true, true, true, true, true, true, true],
+      "columnLineColor": { "r": 110, "g": 190, "b": 255, "a": 90 },
+      "judgementLineColor": { "r": 165, "g": 230, "b": 255, "a": 235 },
+      "bodyMode": "Stretch",
+      "noteStyle": { "asset": "bar-note", "laneWidthRatio": 0.94, "heightMode": "TextureAspect", "framesPerSecond": 60 },
+      "receptorStyle": { "asset": "bar-key", "pressedAsset": "bar-key-pressed", "laneWidthRatio": 0.9, "heightMode": "LaneWidthFraction", "heightValue": 0.17 },
+      "longHeadStyle": { "asset": "bar-hold-head", "laneWidthRatio": 0.94, "heightMode": "TextureAspect", "framesPerSecond": 60 },
+      "longBodyStyle": { "asset": "bar-hold-body", "laneWidthRatio": 0.88, "heightMode": "TextureAspect", "framesPerSecond": 30 },
+      "longTailStyle": { "asset": "bar-hold-tail", "laneWidthRatio": 0.94, "heightMode": "TextureAspect", "framesPerSecond": 60 },
+      "stageAssets": { "hint": "bar-stage-hint", "light": "bar-light-note" },
+      "lightingNoteAsset": "bar-light-note",
+      "lightingHoldAsset": "bar-light-hold",
+      "lanes": [
+        { "width": 50, "gapAfter": 3, "laneColor": { "r": 7, "g": 15, "b": 29, "a": 255 }, "lightColor": { "r": 75, "g": 205, "b": 255, "a": 235 }, "holdColor": { "r": 115, "g": 225, "b": 255, "a": 255 } },
+        { "width": 50, "gapAfter": 3, "laneColor": { "r": 9, "g": 17, "b": 33, "a": 255 }, "lightColor": { "r": 90, "g": 155, "b": 255, "a": 235 }, "holdColor": { "r": 120, "g": 190, "b": 255, "a": 255 } },
+        { "width": 50, "gapAfter": 3, "laneColor": { "r": 7, "g": 15, "b": 29, "a": 255 }, "lightColor": { "r": 170, "g": 130, "b": 255, "a": 235 }, "holdColor": { "r": 195, "g": 155, "b": 255, "a": 255 } },
+        { "width": 50, "gapAfter": 7, "laneColor": { "r": 13, "g": 20, "b": 38, "a": 255 }, "lightColor": { "r": 255, "g": 198, "b": 105, "a": 240 }, "holdColor": { "r": 255, "g": 210, "b": 135, "a": 255 } },
+        { "width": 50, "gapAfter": 3, "laneColor": { "r": 7, "g": 15, "b": 29, "a": 255 }, "lightColor": { "r": 170, "g": 130, "b": 255, "a": 235 }, "holdColor": { "r": 195, "g": 155, "b": 255, "a": 255 } },
+        { "width": 50, "gapAfter": 3, "laneColor": { "r": 9, "g": 17, "b": 33, "a": 255 }, "lightColor": { "r": 90, "g": 155, "b": 255, "a": 235 }, "holdColor": { "r": 120, "g": 190, "b": 255, "a": 255 } },
+        { "width": 50, "laneColor": { "r": 7, "g": 15, "b": 29, "a": 255 }, "lightColor": { "r": 75, "g": 205, "b": 255, "a": 235 }, "holdColor": { "r": 115, "g": 225, "b": 255, "a": 255 } }
+      ]
+    }
+  }
+}

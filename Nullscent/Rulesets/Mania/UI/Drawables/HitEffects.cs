@@ -49,8 +49,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
         }
 
-        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime, System.Collections.Generic.List<Texture2D>? skinnedExplosionFrames = null,
-            SkinManager? skinManager = null, float legacyScale = 1f, float? configuredWidth = null)
+        public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime, ResolvedSkinAnimation? skinnedExplosion = null,
+            SkinManager? skinManager = null, float legacyScale = 1f, float? configuredWidth = null, Color? skinTint = null)
         {
             if (!_isActive) return;
 
@@ -81,25 +81,23 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             var explosionRect = new Rectangle(x, y, width, height);
             
             Texture2D activeTexture = glowTexture;
-            bool isSkinned = skinnedExplosionFrames != null && skinnedExplosionFrames.Count > 0;
+            bool isSkinned = skinnedExplosion is { Frames.Count: > 0 };
             if (isSkinned)
             {
-                double frameDuration = Math.Max(1000d / 60d, 170d / skinnedExplosionFrames!.Count);
-                int frameIdx = (int)(elapsed / frameDuration);
-                frameIdx = Math.Clamp(frameIdx, 0, skinnedExplosionFrames.Count - 1);
-                activeTexture = skinnedExplosionFrames[frameIdx];
+                activeTexture = skinnedExplosion!.FrameAt(elapsed)!;
                 Vector2 logicalSize = skinManager?.GetLogicalSize(activeTexture)
                     ?? new Vector2(activeTexture.Width, activeTexture.Height);
-                float assetScale = configuredWidth is > 0 ? configuredWidth.Value / 30f : 1f;
-                width = Math.Max(1, (int)MathF.Round(logicalSize.X * legacyScale * assetScale));
-                height = Math.Max(1, (int)MathF.Round(logicalSize.Y * legacyScale * assetScale));
+                width = configuredWidth is > 0
+                    ? Math.Max(1, (int)MathF.Round(configuredWidth.Value * legacyScale))
+                    : Math.Max(1, (int)MathF.Round(logicalSize.X * legacyScale));
+                height = Math.Max(1, (int)MathF.Round(width * logicalSize.Y / logicalSize.X));
                 explosionRect = new Rectangle(columnX + (columnWidth - width) / 2, receptorY - height / 2, width, height);
                 alpha = elapsed < 80 ? (float)Math.Clamp(elapsed / 80d, 0, 1)
                     : (float)Math.Clamp((200d - elapsed) / 120d, 0, 1);
             }
             
             // Draw texture
-            spriteBatch.Draw(activeTexture, explosionRect, isSkinned ? Color.White * alpha : explosionColor);
+            spriteBatch.Draw(activeTexture, explosionRect, isSkinned ? (skinTint ?? Color.White) * alpha : explosionColor);
 
             // Draw bright core only if not using skinned texture
             if (!isSkinned && elapsed < SCALE_UP_DURATION * 2)

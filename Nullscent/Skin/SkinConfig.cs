@@ -71,7 +71,7 @@ namespace Nullscent.Skin
         public bool ColumnLighting { get; set; } = true;
         public bool JudgementLine { get; set; } = true;
         public int SpecialStyle { get; set; } = 0;
-        public bool UpsideDown { get; set; } = false;
+        public bool? UpsideDown { get; set; }
         public bool KeysUnderNotes { get; set; } = false;
         public int? ScorePosition { get; set; }
         public int? ComboPosition { get; set; }
@@ -426,21 +426,15 @@ namespace Nullscent.Skin
             else if (key.StartsWith("NoteBodyStyle", StringComparison.OrdinalIgnoreCase))
             {
                 string idxStr = key["NoteBodyStyle".Length..];
-                if (int.TryParse(idxStr, out int idx))
+                if (TryParseNoteBodyStyle(value, out int bodyStyle))
                 {
-                    if (idx >= 0 && int.TryParse(value, out int bodyStyle))
+                    if (int.TryParse(idxStr, out int idx))
                     {
-                        if (bodyStyle >= 0 && bodyStyle <= 2)
+                        if (idx >= 0)
                             maniaConfig.NoteBodyStyles[idx] = bodyStyle;
                     }
-                }
-                else if (string.IsNullOrEmpty(idxStr))
-                {
-                    if (int.TryParse(value, out int bodyStyle))
-                    {
-                        if (bodyStyle >= 0 && bodyStyle <= 2)
-                            maniaConfig.NoteBodyStyle = bodyStyle;
-                    }
+                    else if (string.IsNullOrEmpty(idxStr))
+                        maniaConfig.NoteBodyStyle = bodyStyle;
                 }
             }
             else if (key.StartsWith("NoteFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase))
@@ -541,6 +535,38 @@ namespace Nullscent.Skin
             return value.Split(',')
                 .Select(s => float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float w) && float.IsFinite(w) ? w : 0f)
                 .ToArray();
+        }
+
+        private static bool TryParseNoteBodyStyle(string value, out int style)
+        {
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out style))
+                return style is >= 0 and <= 2;
+
+            // Text aliases found in real skins and legacy tooling. These map to
+            // Nullscent's documented 0/1/2 semantics at the adapter boundary.
+            switch (value.Trim().ToLowerInvariant())
+            {
+                case "stretch":
+                    style = 0;
+                    return true;
+                case "repeatbottom":
+                case "repeat-bottom":
+                case "bottom":
+                case "tilefromtail":
+                case "tile-from-tail":
+                    style = 1;
+                    return true;
+                case "repeattop":
+                case "repeat-top":
+                case "top":
+                case "tilefromhead":
+                case "tile-from-head":
+                    style = 2;
+                    return true;
+                default:
+                    style = 1;
+                    return false;
+            }
         }
 
         private static bool[] ParseBoolArray(string value)

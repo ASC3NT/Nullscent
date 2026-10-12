@@ -13,6 +13,8 @@ namespace Nullscent.Skin
     {
         public Texture2D? Texture { get; init; }
         public Vector2 LogicalSize { get; init; }
+        public Vector2 SourcePixelSize { get; init; }
+        public Vector2 TexturePixelSize { get; init; }
         public SkinAssetOrigin Origin { get; init; }
         public bool IsHighResolution { get; init; }
     }
@@ -41,7 +43,12 @@ namespace Nullscent.Skin
         {
             if (string.IsNullOrWhiteSpace(name)) return new ResolvedSkinAsset { Origin = SkinAssetOrigin.Internal };
             if (name.Equals("_blank", StringComparison.OrdinalIgnoreCase))
-                return new ResolvedSkinAsset { Texture = blank, LogicalSize = Vector2.One, Origin = SkinAssetOrigin.IntentionalBlank };
+                return new ResolvedSkinAsset
+                {
+                    Texture = blank, LogicalSize = Vector2.One,
+                    SourcePixelSize = Vector2.One, TexturePixelSize = Vector2.One,
+                    Origin = SkinAssetOrigin.IntentionalBlank
+                };
             if (cache.TryGetValue(name, out var cached)) return cached;
 
             var result = new ResolvedSkinAsset { Origin = SkinAssetOrigin.Internal };
@@ -63,8 +70,11 @@ namespace Nullscent.Skin
                         int safeTextureLimit = graphics.GraphicsProfile == GraphicsProfile.Reach ? 2048 : 8192;
                         for (int limit = safeTextureLimit; limit >= 1024; limit /= 2)
                         {
-                            int uploadWidth = Math.Min(image.Width, limit);
-                            int uploadHeight = Math.Min(image.Height, limit);
+                            // Scale both axes with one ratio. Clamping them independently
+                            // distorts very wide/tall legacy LN textures.
+                            float resizeScale = Math.Min(1f, limit / (float)Math.Max(image.Width, image.Height));
+                            int uploadWidth = Math.Max(1, (int)MathF.Round(image.Width * resizeScale));
+                            int uploadHeight = Math.Max(1, (int)MathF.Round(image.Height * resizeScale));
                             byte[] pixels = uploadWidth == image.Width && uploadHeight == image.Height
                                 ? image.Data : ResizeBilinear(image.Data, image.Width, image.Height, uploadWidth, uploadHeight);
                             Texture2D? texture = null;
@@ -78,6 +88,8 @@ namespace Nullscent.Skin
                                 {
                                     Texture = texture,
                                     LogicalSize = new Vector2(image.Width / (candidate.Hd ? 2f : 1f), image.Height / (candidate.Hd ? 2f : 1f)),
+                                    SourcePixelSize = new Vector2(image.Width, image.Height),
+                                    TexturePixelSize = new Vector2(uploadWidth, uploadHeight),
                                     Origin = SkinAssetOrigin.Skin,
                                     IsHighResolution = candidate.Hd
                                 };

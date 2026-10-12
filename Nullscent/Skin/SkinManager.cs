@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Nullscent.Skin
 {
@@ -16,25 +17,41 @@ namespace Nullscent.Skin
     public class SkinManager : IDisposable
     {
         private readonly GraphicsDevice _graphicsDevice;
-        private SkinConfig? _currentSkinConfig;
+        private ManiaSkinDefinition _currentDefinition = null!;
+        private ManiaSkinDefinition _internalDefinition = null!;
+        private readonly string _internalSkinDirectory;
+        private readonly SkinAssetResolver _internalAssets;
         private SkinAssetResolver _assets;
         private readonly Dictionary<Texture2D, ResolvedSkinAsset> _assetInfo = new();
         private readonly Dictionary<string, List<Texture2D>?> _animationCache = new();
+        private readonly Dictionary<int, ResolvedManiaKeymode> _resolvedKeymodes = new();
+        private readonly HashSet<string> _reportedDiagnostics = new(StringComparer.OrdinalIgnoreCase);
         private Texture2D? _blankTexture;
 
-        public SkinConfig? CurrentSkinConfig => _currentSkinConfig;
+        public ManiaSkinDefinition CurrentDefinition => _currentDefinition;
         public string CurrentSkinDirectory { get; private set; } = string.Empty;
         public long Version { get; private set; }
         public event Action<long>? SkinChanged;
         public SkinValidation? CurrentValidation { get; private set; }
-        public ManiaKeyConfig? GetManiaConfig(int keyCount) => _currentSkinConfig?.GetConfigForKeyCount(keyCount);
 
         public SkinManager(GraphicsDevice graphicsDevice)
         {
             _graphicsDevice = graphicsDevice;
+            _internalSkinDirectory = Path.Combine(AppContext.BaseDirectory, "Skins", "Bars");
+            try { _internalDefinition = NativeSkinAdapter.Load(_internalSkinDirectory); }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SkinManager] Built-in manifest unavailable; emergency visuals enabled: {ex.Message}");
+                _internalDefinition = CreateEmergencyDefinition();
+            }
+            _currentDefinition = _internalDefinition;
+            _internalAssets = new SkinAssetResolver(graphicsDevice,
+                System.IO.Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null,
+                Core.SettingsService.Instance.HighResolutionSkins);
             _assets = new SkinAssetResolver(graphicsDevice, null, Core.SettingsService.Instance.HighResolutionSkins);
             _blankTexture = new Texture2D(graphicsDevice, 1, 1);
             _blankTexture.SetData(new[] { Color.Transparent });
+            TryActivateInternal();
         }
 
         /// <summary>
@@ -51,13 +68,10 @@ namespace Nullscent.Skin
             SkinAssetResolver? candidate = null;
             try
             {
+                ManiaSkinDefinition definition = validation.Definition ?? SkinSourceDecoder.Load(validation.Directory, out _);
                 candidate = new SkinAssetResolver(_graphicsDevice, validation.Directory, Core.SettingsService.Instance.HighResolutionSkins);
-                // Prepare conventional assets and every image referenced by skin.ini before commit.
-                var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                var names = new HashSet<string>(SkinCatalog.ReferencedImages(definition), StringComparer.OrdinalIgnoreCase)
                 { "cursor", "mania-note1", "mania-note2", "mania-key1", "mania-key2" };
-                if (validation.Config != null)
-                    foreach (var config in validation.Config.ManiaConfigs.Values)
-                        foreach (string name in SkinCatalog.ReferencedImages(config)) names.Add(name);
                 foreach (string name in names)
                     candidate.Resolve(name);
                 if (candidate.Warnings.Count > 0)
@@ -66,12 +80,12 @@ namespace Nullscent.Skin
                     validation.Status = SkinValidity.Partial;
                 }
                 var previous = _assets;
-                var previousConfig = _currentSkinConfig;
+                var previousDefinition = _currentDefinition;
                 var previousDirectory = CurrentSkinDirectory;
                 var previousValidation = CurrentValidation;
                 _assets = candidate;
                 candidate = null;
-                _currentSkinConfig = validation.Config;
+                _currentDefinition = definition;
                 CurrentSkinDirectory = validation.Directory;
                 CurrentValidation = validation;
                 bool persisted;
@@ -81,7 +95,7 @@ namespace Nullscent.Skin
                 {
                     _assets.Dispose();
                     _assets = previous;
-                    _currentSkinConfig = previousConfig;
+                    _currentDefinition = previousDefinition;
                     CurrentSkinDirectory = previousDirectory;
                     CurrentValidation = previousValidation;
                     validation.Errors.Add("No se pudo guardar la selección; se conservó la skin anterior.");
@@ -89,6 +103,8 @@ namespace Nullscent.Skin
                 }
                 _assetInfo.Clear();
                 _animationCache.Clear();
+                _resolvedKeymodes.Clear();
+                _reportedDiagnostics.Clear();
                 Version++;
                 NotifySkinChanged();
                 try { previous.Dispose(); }
@@ -114,12 +130,13 @@ namespace Nullscent.Skin
         public bool TryActivateInternal(Func<bool>? persistSelection = null)
         {
             var previous = _assets;
-            var previousConfig = _currentSkinConfig;
+            var previousDefinition = _currentDefinition;
             var previousDirectory = CurrentSkinDirectory;
             var previousValidation = CurrentValidation;
-            var candidate = new SkinAssetResolver(_graphicsDevice, null, Core.SettingsService.Instance.HighResolutionSkins);
+            string? root = System.IO.Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null;
+            var candidate = new SkinAssetResolver(_graphicsDevice, root, Core.SettingsService.Instance.HighResolutionSkins);
             _assets = candidate;
-            _currentSkinConfig = null;
+            _currentDefinition = _internalDefinition;
             CurrentSkinDirectory = string.Empty;
             CurrentValidation = null;
             bool persisted;
@@ -129,13 +146,15 @@ namespace Nullscent.Skin
             {
                 candidate.Dispose();
                 _assets = previous;
-                _currentSkinConfig = previousConfig;
+                _currentDefinition = previousDefinition;
                 CurrentSkinDirectory = previousDirectory;
                 CurrentValidation = previousValidation;
                 return false;
             }
             _assetInfo.Clear();
             _animationCache.Clear();
+            _resolvedKeymodes.Clear();
+            _reportedDiagnostics.Clear();
             Version++;
             NotifySkinChanged();
             try { previous.Dispose(); }
@@ -156,6 +175,20 @@ namespace Nullscent.Skin
         public ResolvedSkinAsset ResolveAsset(string fileName)
         {
             var asset = _assets.Resolve(fileName);
+            if (asset.Texture == null && asset.Origin != SkinAssetOrigin.IntentionalBlank)
+            {
+                ResolvedSkinAsset fallback = _internalAssets.Resolve(fileName);
+                if (fallback.Texture != null)
+                    asset = new ResolvedSkinAsset
+                    {
+                        Texture = fallback.Texture,
+                        LogicalSize = fallback.LogicalSize,
+                        SourcePixelSize = fallback.SourcePixelSize,
+                        TexturePixelSize = fallback.TexturePixelSize,
+                        Origin = SkinAssetOrigin.Internal,
+                        IsHighResolution = fallback.IsHighResolution
+                    };
+            }
             if (asset.Texture != null) _assetInfo[asset.Texture] = asset;
             return asset;
         }
@@ -170,43 +203,254 @@ namespace Nullscent.Skin
         /// </summary>
         public List<Texture2D>? GetAnimation(string fileName)
         {
-            if (string.IsNullOrWhiteSpace(CurrentSkinDirectory))
-                return null;
-
             if (_animationCache.TryGetValue(fileName, out var cachedAnimation))
                 return cachedAnimation;
 
+            List<Texture2D>? frames = LoadAnimationFrom(_assets, fileName);
+            if (frames == null && !ReferenceEquals(_assets, _internalAssets))
+                frames = LoadAnimationFrom(_internalAssets, fileName);
+
+            _animationCache[fileName] = frames;
+            return frames;
+        }
+
+        private List<Texture2D>? LoadAnimationFrom(SkinAssetResolver provider, string fileName)
+        {
             var frames = new List<Texture2D>();
-            int frameIndex = 0;
-
-            while (true)
+            for (int i = 0; i < 1000; i++)
             {
-                string frameName = $"{fileName}-{frameIndex}";
-                var tex = GetTexture(frameName);
-                if (tex == null)
-                    break;
+                ResolvedSkinAsset frame = provider.Resolve($"{fileName}-{i}");
+                if (frame.Texture == null) break;
+                RememberResolvedAsset(provider, frame);
+                frames.Add(frame.Texture);
+            }
+            if (frames.Count > 0) return frames;
 
-                frames.Add(tex);
-                frameIndex++;
+            ResolvedSkinAsset single = provider.Resolve(fileName);
+            if (single.Texture == null) return null;
+            RememberResolvedAsset(provider, single);
+            return new List<Texture2D> { single.Texture };
+        }
+
+        private void RememberResolvedAsset(SkinAssetResolver provider, ResolvedSkinAsset asset)
+        {
+            if (asset.Texture == null) return;
+            if (ReferenceEquals(provider, _internalAssets) && asset.Origin == SkinAssetOrigin.Skin)
+            {
+                asset = new ResolvedSkinAsset
+                {
+                    Texture = asset.Texture,
+                    LogicalSize = asset.LogicalSize,
+                    SourcePixelSize = asset.SourcePixelSize,
+                    TexturePixelSize = asset.TexturePixelSize,
+                    Origin = SkinAssetOrigin.Internal,
+                    IsHighResolution = asset.IsHighResolution
+                };
+            }
+            _assetInfo[asset.Texture] = asset;
+        }
+
+        public ManiaKeymodeDefinition GetManiaProfile(int keyCount)
+        {
+            if (_currentDefinition.Keymodes.TryGetValue(keyCount, out var active)) return active;
+            if (_internalDefinition.Keymodes.TryGetValue(keyCount, out var fallback)) return fallback;
+            return CreateFallbackMode(keyCount);
+        }
+
+        public ResolvedManiaKeymode GetResolvedKeymode(int keyCount)
+        {
+            if (_resolvedKeymodes.TryGetValue(keyCount, out var cached)) return cached;
+            ManiaKeymodeDefinition profile;
+            bool internalOnly = !_currentDefinition.Keymodes.TryGetValue(keyCount, out profile!);
+            if (internalOnly)
+                profile = _internalDefinition.Keymodes.TryGetValue(keyCount, out var fallback)
+                    ? fallback : CreateFallbackMode(keyCount);
+
+            var lanes = new List<ResolvedManiaLane>(profile.Lanes.Count);
+            for (int i = 0; i < profile.Lanes.Count; i++)
+            {
+                ManiaLaneDefinition lane = profile.Lanes[i];
+                string suffix = GetDefaultStyleSuffix(keyCount, i);
+                bool legacy = !internalOnly && _currentDefinition.Provider == SkinProviderKind.OsuLegacy;
+                string? noteName = First(lane.NoteAsset, profile.NoteStyle.Asset,
+                    legacy ? $"mania-note{suffix}" : null);
+                var note = ResolveAnimation(noteName, "bar-note", profile.NoteStyle.FramesPerSecond ?? 60, internalOnly);
+
+                string? receptorName = First(lane.ReceptorAsset, profile.ReceptorStyle.Asset,
+                    legacy ? $"mania-key{suffix}" : null);
+                var receptor = ResolveAnimation(receptorName, "bar-key", profile.ReceptorStyle.FramesPerSecond ?? 60, internalOnly);
+                string? pressedName = First(lane.PressedReceptorAsset, profile.ReceptorStyle.PressedAsset,
+                    legacy ? $"mania-key{suffix}D" : null);
+                var pressed = ResolveAnimation(pressedName, "bar-key-pressed", profile.ReceptorStyle.FramesPerSecond ?? 60, internalOnly)
+                    ?? receptor;
+
+                string? headName = First(lane.LongHeadAsset, profile.LongHeadStyle.Asset,
+                    legacy ? $"mania-note{suffix}H" : null);
+                var head = ResolveAnimation(headName, noteName, profile.LongHeadStyle.FramesPerSecond ?? 60, internalOnly)
+                    ?? ResolveAnimation(headName, "bar-hold-head", profile.LongHeadStyle.FramesPerSecond ?? 60, internalOnly) ?? note;
+                string? bodyName = First(lane.LongBodyAsset, profile.LongBodyStyle.Asset,
+                    legacy ? $"mania-note{suffix}L" : null);
+                var body = ResolveAnimation(bodyName, "bar-hold-body", profile.LongBodyStyle.FramesPerSecond ?? 30, internalOnly);
+                string? tailName = First(lane.LongTailAsset, profile.LongTailStyle.Asset,
+                    legacy ? $"mania-note{suffix}T" : null);
+                var tail = ResolveAnimation(tailName, headName, profile.LongTailStyle.FramesPerSecond ?? 60, internalOnly)
+                    ?? ResolveAnimation(tailName, "bar-hold-tail", profile.LongTailStyle.FramesPerSecond ?? 60, internalOnly) ?? head;
+
+                string lightSuffix = First(profile.LightingNoteAsset, legacy ? $"lightingN-{i}" : null) ?? "bar-light-note";
+                string holdLightSuffix = First(profile.LightingHoldAsset, legacy ? $"lightingL-{i}" : null) ?? "bar-light-hold";
+                var noteLight = ResolveAnimation(lightSuffix, "bar-light-note", profile.LightFramesPerSecond, internalOnly);
+                var holdLight = ResolveAnimation(holdLightSuffix, "bar-light-hold", profile.LightFramesPerSecond, internalOnly);
+                lanes.Add(new ResolvedManiaLane(lane, note, receptor, pressed, head, body, tail, noteLight, holdLight));
             }
 
-            if (frames.Count > 0)
+            var stage = new Dictionary<string, ResolvedSkinAnimation>(StringComparer.OrdinalIgnoreCase);
+            foreach (string part in new[] { "left", "right", "bottom", "hint", "light" })
             {
-                _animationCache[fileName] = frames;
-                return frames;
+                profile.StageAssets.TryGetValue(part, out string? configured);
+                string conventional = $"mania-stage-{part}";
+                string? name = First(configured, conventional);
+                string? emergency = part == "hint" ? "bar-stage-hint" : null;
+                ResolvedSkinAnimation? animation = ResolveAnimation(name, emergency, 60, internalOnly);
+                if (animation != null) stage[part] = animation;
             }
 
-            // Fallback a un único frame estático
-            var singleTex = GetTexture(fileName);
-            if (singleTex != null)
+            var judgements = new Dictionary<string, ResolvedSkinAnimation>(StringComparer.OrdinalIgnoreCase);
+            foreach (string key in new[] { "Hit0", "Hit50", "Hit100", "Hit200", "Hit300", "Hit300g" })
             {
-                var list = new List<Texture2D> { singleTex };
-                _animationCache[fileName] = list;
-                return list;
+                string? configured = profile.JudgementAssets.TryGetValue(key, out string? hit) ? hit : null;
+                string suffix = key[3..];
+                var animation = ResolveAnimation(First(configured, $"mania-hit{suffix}", $"hit{suffix}"), null, 60, internalOnly);
+                if (animation != null) judgements[suffix] = animation;
             }
 
-            _animationCache[fileName] = null;
-            return null;
+            var result = new ResolvedManiaKeymode(profile, lanes, stage, judgements);
+            _resolvedKeymodes[keyCount] = result;
+            return result;
+        }
+
+        public SkinSpriteMetrics GetSpriteMetrics(int keyCount, int columnIndex, string part)
+        {
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            ManiaLaneDefinition lane = mode.Lanes[Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1)].Definition;
+            SpriteStyleDefinition style = part switch
+            {
+                "receptor" => mode.Definition.ReceptorStyle,
+                "head" => mode.Definition.LongHeadStyle,
+                "body" => mode.Definition.LongBodyStyle,
+                "tail" => mode.Definition.LongTailStyle,
+                _ => mode.Definition.NoteStyle
+            };
+            float widthRatio = part switch
+            {
+                "note" => lane.NoteWidthRatio ?? style.LaneWidthRatio,
+                "receptor" => lane.ReceptorWidthRatio ?? style.LaneWidthRatio,
+                "body" => lane.HoldBodyWidthRatio ?? style.LaneWidthRatio,
+                _ => style.LaneWidthRatio
+            };
+            return new SkinSpriteMetrics(widthRatio, style.HeightMode, style.HeightValue,
+                mode.Definition.NoteHeightReferenceWidth ?? 0f, style.OffsetXRatio, style.OffsetY, style.FramesPerSecond);
+        }
+
+        private ResolvedSkinAnimation? ResolveAnimation(string? name, string? fallbackName, int fps, bool internalOnly)
+        {
+            if (string.Equals(name, "_blank", StringComparison.OrdinalIgnoreCase))
+                return _blankTexture == null ? null : new ResolvedSkinAnimation(new[] { _blankTexture }, fps);
+
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                List<Texture2D>? frames = internalOnly
+                    ? LoadAnimationFrom(_internalAssets, name)
+                    : GetAnimation(name);
+                if (frames != null) return new ResolvedSkinAnimation(frames, fps);
+            }
+
+            if (string.IsNullOrWhiteSpace(fallbackName) || fallbackName.Equals(name, StringComparison.OrdinalIgnoreCase)) return null;
+            List<Texture2D>? fallback = internalOnly
+                ? LoadAnimationFrom(_internalAssets, fallbackName)
+                : GetAnimation(fallbackName);
+            if (fallback == null) return null;
+            string key = $"{_currentDefinition.Name}:{name ?? "<missing>"}->{fallbackName}";
+            string provider = internalOnly || !_assetInfo.TryGetValue(fallback[0], out ResolvedSkinAsset? info)
+                || info.Origin != SkinAssetOrigin.Skin ? "fallback interno" : "skin activa";
+            if (_reportedDiagnostics.Add(key)) Console.WriteLine($"[Skin] Fallback visual usado: {name ?? "(sin asset)"} -> {provider}/{fallbackName}.");
+            return new ResolvedSkinAnimation(fallback, fps);
+        }
+
+        private ResolvedSkinAsset ResolveFromInternal(string name)
+        {
+            ResolvedSkinAsset asset = _internalAssets.Resolve(name);
+            if (asset.Texture != null)
+            {
+                asset = new ResolvedSkinAsset
+                {
+                    Texture = asset.Texture, LogicalSize = asset.LogicalSize,
+                    SourcePixelSize = asset.SourcePixelSize, TexturePixelSize = asset.TexturePixelSize,
+                    Origin = SkinAssetOrigin.Internal, IsHighResolution = asset.IsHighResolution
+                };
+                _assetInfo[asset.Texture] = asset;
+            }
+            return asset;
+        }
+
+        private ManiaKeymodeDefinition CreateFallbackMode(int keyCount)
+        {
+            if (keyCount < 1 || keyCount > 18) throw new ArgumentOutOfRangeException(nameof(keyCount));
+            var baseMode = _internalDefinition.Keymodes.TryGetValue(keyCount <= 5 ? 4 : 7, out var exact)
+                ? exact : _internalDefinition.Keymodes.Values.FirstOrDefault();
+            float baseWidth = baseMode?.Lanes.Count > 0
+                ? baseMode.Lanes.Sum(l => l.Width + l.GapAfter) / baseMode.Lanes.Count : 48f;
+            var lanes = new List<ManiaLaneDefinition>(keyCount);
+            for (int i = 0; i < keyCount; i++)
+            {
+                ManiaLaneDefinition? source = baseMode?.Lanes.Count > 0 ? baseMode.Lanes[i % baseMode.Lanes.Count] : null;
+                lanes.Add(new ManiaLaneDefinition
+                {
+                    Width = baseWidth * Math.Clamp((baseMode?.KeyCount ?? 4) / (float)keyCount, .65f, 1.35f),
+                    GapAfter = 2f,
+                    LaneColor = source?.LaneColor,
+                    LightColor = source?.LightColor,
+                    HoldColor = source?.HoldColor
+                });
+            }
+            return new ManiaKeymodeDefinition
+            {
+                KeyCount = keyCount, Placement = "center", Lanes = lanes,
+                DefaultHitPositionRatio = .84f, JudgementLine = true,
+                ColumnLineWidths = new float[keyCount + 1], ColumnLines = new bool[keyCount + 1],
+                NoteStyle = baseMode?.NoteStyle ?? new SpriteStyleDefinition { Asset = "bar-note", LaneWidthRatio = .94f },
+                ReceptorStyle = baseMode?.ReceptorStyle ?? new SpriteStyleDefinition { Asset = "bar-key", PressedAsset = "bar-key-pressed", LaneWidthRatio = .9f, HeightMode = SpriteHeightMode.LaneWidthFraction, HeightValue = .17f },
+                LongHeadStyle = baseMode?.LongHeadStyle ?? new SpriteStyleDefinition { Asset = "bar-hold-head", LaneWidthRatio = .94f },
+                LongBodyStyle = baseMode?.LongBodyStyle ?? new SpriteStyleDefinition { Asset = "bar-hold-body", LaneWidthRatio = .88f },
+                LongTailStyle = baseMode?.LongTailStyle ?? new SpriteStyleDefinition { Asset = "bar-hold-tail", LaneWidthRatio = .94f },
+                BodyMode = baseMode?.BodyMode ?? NoteBodyRenderMode.Stretch,
+                StageAssets = baseMode?.StageAssets ?? new Dictionary<string, string?> { ["hint"] = "bar-stage-hint" },
+                LightFramesPerSecond = baseMode?.LightFramesPerSecond ?? 60
+            };
+        }
+
+        private static string? First(params string?[] names) => names.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+
+        private static ManiaSkinDefinition CreateEmergencyDefinition()
+        {
+            ManiaKeymodeDefinition Build(int keys)
+            {
+                var lanes = Enumerable.Range(0, keys).Select(_ => new ManiaLaneDefinition { Width = 48, GapAfter = 2 }).ToList();
+                return new ManiaKeymodeDefinition
+                {
+                    KeyCount = keys, Lanes = lanes, ColumnLineWidths = new float[keys + 1], ColumnLines = new bool[keys + 1],
+                    NoteStyle = new SpriteStyleDefinition { LaneWidthRatio = .9f },
+                    ReceptorStyle = new SpriteStyleDefinition { LaneWidthRatio = .9f, HeightMode = SpriteHeightMode.LaneWidthFraction, HeightValue = .2f },
+                    LongHeadStyle = new SpriteStyleDefinition { LaneWidthRatio = .9f },
+                    LongBodyStyle = new SpriteStyleDefinition { LaneWidthRatio = .85f },
+                    LongTailStyle = new SpriteStyleDefinition { LaneWidthRatio = .9f }
+                };
+            }
+            return new ManiaSkinDefinition
+            {
+                Id = "internal:emergency", Name = "Nullscent Emergency",
+                Provider = SkinProviderKind.Emergency,
+                Keymodes = new Dictionary<int, ManiaKeymodeDefinition> { [4] = Build(4), [7] = Build(7) }
+            };
         }
 
         /// <summary>
@@ -219,7 +463,7 @@ namespace Nullscent.Skin
 
             if (timeMs < 0) return animation[0];
 
-            int fps = framesPerSecond ?? _currentSkinConfig?.AnimationFramerate ?? -1;
+            int fps = framesPerSecond ?? _currentDefinition.AnimationFramerate ?? -1;
             if (fps <= 0)
                 fps = 15; // default en osu!mania
 
@@ -248,23 +492,9 @@ namespace Nullscent.Skin
 
         public List<Texture2D>? GetNoteAnimation(int keyCount, int columnIndex)
         {
-            return GetNoteAnimationRaw(keyCount, columnIndex);
-        }
-
-        private List<Texture2D>? GetNoteAnimationRaw(int keyCount, int columnIndex)
-        {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-
-            if (config != null && config.NoteImages.TryGetValue(columnIndex, out string? customPath))
-                return GetAnimation(customPath);
-
-            string style = GetDefaultStyleSuffix(keyCount, columnIndex);
-            
-            // Legacy fallback is selected by the column's edge distance, or its
-            // special-column role. Per-column filenames come from skin.ini.
-            var anim = GetAnimation($"mania-note{style}");
-            return anim;
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
+            return mode.Lanes[index].Note?.Textures;
         }
 
         /// <summary>
@@ -278,20 +508,9 @@ namespace Nullscent.Skin
 
         public List<Texture2D>? GetLNHeadAnimation(int keyCount, int columnIndex)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-
-            if (config != null && config.NoteHeadImages.TryGetValue(columnIndex, out string? customPath))
-                return GetAnimation(customPath);
-
-            // The legacy default name is derived from the column style.
-            string style = GetDefaultStyleSuffix(keyCount, columnIndex);
-            var anim = GetAnimation($"mania-note{style}H");
-            if (anim != null) return anim;
-
-            // A skin may omit an explicit head; stable uses the normal note.
-            anim = GetNoteAnimation(keyCount, columnIndex);
-            return anim;
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
+            return mode.Lanes[index].LongHead?.Textures;
         }
 
         /// <summary>
@@ -305,15 +524,9 @@ namespace Nullscent.Skin
 
         public List<Texture2D>? GetLNBodyAnimation(int keyCount, int columnIndex)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-
-            if (config != null && config.NoteBodyImages.TryGetValue(columnIndex, out string? customPath))
-                return GetAnimation(customPath);
-
-            // The body uses the same legacy column-style fallback as notes.
-            string style = GetDefaultStyleSuffix(keyCount, columnIndex);
-            return GetAnimation($"mania-note{style}L");
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
+            return mode.Lanes[index].LongBody?.Textures;
         }
 
         /// <summary>
@@ -327,23 +540,9 @@ namespace Nullscent.Skin
 
         public List<Texture2D>? GetLNTailAnimation(int keyCount, int columnIndex)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-
-            if (config != null && config.NoteTailImages.TryGetValue(columnIndex, out string? customPath))
-                return GetAnimation(customPath);
-
-            // Stable's default tail name follows the legacy column style.
-            string style = GetDefaultStyleSuffix(keyCount, columnIndex);
-            var anim = GetAnimation($"mania-note{style}T");
-            if (anim != null) return anim;
-
-            // 3. Fallback to LN Head
-            anim = GetLNHeadAnimation(keyCount, columnIndex);
-            if (anim != null) return anim;
-
-            // 4. Default game asset fallback
-            return GetAnimation("mania-note-hold-tail");
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
+            return mode.Lanes[index].LongTail?.Textures;
         }
 
         /// <summary>
@@ -357,32 +556,9 @@ namespace Nullscent.Skin
 
         public List<Texture2D>? GetKeyAnimation(int keyCount, int columnIndex, bool pressed = false)
         {
-            return GetKeyAnimationRaw(keyCount, columnIndex, pressed) ?? (pressed ? GetKeyAnimationRaw(keyCount, columnIndex, false) : null);
-        }
-
-        private List<Texture2D>? GetKeyAnimationRaw(int keyCount, int columnIndex, bool pressed)
-        {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-
-            if (config != null)
-            {
-                var imageDict = pressed ? config.KeyPressedImages : config.KeyImages;
-                if (imageDict.TryGetValue(columnIndex, out string? customPath))
-                    return GetAnimation(customPath);
-            }
-
-            string style = GetDefaultStyleSuffix(keyCount, columnIndex);
-            string suffix = pressed ? "D" : "";
-
-            // Buscar en orden de prioridad estándar de osu! (ej. mania-key1 o mania-key1D)
-            var anim = GetAnimation($"mania-key{style}{suffix}");
-            if (anim != null) return anim;
-
-            anim = GetAnimation($"mania-key-{style}{suffix}");
-            if (anim != null) return anim;
-
-            return GetAnimation($"mania-key{style}{suffix}");
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
+            return (pressed ? mode.Lanes[index].PressedReceptor : mode.Lanes[index].Receptor)?.Textures;
         }
 
         /// <summary>
@@ -390,32 +566,16 @@ namespace Nullscent.Skin
         /// </summary>
         public List<Texture2D>? GetLightingAnimation(int keyCount, int columnIndex)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-            if (config != null && !string.IsNullOrWhiteSpace(config.LightingN))
-            {
-                if (config.LightingN.Equals("_blank", StringComparison.OrdinalIgnoreCase))
-                    return _blankTexture != null ? new List<Texture2D> { _blankTexture } : null;
-                return GetAnimation(config.LightingN);
-            }
-
-            string fileName = $"lightingN-{columnIndex}";
-            return GetAnimation(fileName) ?? GetAnimation("lightingN");
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
+            return mode.Lanes[index].NoteLighting?.Textures;
         }
 
         public List<Texture2D>? GetLightingLAnimation(int keyCount, int columnIndex)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-            if (config != null && !string.IsNullOrWhiteSpace(config.LightingL))
-            {
-                if (config.LightingL.Equals("_blank", StringComparison.OrdinalIgnoreCase))
-                    return _blankTexture != null ? new List<Texture2D> { _blankTexture } : null;
-                return GetAnimation(config.LightingL);
-            }
-
-            string fileName = $"lightingL-{columnIndex}";
-            return GetAnimation(fileName) ?? GetAnimation("lightingL");
+            ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
+            int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
+            return mode.Lanes[index].HoldLighting?.Textures;
         }
 
         public Texture2D? GetLightingLTexture(int keyCount, int columnIndex)
@@ -435,53 +595,21 @@ namespace Nullscent.Skin
         /// </summary>
         public Texture2D? GetStageTexture(int keyCount, string? part = null)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-
-            if (part != null)
-            {
-                string? customName = null;
-                if (config != null)
-                {
-                    if (part == "left") customName = config.StageLeft;
-                    else if (part == "right") customName = config.StageRight;
-                    else if (part == "bottom") customName = config.StageBottom;
-                    else if (part == "hint") customName = config.StageHint;
-                    else if (part == "light") customName = config.StageLight;
-                }
-
-                if (customName != null)
-                {
-                    if (customName.Equals("_blank", StringComparison.OrdinalIgnoreCase))
-                        return _blankTexture;
-                    return GetTexture(customName);
-                }
-
-                string fileName = $"mania-stage-{part}";
-                return GetTexture(fileName);
-            }
-
-            return GetTexture("mania-stage-bottom");
+            string key = part ?? "bottom";
+            return GetResolvedKeymode(keyCount).StageAssets.TryGetValue(key, out ResolvedSkinAnimation? animation)
+                ? animation.FirstFrame : null;
         }
 
         public List<Texture2D>? GetStageAnimation(int keyCount, string part)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
-            string? customName = part switch
-            {
-                "bottom" => config.StageBottom,
-                "light" => config.StageLight,
-                _ => null
-            };
-            return GetAnimation(customName ?? $"mania-stage-{part}");
+            return GetResolvedKeymode(keyCount).StageAssets.TryGetValue(part, out ResolvedSkinAnimation? animation)
+                ? animation.Textures : null;
         }
 
-        public int GetLightFramePerSecond(int keyCount) => KeyConfig(keyCount)?.LightFramePerSecond ?? 60;
+        public int GetLightFramePerSecond(int keyCount) => GetManiaProfile(keyCount).LightFramesPerSecond;
         // v2.4 scales mania combo and hitbursts in the 768-high virtual space
         // instead of the 480-high stage space (480 / 768 = 0.625).
-        public float GetLegacyHudScale(int viewportHeight) => viewportHeight / 480f
-            * (_currentSkinConfig?.IsVersionAtLeast(2.4) == true ? 0.625f : 1f);
+        public float GetLegacyHudScale(float layoutScale) => layoutScale * _currentDefinition.LegacyHudScale;
 
         public List<Texture2D>? GetHitExplosionAnimation(int keyCount, int columnIndex)
         {
@@ -504,116 +632,107 @@ namespace Nullscent.Skin
 
         public List<Texture2D>? GetJudgementAnimation(int keyCount, string judgement)
         {
-            var config = GetManiaConfig(keyCount);
-            if (config == null) return null;
             string suffix = judgement switch
             {
                 "Perfect" => "300g", "Great" => "300", "Good" => "200",
                 "Ok" => "100", "Meh" => "50", "Miss" => "0", _ => ""
             };
             if (suffix.Length == 0) return null;
-            if (config.HitImages.TryGetValue("Hit" + suffix, out string? custom))
-                return GetAnimation(custom);
-            return GetAnimation("mania-hit" + suffix) ?? GetAnimation("hit" + suffix);
+            return GetResolvedKeymode(keyCount).Judgements.TryGetValue(suffix, out ResolvedSkinAnimation? animation)
+                ? animation.Textures : null;
+        }
+
+        public Texture2D? GetJudgementFrame(int keyCount, string judgement, double elapsedMs)
+        {
+            string suffix = judgement switch
+            {
+                "Perfect" => "300g", "Great" => "300", "Good" => "200",
+                "Ok" => "100", "Meh" => "50", "Miss" => "0", _ => ""
+            };
+            return suffix.Length > 0 && GetResolvedKeymode(keyCount).Judgements.TryGetValue(suffix, out ResolvedSkinAnimation? animation)
+                ? animation.FrameAtClamped(elapsedMs) : null;
         }
 
         /// <summary>
         /// Propiedades del layout expuestas desde la skin activa.
         /// </summary>
-        private ManiaKeyConfig? KeyConfig(int keyCount) => GetManiaConfig(keyCount);
+        private ManiaKeymodeDefinition Profile(int keyCount) => GetManiaProfile(keyCount);
         public float? GetColumnWidth(int keyCount, int columnIndex)
         {
-            var widths = KeyConfig(keyCount)?.ColumnWidths;
-            return widths != null && columnIndex >= 0 && columnIndex < widths.Length ? widths[columnIndex] : null;
+            var lanes = Profile(keyCount).Lanes;
+            return columnIndex >= 0 && columnIndex < lanes.Count ? lanes[columnIndex].Width : null;
         }
-        public float[]? GetColumnSpacing(int keyCount) => KeyConfig(keyCount)?.ColumnSpacing;
-        public bool[]? GetColumnLines(int keyCount) => KeyConfig(keyCount)?.ColumnLines;
-        public float? GetColumnStart(int keyCount) => KeyConfig(keyCount)?.ColumnStart;
-        public float? GetWidthForNoteHeightScale(int keyCount) => KeyConfig(keyCount)?.WidthForNoteHeightScale;
+        public float[]? GetColumnSpacing(int keyCount) => Profile(keyCount).Lanes.Select(lane => lane.GapAfter).ToArray();
+        public bool[]? GetColumnLines(int keyCount) => Profile(keyCount).ColumnLines;
+        public float? GetColumnStart(int keyCount) => Profile(keyCount).ColumnStart;
+        public float? GetWidthForNoteHeightScale(int keyCount) => Profile(keyCount).NoteHeightReferenceWidth;
         public float GetNoteHeightReferenceWidth(int keyCount)
         {
-            var config = KeyConfig(keyCount);
-            if (config?.WidthForNoteHeightScale is float referenceWidth && referenceWidth > 0f && float.IsFinite(referenceWidth))
+            var config = Profile(keyCount);
+            if (config.NoteHeightReferenceWidth is float referenceWidth && referenceWidth > 0f && float.IsFinite(referenceWidth))
                 return referenceWidth;
-            float minimum = float.PositiveInfinity;
-            for (int column = 0; column < keyCount; column++)
-            {
-                float width = config?.ColumnWidths != null && column < config.ColumnWidths.Length
-                    && float.IsFinite(config.ColumnWidths[column]) && config.ColumnWidths[column] > 0
-                    ? config.ColumnWidths[column] : 30f;
-                minimum = Math.Min(minimum, width);
-            }
-            return float.IsPositiveInfinity(minimum) ? 30f : minimum;
+            return config.Lanes.Select(lane => lane.Width).Where(width => float.IsFinite(width) && width > 0)
+                .DefaultIfEmpty(48f).Min();
         }
-        public float[]? GetColumnLineWidths(int keyCount) => KeyConfig(keyCount)?.ColumnLineWidths;
-        public int? GetHitPosition(int keyCount) => KeyConfig(keyCount)?.HitPosition;
-        public int? GetLightPosition(int keyCount) => KeyConfig(keyCount)?.LightPosition;
-        public bool IsLightingEnabled(int keyCount) => KeyConfig(keyCount)?.ColumnLighting ?? true;
-        public bool HasJudgementLine(int keyCount) => KeyConfig(keyCount)?.JudgementLine ?? true;
-        public bool IsUpsideDown(int keyCount) => KeyConfig(keyCount)?.UpsideDown ?? false;
-        public bool AreKeysUnderNotes(int keyCount) => KeyConfig(keyCount)?.KeysUnderNotes ?? false;
-        public int? GetScorePosition(int keyCount) => KeyConfig(keyCount)?.ScorePosition;
-        public int? GetComboPosition(int keyCount) => KeyConfig(keyCount)?.ComboPosition;
-        public (byte R, byte G, byte B, byte A)? GetColourBarline(int keyCount) => KeyConfig(keyCount)?.ColourBarline;
-        public (byte R, byte G, byte B, byte A)? GetColourJudgementLine(int keyCount) => KeyConfig(keyCount)?.ColourJudgementLine;
-        public (byte R, byte G, byte B, byte A)? GetColourColumnLine(int keyCount) => KeyConfig(keyCount)?.ColourColumnLine;
-        public (byte R, byte G, byte B, byte A)? GetColourBreak(int keyCount) => KeyConfig(keyCount)?.ColourBreak;
-        public (byte R, byte G, byte B, byte A)? GetGlobalColourHold(int keyCount) => KeyConfig(keyCount)?.ColourHold;
-        public string GetComboPrefix() => _currentSkinConfig?.ComboPrefix ?? "score";
-        public float GetComboOverlap() => _currentSkinConfig?.ComboOverlap ?? 0f;
-        public float[]? GetLightingNWidths(int keyCount) => _currentSkinConfig?.IsVersionAtLeast(2.5) == true
-            ? KeyConfig(keyCount)?.LightingNWidths : null;
-        public float[]? GetLightingLWidths(int keyCount) => _currentSkinConfig?.IsVersionAtLeast(2.5) == true
-            ? KeyConfig(keyCount)?.LightingLWidths : null;
+        public float[]? GetColumnLineWidths(int keyCount) => Profile(keyCount).ColumnLineWidths;
+        public int? GetHitPosition(int keyCount) => (int?)Profile(keyCount).HitPosition;
+        public int? GetLightPosition(int keyCount) => (int?)Profile(keyCount).LightPosition;
+        public bool IsLightingEnabled(int keyCount) => Profile(keyCount).ColumnLighting;
+        public bool HasJudgementLine(int keyCount) => Profile(keyCount).JudgementLine;
+        public bool? GetUpsideDownPreference(int keyCount) => Profile(keyCount).UpsideDown;
+        public bool AreKeysUnderNotes(int keyCount) => Profile(keyCount).KeysUnderNotes;
+        public int? GetScorePosition(int keyCount) => (int?)Profile(keyCount).ScorePosition;
+        public int? GetComboPosition(int keyCount) => (int?)Profile(keyCount).ComboPosition;
+        public (byte R, byte G, byte B, byte A)? GetColourBarline(int keyCount) => ToTuple(Profile(keyCount).BarlineColor);
+        public (byte R, byte G, byte B, byte A)? GetColourJudgementLine(int keyCount) => ToTuple(Profile(keyCount).JudgementLineColor);
+        public (byte R, byte G, byte B, byte A)? GetColourColumnLine(int keyCount) => ToTuple(Profile(keyCount).ColumnLineColor);
+        public (byte R, byte G, byte B, byte A)? GetColourBreak(int keyCount) => ToTuple(Profile(keyCount).BreakColor);
+        public (byte R, byte G, byte B, byte A)? GetGlobalColourHold(int keyCount) => ToTuple(Profile(keyCount).HoldColor);
+        public string GetComboPrefix() => _currentDefinition.ComboPrefix;
+        public float GetComboOverlap() => _currentDefinition.ComboOverlap;
+        public float[]? GetLightingNWidths(int keyCount) => Profile(keyCount).LightingNoteWidths;
+        public float[]? GetLightingLWidths(int keyCount) => Profile(keyCount).LightingHoldWidths;
         public (byte R, byte G, byte B, byte A)? GetColourLight(int keyCount, int columnIndex)
         {
-            var config = KeyConfig(keyCount);
-            return config != null && config.ColourLights.TryGetValue(columnIndex, out var color) ? color : null;
+            var lanes = Profile(keyCount).Lanes;
+            return columnIndex >= 0 && columnIndex < lanes.Count ? ToTuple(lanes[columnIndex].LightColor) : null;
         }
         public (byte R, byte G, byte B, byte A)? GetColourHold(int keyCount, int columnIndex)
         {
-            var config = KeyConfig(keyCount);
-            if (config == null) return null;
-            return config.ColourHolds.TryGetValue(columnIndex, out var color) ? color : config.ColourHold;
+            var profile = Profile(keyCount);
+            var lanes = profile.Lanes;
+            return columnIndex >= 0 && columnIndex < lanes.Count
+                ? ToTuple(lanes[columnIndex].HoldColor ?? profile.HoldColor) : ToTuple(profile.HoldColor);
         }
         public (byte R, byte G, byte B, byte A)? GetColumnColorMap(int keyCount, int columnIndex)
         {
-            var config = KeyConfig(keyCount);
-            return config != null && config.ColumnColorsMap.TryGetValue(columnIndex, out var color) ? color : null;
+            var lanes = Profile(keyCount).Lanes;
+            return columnIndex >= 0 && columnIndex < lanes.Count ? ToTuple(lanes[columnIndex].LaneColor) : null;
         }
         public int GetNoteBodyStyle(int keyCount, int columnIndex)
         {
-            if (_currentSkinConfig?.IsVersionAtLeast(2.5) == false) return 1;
-            var config = KeyConfig(keyCount);
-            return config != null && config.NoteBodyStyles.TryGetValue(columnIndex, out int style) ? style : config?.NoteBodyStyle ?? 1;
+            var profile = Profile(keyCount);
+            NoteBodyRenderMode mode = columnIndex >= 0 && columnIndex < profile.Lanes.Count
+                ? profile.Lanes[columnIndex].BodyMode ?? profile.BodyMode : profile.BodyMode;
+            return mode switch
+            {
+                NoteBodyRenderMode.Stretch => 0,
+                NoteBodyRenderMode.TileFromHead => 2,
+                _ => 1
+            };
         }
+
+        private static (byte R, byte G, byte B, byte A)? ToTuple(SkinColor? color) => color is { } value
+            ? (value.R, value.G, value.B, value.A) : null;
 
         public bool FlipNote(int keyCount, int columnIndex, string part, bool downScroll)
         {
-            var config = KeyConfig(keyCount);
-            bool versionAllowsOverrides = _currentSkinConfig?.IsVersionAtLeast(2.5) == true;
-            bool flip = true;
-            if (versionAllowsOverrides && config != null)
-            {
-                flip = config.NoteFlips.TryGetValue($"{columnIndex}{part}", out bool partFlip) ? partFlip
-                    : config.NoteFlips.TryGetValue(columnIndex.ToString(), out bool columnFlip) ? columnFlip
-                    : config.NoteFlipWhenUpsideDown ?? true;
-            }
-
-            // The normal note/head/body face the playfield in upscroll. A tail
-            // faces the opposite direction. Version 2.5 adds per-skin overrides.
-            return part.Equals("T", StringComparison.OrdinalIgnoreCase) ? downScroll && flip : !downScroll && flip;
+            return ManiaSkinRules.FlipNote(Profile(keyCount), columnIndex, part, downScroll);
         }
 
         public bool FlipKey(int keyCount, int columnIndex, bool pressed, bool downScroll)
         {
-            if (downScroll) return false;
-            if (_currentSkinConfig?.IsVersionAtLeast(2.5) != true) return true;
-            var config = KeyConfig(keyCount);
-            if (config == null) return true;
-            return config.KeyFlips.TryGetValue($"{columnIndex}{(pressed ? "D" : "")}", out bool stateFlip) ? stateFlip
-                : config.KeyFlips.TryGetValue(columnIndex.ToString(), out bool columnFlip) ? columnFlip
-                : config.KeyFlipWhenUpsideDown ?? true;
+            return ManiaSkinRules.FlipKey(Profile(keyCount), columnIndex, pressed, downScroll);
         }
         public Texture2D? GetScorebarBg() => GetTexture("scorebar-bg");
         public Texture2D? GetScorebarColour() => GetTexture("scorebar-colour");
@@ -709,6 +828,7 @@ namespace Nullscent.Skin
         public void Dispose()
         {
             _assets.Dispose();
+            _internalAssets.Dispose();
             _blankTexture?.Dispose();
             GC.SuppressFinalize(this);
         }

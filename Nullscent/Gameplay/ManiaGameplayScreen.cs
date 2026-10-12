@@ -13,6 +13,7 @@ using Nullscent.Rulesets.Mania.Judgements;
 using Nullscent.Rulesets.Mania.Mods;
 using Nullscent.Rulesets.Mania.Scoring;
 using Nullscent.Rulesets.Mania.UI;
+using Nullscent.Skin;
 using Nullscent.UI;
 using System;
 using System.Collections.Generic;
@@ -408,7 +409,9 @@ namespace Nullscent.Gameplay
                 HandleInput(keyboardState);
             }
 
-            _playfield.Update(_currentTime, _scoreProcessor, _maniaConfig.ScrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
+            float? receptorPositionOverride = _maniaConfig.UseSkinReceptorPosition ? null : (float)_maniaConfig.ReceptorPosition;
+            _playfield.Update(_currentTime, _scoreProcessor, _maniaConfig.ScrollSpeed, receptorPositionOverride, EffectiveDownScroll,
+                _settings.SkinNoteHeightScale, _settings.SkinReceptorHeightScale);
 
 
 
@@ -519,7 +522,9 @@ namespace Nullscent.Gameplay
             _spriteBatch.Draw(_whitePixel!, new Rectangle(0, 0, _game.WindowWidth, _game.WindowHeight), Color.Black * (float)dimAmount);
             _spriteBatch.End();
 
-            _playfield.Draw(_currentTime, _maniaConfig.ScrollSpeed, (float)_maniaConfig.ReceptorPosition, _maniaConfig.DownScroll);
+            float? receptorPositionOverride = _maniaConfig.UseSkinReceptorPosition ? null : (float)_maniaConfig.ReceptorPosition;
+            _playfield.Draw(_currentTime, _maniaConfig.ScrollSpeed, receptorPositionOverride, EffectiveDownScroll,
+                _settings.SkinNoteHeightScale, _settings.SkinReceptorHeightScale);
 
             _hud.Draw(_scoreProcessor, _originalBeatmap!, _currentTime, _activeMods, _game.SkinManager);
 
@@ -670,7 +675,9 @@ namespace Nullscent.Gameplay
             {
                 ScrollSpeed = _settings.ScrollSpeed,
                 DownScroll = _settings.DownScroll,
+                UseSkinScrollDirection = _settings.UseSkinScrollDirection,
                 ReceptorPosition = _settings.ReceptorPosition,
+                UseSkinReceptorPosition = _settings.UseSkinReceptorPosition,
                 ShowJudgementText = true,
                 ShowCombo = true,
                 ShowScore = true,
@@ -681,6 +688,18 @@ namespace Nullscent.Gameplay
                 ColumnLightBrightness = 1.0,
                 BarlineVisibility = 0.5
             };
+        }
+
+        private bool EffectiveDownScroll
+        {
+            get
+            {
+                bool? skinUpsideDown = _maniaBeatmap != null
+                    ? _game.SkinManager.GetUpsideDownPreference(_maniaBeatmap.KeyCount)
+                    : null;
+                return ManiaSkinRules.ResolveDownScroll(_maniaConfig.DownScroll,
+                    _maniaConfig.UseSkinScrollDirection, skinUpsideDown);
+            }
         }
 
         private static void SafeDispose<T>(ref T? resource, string resourceName) where T : class, IDisposable
@@ -839,6 +858,12 @@ namespace Nullscent.Gameplay
                     break;
                 case nameof(Core.SettingsService.ReceptorPosition):
                     if (_maniaConfig != null) _maniaConfig.ReceptorPosition = Core.SettingsService.Instance.ReceptorPosition;
+                    break;
+                case nameof(Core.SettingsService.UseSkinReceptorPosition):
+                    if (_maniaConfig != null) _maniaConfig.UseSkinReceptorPosition = Core.SettingsService.Instance.UseSkinReceptorPosition;
+                    break;
+                case nameof(Core.SettingsService.UseSkinScrollDirection):
+                    if (_maniaConfig != null) _maniaConfig.UseSkinScrollDirection = Core.SettingsService.Instance.UseSkinScrollDirection;
                     break;
                 case nameof(Core.SettingsService.DownScroll):
                     if (_maniaConfig != null) _maniaConfig.DownScroll = Core.SettingsService.Instance.DownScroll;

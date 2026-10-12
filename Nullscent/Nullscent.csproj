@@ -24,6 +24,11 @@
     <Folder Include="Ui\" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Skins\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <None Include="bass.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

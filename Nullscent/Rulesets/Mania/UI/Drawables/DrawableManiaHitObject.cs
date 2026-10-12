@@ -31,6 +31,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
 
         private double _alpha = 0;
         private bool _isVisible = false;
+        protected int ScrollTop { get; private set; }
+        protected int ScrollBottom { get; private set; }
+        protected int CurrentReceptorY { get; private set; }
 
         protected DrawableManiaHitObject(ManiaHitObject hitObject)
         {
@@ -40,19 +43,19 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         /// <summary>
         /// Updates the drawable state based on current time.
         /// </summary>
-        public virtual void Update(double currentTime, double scrollSpeedSetting, float receptorPosition, bool downScroll, int screenHeight)
+        public virtual void Update(double currentTime, double scrollSpeedSetting, float receptorPosition, bool downScroll,
+            int screenHeight, int? layoutReceptorY = null, int scrollTop = 0, int? scrollBottom = null)
         {
+            ScrollTop = scrollTop;
+            ScrollBottom = scrollBottom ?? screenHeight;
             double scrollTime = 2000.0 - (scrollSpeedSetting - 1.0) * 45.0;
             scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
 
             TimePreempt = scrollTime;
             TimeFadeIn = Math.Min(200.0, scrollTime * 0.2);
 
-            int receptorY = (int)(screenHeight * receptorPosition);
-            if (!downScroll)
-            {
-                receptorY = (int)(screenHeight * (1 - receptorPosition));
-            }
+            int receptorY = layoutReceptorY ?? (int)(downScroll ? screenHeight * receptorPosition : screenHeight * (1 - receptorPosition));
+            CurrentReceptorY = receptorY;
 
             int y = CalculateYPosition(HitObject.StartTime, currentTime, scrollSpeedSetting, receptorY, downScroll, screenHeight);
 
@@ -128,7 +131,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         /// Draws the hit object.
         /// </summary>
         public abstract void Draw(SpriteBatch spriteBatch, Texture2D pixel, SkinManager? skinManager, int keyCount, int columnIndex, int columnX, double currentTime, 
-            double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth);
+            double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth, float layoutScale, float noteHeightScale);
 
         /// <summary>
         /// Checks if this object should be judged at the given time.
@@ -176,12 +179,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             if (downScroll)
             {
                 double ratio = timeDiff / scrollTime;
-                return receptorY - (int)(ratio * receptorY);
+                return receptorY - (int)(ratio * (receptorY - ScrollTop));
             }
             else
             {
                 double ratio = timeDiff / scrollTime;
-                return receptorY + (int)(ratio * (screenHeight - receptorY));
+                return receptorY + (int)(ratio * (ScrollBottom - receptorY));
             }
         }
 
@@ -205,7 +208,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         }
 
         public override void Draw(SpriteBatch spriteBatch, Texture2D pixel, SkinManager? skinManager, int keyCount, int columnIndex, int columnX, double currentTime, 
-            double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth)
+            double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth, float layoutScale, float noteHeightScale)
         {
             if (!IsVisible() || IsJudged) return;
 
@@ -217,27 +220,35 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             double alpha = GetHiddenAlpha(y, downScroll, receptorY, screenHeight, CurrentCombo);
             if (alpha <= 0.0) return;
 
-            List<Texture2D>? noteFrames = skinManager?.GetNoteAnimation(keyCount, columnIndex);
-            Texture2D? noteTexture = skinManager?.GetAnimationFrame(noteFrames, currentTime, 60);
+            ResolvedManiaLane? resolvedLane = skinManager != null && columnIndex >= 0 && columnIndex < skinManager.GetResolvedKeymode(keyCount).Lanes.Count
+                ? skinManager.GetResolvedKeymode(keyCount).Lanes[columnIndex] : null;
+            Texture2D? noteTexture = resolvedLane?.Note?.FrameAt(currentTime);
             if (noteTexture != null)
             {
-                float userScale = (float)Core.SettingsService.Instance.SkinNoteHeightScale;
-                float baseWidth = skinManager!.GetNoteHeightReferenceWidth(keyCount) * screenHeight / 480f;
-
+                SkinSpriteMetrics metrics = skinManager!.GetSpriteMetrics(keyCount, columnIndex, "note");
                 Vector2 noteSize = skinManager!.GetLogicalSize(noteTexture);
                 float aspect = noteSize.Y / noteSize.X;
-                int noteHeight = (int)(baseWidth * aspect * userScale);
+                float noteWidth = Math.Max(1f, columnWidth * metrics.WidthRatio);
+                float noteHeight = metrics.HeightMode switch
+                {
+                    SpriteHeightMode.ReferenceWidthAspect when metrics.ReferenceWidth > 0f => metrics.ReferenceWidth * layoutScale * aspect,
+                    SpriteHeightMode.LaneWidthFraction => columnWidth * metrics.HeightValue,
+                    _ => noteWidth * aspect
+                } * noteHeightScale;
+                noteWidth = Math.Max(1f, noteWidth);
+                noteHeight = Math.Max(1f, noteHeight);
 
                 // ALINEACIÓN DE BORDE DELANTERO (osu!stable style):
                 // En downScroll, el borde inferior coincide con y.
                 // En upScroll, el borde superior coincide con y.
-                int noteY = downScroll ? y - noteHeight : y;
+                int noteY = (int)MathF.Round(downScroll ? y - noteHeight + metrics.OffsetY * layoutScale : y + metrics.OffsetY * layoutScale);
+                int noteX = (int)MathF.Round(columnX + (columnWidth - noteWidth) / 2f + columnWidth * metrics.OffsetXRatio);
 
                 var noteRect = new Rectangle(
-                    columnX, 
+                    noteX,
                     noteY, 
-                    columnWidth, 
-                    noteHeight
+                    (int)MathF.Round(noteWidth),
+                    (int)MathF.Round(noteHeight)
                 );
                 SpriteEffects effects = skinManager.FlipNote(keyCount, columnIndex, "", downScroll)
                     ? SpriteEffects.FlipVertically : SpriteEffects.None;

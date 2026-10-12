@@ -14,6 +14,8 @@ namespace Nullscent.Rulesets.Mania.Configuration
         public double ScrollSpeed { get; set; } = 20.0;
         public bool DownScroll { get; set; } = false;
         public double ReceptorPosition { get; set; } = 0.1;
+        public bool UseSkinReceptorPosition { get; set; } = true;
+        public bool UseSkinScrollDirection { get; set; } = true;
         public double LaneCoverTop { get; set; } = 0.0;
         public double LaneCoverBottom { get; set; } = 0.0;
 
@@ -62,6 +64,8 @@ namespace Nullscent.Rulesets.Mania.Configuration
                 ScrollSpeed = ScrollSpeed,
                 DownScroll = DownScroll,
                 ReceptorPosition = ReceptorPosition,
+                UseSkinReceptorPosition = UseSkinReceptorPosition,
+                UseSkinScrollDirection = UseSkinScrollDirection,
                 LaneCoverTop = LaneCoverTop,
                 LaneCoverBottom = LaneCoverBottom,
                 ShowJudgementText = ShowJudgementText,

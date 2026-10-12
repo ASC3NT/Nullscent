@@ -35,6 +35,7 @@ namespace Nullscent.Rulesets.Mania.UI
         public Vector2 Position { get; set; }
         public Vector2 ComboPosition { get; set; }
         public int KeyCount { get; set; }
+        public float LayoutScale { get; set; } = 1f;
 
         // Tiempo de vida visual de cada juicio en pantalla (en milisegundos)
         private const double DISPLAY_LIFETIME = 800;
@@ -129,14 +130,12 @@ namespace Nullscent.Rulesets.Mania.UI
                         float driftY = (float)(age / DISPLAY_LIFETIME) * 40.0f;
                         int textY = (int)(Position.Y + 15 - driftY);
 
-                        var judgementFrames = skinManager?.GetJudgementAnimation(KeyCount, _activeJudgement.Result.ToString());
-                        Texture2D? judgementTexture = judgementFrames is { Count: > 0 }
-                            ? judgementFrames[Math.Clamp((int)(age / 50d), 0, judgementFrames.Count - 1)] : null;
+                        Texture2D? judgementTexture = skinManager?.GetJudgementFrame(KeyCount, _activeJudgement.Result.ToString(), age);
                         if (judgementTexture != null)
                         {
                             // Legacy hitbursts have their own short animation and are
                             // centred on ScorePosition. General HUD drift/pop is internal.
-                            float skinScale = skinManager!.GetLegacyHudScale(_graphicsDevice.Viewport.Height);
+                            float skinScale = skinManager!.GetLegacyHudScale(LayoutScale);
                             float hitScale;
                             if (_activeJudgement.Result == HitResult.Miss)
                                 hitScale = age < 100 ? MathHelper.Lerp(1.2f, 1f, (float)(age / 100d)) : 1f;
@@ -173,7 +172,7 @@ namespace Nullscent.Rulesets.Mania.UI
             {
                 float progress = (float)(breakAge / 200d);
                 float breakAlpha = 0.8f * (1f - progress);
-                float breakScale = (1f + 3f * progress) * (skinManager?.GetLegacyHudScale(_graphicsDevice.Viewport.Height) ?? 1f);
+                float breakScale = (1f + 3f * progress) * (skinManager?.GetLegacyHudScale(LayoutScale) ?? LayoutScale);
                 var configuredBreakColour = skinManager?.GetColourBreak(KeyCount);
                 Color breakColour = configuredBreakColour is { } custom
                     ? new Color(custom.R, custom.G, custom.B, custom.A) : Color.Red;
@@ -223,7 +222,7 @@ namespace Nullscent.Rulesets.Mania.UI
                         _cachedComboString = _currentCombo.ToString();
                     }
 
-                    float drawScale = comboScale * (skinManager?.GetLegacyHudScale(_graphicsDevice.Viewport.Height) ?? 1f);
+                    float drawScale = comboScale * (skinManager?.GetLegacyHudScale(LayoutScale) ?? LayoutScale);
                     bool drawn = skinManager != null && skinManager.DrawNumber(_spriteBatch, _cachedComboString,
                         ComboPosition, skinManager.GetComboPrefix(), drawScale, comboAlpha,
                         spacing: -skinManager.GetComboOverlap() * drawScale, tint: holdComboColour ?? Color.White);

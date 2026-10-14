@@ -114,7 +114,7 @@ namespace Nullscent.Skin
             return result;
         }
 
-        private static byte[] ResizeBilinear(byte[] source, int sourceWidth, int sourceHeight, int width, int height)
+        internal static byte[] ResizeBilinear(byte[] source, int sourceWidth, int sourceHeight, int width, int height)
         {
             var output = new byte[checked(width * height * 4)];
             for (int y = 0; y < height; y++)
@@ -134,12 +134,31 @@ namespace Nullscent.Skin
                     int topRight = (y0 * sourceWidth + x1) * 4;
                     int bottomLeft = (y1 * sourceWidth + x0) * 4;
                     int bottomRight = (y1 * sourceWidth + x1) * 4;
-                    for (int channel = 0; channel < 4; channel++)
+                    float topWeight = 1 - fy;
+                    float bottomWeight = fy;
+                    float leftWeight = 1 - fx;
+                    float rightWeight = fx;
+                    float topLeftWeight = topWeight * leftWeight;
+                    float topRightWeight = topWeight * rightWeight;
+                    float bottomLeftWeight = bottomWeight * leftWeight;
+                    float bottomRightWeight = bottomWeight * rightWeight;
+
+                    float topLeftAlpha = source[topLeft + 3] / 255f;
+                    float topRightAlpha = source[topRight + 3] / 255f;
+                    float bottomLeftAlpha = source[bottomLeft + 3] / 255f;
+                    float bottomRightAlpha = source[bottomRight + 3] / 255f;
+                    float alpha = topLeftAlpha * topLeftWeight + topRightAlpha * topRightWeight
+                        + bottomLeftAlpha * bottomLeftWeight + bottomRightAlpha * bottomRightWeight;
+                    for (int channel = 0; channel < 3; channel++)
                     {
-                        float top = source[topLeft + channel] * (1 - fx) + source[topRight + channel] * fx;
-                        float bottom = source[bottomLeft + channel] * (1 - fx) + source[bottomRight + channel] * fx;
-                        output[destination + channel] = (byte)Math.Clamp((int)MathF.Round(top * (1 - fy) + bottom * fy), 0, 255);
+                        float premultiplied = source[topLeft + channel] * topLeftAlpha * topLeftWeight
+                            + source[topRight + channel] * topRightAlpha * topRightWeight
+                            + source[bottomLeft + channel] * bottomLeftAlpha * bottomLeftWeight
+                            + source[bottomRight + channel] * bottomRightAlpha * bottomRightWeight;
+                        float straight = alpha > 0 ? premultiplied / alpha : 0;
+                        output[destination + channel] = (byte)Math.Clamp((int)MathF.Round(straight), 0, 255);
                     }
+                    output[destination + 3] = (byte)Math.Clamp((int)MathF.Round(alpha * 255), 0, 255);
                 }
             }
             return output;

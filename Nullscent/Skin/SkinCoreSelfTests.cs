@@ -34,7 +34,26 @@ namespace Nullscent.Skin
             TestHoldLightingAnimationLifecycle();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 22 pruebas deterministas pasaron.");
+            TestTextureDownscalePreservesStraightAlphaEdges();
+            Console.WriteLine("[SkinTests] 23 pruebas deterministas pasaron.");
+        }
+
+        private static void TestTextureDownscalePreservesStraightAlphaEdges()
+        {
+            byte[] source =
+            {
+                255, 0, 0, 255,
+                0, 255, 0, 0
+            };
+            byte[] downscaled = SkinAssetResolver.ResizeBilinear(source, 2, 1, 1, 1);
+            Assert(downscaled[0] == 255 && downscaled[1] == 0 && downscaled[2] == 0
+                && downscaled[3] is >= 127 and <= 128,
+                "Straight-alpha downscaling must filter premultiplied colour, then restore straight RGB without bleeding transparent texel colour.");
+
+            byte[] transparentSource = { 17, 33, 65, 0, 240, 180, 120, 0 };
+            byte[] transparentResult = SkinAssetResolver.ResizeBilinear(transparentSource, 2, 1, 1, 1);
+            Assert(transparentResult[3] == 0,
+                "Downscaling fully transparent pixels must keep the resulting alpha transparent.");
         }
 
         private static void TestResolvedCollectionsAreReadOnlySnapshots()

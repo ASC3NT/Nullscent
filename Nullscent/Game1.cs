@@ -135,6 +135,9 @@ namespace Nullscent
         public Game1()
         {
             _graphics = new GraphicsDeviceManager(this);
+            _graphics.GraphicsProfile = GraphicsAdapter.DefaultAdapter.IsProfileSupported(GraphicsProfile.HiDef)
+                ? GraphicsProfile.HiDef
+                : GraphicsProfile.Reach;
             Content.RootDirectory = "Content";
             IsMouseVisible = true;
 
@@ -258,6 +261,7 @@ namespace Nullscent
         protected override void LoadContent()
         {
             Console.WriteLine("[Game1] Loading content...");
+            Console.WriteLine($"[Game1] Graphics profile: {GraphicsDevice.GraphicsProfile}");
 
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 

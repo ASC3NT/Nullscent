@@ -38,6 +38,9 @@ internal sealed class SkinVisualSmokeGame : Game
     private readonly LegacySkinCompatibilityMode legacyCompatibilityMode;
     private readonly LegacySkinCompatibilityMode? switchCompatibilityMode;
     private readonly string? compatibilityOutputPath;
+    private readonly string? timelineOutputDirectory;
+    private readonly string[]? switchSequence;
+    private readonly string? switchSequenceOutputDirectory;
     private SpriteBatch? batch;
     private SkinManager? skin;
     private SkinCatalog? skinCatalog;
@@ -48,12 +51,21 @@ internal sealed class SkinVisualSmokeGame : Game
     private int captureStage;
     private bool resizeApplied;
     private int persistenceCount;
+    private int switchSequenceIndex;
+    private int timelineStage;
+    private double timelineCurrentTime = 1040;
+    private LongNote? timelineLongNote;
+    private LongNote? timelineEarlyReleaseNote;
+    private double timelineLongNoteEndTime;
+    private int timelineLongColumn;
 
     public SkinVisualSmokeGame(string skinPath, int keyCount, string outputPath, bool downScroll,
         string? switchSkinPath = null, string? switchOutputPath = null, int viewportWidth = 1280, int viewportHeight = 720,
         string? resizeOutputPath = null, int? resizedViewportWidth = null, int? resizedViewportHeight = null,
         LegacySkinCompatibilityMode legacyCompatibilityMode = LegacySkinCompatibilityMode.Stable,
-        LegacySkinCompatibilityMode? switchCompatibilityMode = null, string? compatibilityOutputPath = null)
+        LegacySkinCompatibilityMode? switchCompatibilityMode = null, string? compatibilityOutputPath = null,
+        string? timelineOutputDirectory = null, IReadOnlyList<string>? switchSequence = null,
+        string? switchSequenceOutputDirectory = null)
     {
         if (keyCount < 1 || keyCount > 18) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (viewportWidth < 640 || viewportHeight < 480) throw new ArgumentOutOfRangeException(nameof(viewportWidth), "La resolución de smoke debe ser de al menos 640x480.");
@@ -66,6 +78,12 @@ internal sealed class SkinVisualSmokeGame : Game
             throw new ArgumentException("El cambio de perfil requiere un perfil destino y captura de salida.");
         if (switchCompatibilityMode != null && (switchSkinPath != null || resizeOutputPath != null))
             throw new ArgumentException("El smoke de perfil se ejecuta separado del cambio de skin y resize.");
+        if (timelineOutputDirectory != null && (switchSkinPath != null || resizeOutputPath != null || switchCompatibilityMode != null))
+            throw new ArgumentException("El smoke temporal se ejecuta separado de los cambios de skin, perfil y viewport.");
+        if ((switchSequence == null) != (switchSequenceOutputDirectory == null)
+            || switchSequence is { Count: 0 }
+            || (switchSequence != null && (switchSkinPath != null || resizeOutputPath != null || switchCompatibilityMode != null || timelineOutputDirectory != null)))
+            throw new ArgumentException("El smoke de secuencia requiere destinos y una carpeta de capturas, y se ejecuta de forma independiente.");
         this.skinPath = skinPath;
         this.keyCount = keyCount;
         this.outputPath = Path.GetFullPath(outputPath);
@@ -80,17 +98,25 @@ internal sealed class SkinVisualSmokeGame : Game
         this.legacyCompatibilityMode = legacyCompatibilityMode;
         this.switchCompatibilityMode = switchCompatibilityMode;
         this.compatibilityOutputPath = compatibilityOutputPath == null ? null : Path.GetFullPath(compatibilityOutputPath);
+        this.timelineOutputDirectory = timelineOutputDirectory == null ? null : Path.GetFullPath(timelineOutputDirectory);
+        this.switchSequence = switchSequence?.Select(path =>
+            path.Equals("internal", StringComparison.OrdinalIgnoreCase) ? "internal" : Path.GetFullPath(path)).ToArray();
+        this.switchSequenceOutputDirectory = switchSequenceOutputDirectory == null ? null : Path.GetFullPath(switchSequenceOutputDirectory);
         graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth = viewportWidth,
             PreferredBackBufferHeight = viewportHeight
         };
+        graphics.GraphicsProfile = GraphicsAdapter.DefaultAdapter.IsProfileSupported(GraphicsProfile.HiDef)
+            ? GraphicsProfile.HiDef
+            : GraphicsProfile.Reach;
         IsFixedTimeStep = false;
         IsMouseVisible = false;
     }
 
     protected override void LoadContent()
     {
+        Console.WriteLine($"[SkinVisualSmoke] Graphics profile: {GraphicsDevice.GraphicsProfile}");
         batch = new SpriteBatch(GraphicsDevice);
         string builtInSkinsRoot = Path.Combine(AppContext.BaseDirectory, "Skins");
         string userSkinsRoot = skinPath.Equals("internal", StringComparison.OrdinalIgnoreCase)
@@ -113,37 +139,72 @@ internal sealed class SkinVisualSmokeGame : Game
 
         playfield = new ManiaPlayfield(GraphicsDevice, batch, keyCount, viewportWidth, viewportHeight, skinManager: skin);
         score = new ManiaScoreProcessor(keyCount, keyCount, 5, false, new List<Nullscent.Rulesets.Mania.Mods.ManiaMod>());
+        timelineLongColumn = keyCount > 1 ? 1 : 0;
+        double timelineLongNoteStart = keyCount > 2 ? 1475 : 1600;
+        var smokeObjects = new List<ManiaHitObject>();
         for (int column = 0; column < keyCount; column++)
         {
             double noteTime = column == keyCount - 1 && keyCount > 1 ? 1000 : 1200 + column * 75;
-            playfield.AddHitObject(new Note { StartTime = noteTime, Column = column });
+            smokeObjects.Add(new Note { StartTime = noteTime, Column = column });
             if (column % 2 == 0)
-                playfield.AddHitObject(new Note { StartTime = 1550, Column = column });
+                smokeObjects.Add(new Note { StartTime = 1550, Column = column });
             if (column % 2 != 0 && (column == 1 || column == keyCount / 2))
-                playfield.AddHitObject(new Note { StartTime = 1550, Column = column });
+                smokeObjects.Add(new Note { StartTime = 1550, Column = column });
 
             double longNoteStart = column == 0 || column == keyCount - 1 ? 1000 : 1400 + column * 75;
-            double longNoteDuration = column % 2 == 0 ? 300 : 1100;
-            playfield.AddHitObject(new LongNote(longNoteStart, longNoteStart + longNoteDuration, column));
+            double longNoteDuration = timelineOutputDirectory != null ? 1100 : column % 2 == 0 ? 300 : 1100;
+            var longNote = new LongNote(longNoteStart, longNoteStart + longNoteDuration, column);
+            smokeObjects.Add(longNote);
+            if (timelineOutputDirectory != null && column == 0) timelineEarlyReleaseNote = longNote;
+            if (timelineOutputDirectory != null && column == timelineLongColumn && longNoteStart == timelineLongNoteStart)
+                timelineLongNote = longNote;
         }
-        if (keyCount > 1) playfield.HandleKeyPress(keyCount - 1, 1000, score);
-        playfield.HandleKeyPress(0, 1000, score);
-        playfield.JudgementDisplayManager?.EnqueueJudgement(HitResult.Perfect, 0, 0, 12, 1000);
-        playfield.Update(1040, score, 8, null, downScroll);
+        if (timelineOutputDirectory != null && keyCount <= 2)
+        {
+            timelineLongNote = new LongNote(timelineLongNoteStart, timelineLongNoteStart + 1100, timelineLongColumn);
+            smokeObjects.Add(timelineLongNote);
+        }
+        timelineLongNoteEndTime = timelineLongNoteStart + 1100;
+        foreach (ManiaHitObject smokeObject in smokeObjects.OrderBy(hitObject => hitObject.StartTime))
+            playfield.AddHitObject(smokeObject);
+
+        if (timelineOutputDirectory == null)
+        {
+            if (keyCount > 1) playfield.HandleKeyPress(keyCount - 1, 1000, score);
+            playfield.HandleKeyPress(0, 1000, score);
+            playfield.JudgementDisplayManager?.EnqueueJudgement(HitResult.Perfect, 0, 0, 12, 1000);
+            playfield.Update(1040, score, 8, null, downScroll);
+        }
+        else
+        {
+            timelineCurrentTime = 700;
+            playfield.Update(timelineCurrentTime, score, 8, null, downScroll);
+        }
     }
 
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(new Color(6, 9, 16));
-        playfield!.Draw(1040, 8, null, downScroll);
+        playfield!.Draw(timelineOutputDirectory == null ? 1040 : timelineCurrentTime, 8, null, downScroll);
+        if (timelineOutputDirectory != null)
+        {
+            AdvanceTimelineSmoke();
+            base.Draw(gameTime);
+            return;
+        }
+
         if (captureStage == 0)
         {
             SaveBackbuffer(outputPath);
             Console.WriteLine($"[SkinVisualSmoke] {keyCount}K initial: {outputPath}");
             captureStage = 1;
-            if (switchSkinPath == null && switchCompatibilityMode == null)
+            if (switchSkinPath == null && switchCompatibilityMode == null && switchSequence == null)
             {
                 if (resizeOutputPath == null) Exit();
+            }
+            else if (switchSequence != null)
+            {
+                ApplySwitchSequenceEntry(switchSequenceIndex++);
             }
             else if (switchCompatibilityMode != null)
             {
@@ -221,6 +282,16 @@ internal sealed class SkinVisualSmokeGame : Game
             captureStage = 2;
             Exit();
         }
+        else if (captureStage == 1 && switchSequence != null)
+        {
+            string sequenceOutput = Path.Combine(switchSequenceOutputDirectory!, $"{switchSequenceIndex:00}-switch.png");
+            SaveBackbuffer(sequenceOutput);
+            Console.WriteLine($"[SkinVisualSmoke] switch sequence capture {switchSequenceIndex}/{switchSequence.Length}: {sequenceOutput}; provider={skin!.CurrentDefinition.Provider}; profile={skin.CurrentDefinition.CompatibilityProfile}");
+            if (switchSequenceIndex >= switchSequence.Length)
+                Exit();
+            else
+                ApplySwitchSequenceEntry(switchSequenceIndex++);
+        }
         else if (captureStage == 1 && resizeOutputPath != null && resizeApplied)
         {
             SaveBackbuffer(resizeOutputPath);
@@ -229,6 +300,126 @@ internal sealed class SkinVisualSmokeGame : Game
             Exit();
         }
         base.Draw(gameTime);
+    }
+
+    private void AdvanceTimelineSmoke()
+    {
+        string[] frameNames =
+        {
+            "00-approach-0700ms.png",
+            "01-holding-1040ms.png",
+            "02-holding-1090ms.png",
+            "03-early-release-1160ms.png",
+            "04-long-hold-start.png",
+            "05-long-hold-progress.png",
+            "06-tail-approach.png",
+            "07-after-tail-release.png"
+        };
+
+        string framePath = Path.Combine(timelineOutputDirectory!, frameNames[timelineStage]);
+        SaveBackbuffer(framePath);
+        Console.WriteLine($"[SkinVisualSmoke] timeline {timelineStage + 1}/{frameNames.Length}: {framePath}");
+
+        void UpdateAt(double time)
+        {
+            timelineCurrentTime = time;
+            playfield!.Update(time, score!, 8, null, downScroll);
+        }
+
+        switch (timelineStage++)
+        {
+            case 0:
+                playfield!.HandleKeyPress(0, 1000, score!);
+                if (keyCount > 1) playfield.HandleKeyPress(keyCount - 1, 1000, score!);
+                UpdateAt(1040);
+                if (timelineEarlyReleaseNote is not { State: LongNoteState.Holding })
+                    throw new InvalidOperationException("El fixture temporal no pudo entrar en el estado de LN Holding.");
+                break;
+            case 1:
+                UpdateAt(1090);
+                break;
+            case 2:
+                playfield!.HandleKeyRelease(0, 1150, score!);
+                if (keyCount > 1) playfield.HandleKeyRelease(keyCount - 1, 1150, score!);
+                UpdateAt(1160);
+                if (timelineEarlyReleaseNote is not { State: LongNoteState.Broken, TailResult: HitResult.Miss })
+                    throw new InvalidOperationException("La fase de early release no produjo una LN rota verificable.");
+                break;
+            case 3:
+                double longNoteStart = timelineLongNoteEndTime - 1100;
+                UpdateAt(longNoteStart - 25);
+                playfield!.HandleKeyPress(timelineLongColumn, longNoteStart, score!);
+                UpdateAt(longNoteStart + 40);
+                if (timelineLongNote is not { State: LongNoteState.Holding } || timelineLongNote.HeadResult == HitResult.Miss)
+                    throw new InvalidOperationException("La LN larga temporal no entró en sostén tras pulsar su head.");
+                break;
+            case 4:
+                UpdateAt(timelineLongNoteEndTime - 875);
+                break;
+            case 5:
+                UpdateAt(timelineLongNoteEndTime - 25);
+                ResolvedSkinAnimation? bodyAnimation = skin!.GetResolvedKeymode(keyCount).Lanes[timelineLongColumn].LongBody;
+                if (bodyAnimation is { Frames.Count: > 1 }
+                    && ReferenceEquals(bodyAnimation.FrameAt(40), bodyAnimation.FrameAt(225)))
+                    throw new InvalidOperationException("La animación del body LN no avanzó entre dos instantes del sostén.");
+                break;
+            case 6:
+                playfield!.HandleKeyRelease(timelineLongColumn, timelineLongNoteEndTime, score!);
+                UpdateAt(timelineLongNoteEndTime + 5);
+                if (timelineLongNote is not { State: LongNoteState.Finished } || timelineLongNote.TailResult == HitResult.Miss)
+                    throw new InvalidOperationException("La liberación de tail temporal no completó la LN larga.");
+                break;
+            default:
+                Exit();
+                break;
+        }
+    }
+
+    private void ApplySwitchSequenceEntry(int index)
+    {
+        string targetPath = switchSequence![index];
+        long previousVersion = skin!.Version;
+        string previousDirectory = skin.CurrentSkinDirectory;
+        ManiaSkinDefinition previousDefinition = skin.CurrentDefinition;
+        ResolvedManiaKeymode previousResolvedMode = skin.GetResolvedKeymode(keyCount);
+        object? previousHudPrefixState = skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix);
+
+        bool persistenceFailurePreservedState;
+        if (targetPath.Equals("internal", StringComparison.OrdinalIgnoreCase))
+        {
+            persistenceFailurePreservedState = !skin.TryActivateInternal(() => false);
+        }
+        else
+        {
+            SkinValidation rejectedCandidate = skinCatalog!.Validate(targetPath);
+            if (rejectedCandidate.Status == SkinValidity.Invalid)
+                throw new InvalidDataException($"La entrada {index + 1} de la secuencia es inválida: {rejectedCandidate.Summary}");
+            persistenceFailurePreservedState = !skin.TryActivate(rejectedCandidate, () => false);
+        }
+
+        if (!persistenceFailurePreservedState
+            || skin.Version != previousVersion
+            || !string.Equals(skin.CurrentSkinDirectory, previousDirectory, StringComparison.OrdinalIgnoreCase)
+            || !ReferenceEquals(skin.CurrentDefinition, previousDefinition)
+            || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+            || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState))
+            throw new InvalidOperationException($"Falló el rollback transaccional antes de activar la entrada {index + 1} de la secuencia.");
+
+        if (!ActivateSkin(targetPath))
+            throw new InvalidDataException($"No se pudo activar entrada {index + 1} de la secuencia: {skin.CurrentValidation?.Summary ?? targetPath}");
+
+        if (skin.Version != previousVersion + 1
+            || ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+            || ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudPrefixState)
+            || persistenceCount != index + 2
+            || !string.Equals(hitSoundPlayer!.SkinDirectory, skin.CurrentSkinDirectory, StringComparison.OrdinalIgnoreCase)
+            || !PersistedSelectionMatchesActiveSkin())
+            throw new InvalidOperationException($"La entrada {index + 1} no publicó un snapshot, provider, hitsounds y selección persistida coherentes.");
+
+        AssertResolvedKeymodesPrepared();
+        AssertHudGlyphsPrepared();
+        ReportResolvedHighResolutionAssets();
+        playfield!.Update(1040, score!, 8, null, downScroll);
     }
 
     protected override void Update(GameTime gameTime)

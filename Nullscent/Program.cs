@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace Nullscent
@@ -65,6 +66,17 @@ namespace Nullscent
                     switchSmoke.Run();
                     return;
                 }
+                if (args.Length >= 5 && args[0] == "--skin-visual-cycle-smoke" && int.TryParse(args[2], out int cycleKeyCount))
+                {
+                    string cycleOutputDirectory = Path.GetFullPath(args[3]);
+                    Directory.CreateDirectory(cycleOutputDirectory);
+                    using var cycleSmoke = new Skin.SkinVisualSmokeGame(
+                        args[1], cycleKeyCount, Path.Combine(cycleOutputDirectory, "00-initial.png"), true,
+                        viewportWidth: 1920, viewportHeight: 1080,
+                        switchSequence: args.Skip(4).ToArray(), switchSequenceOutputDirectory: cycleOutputDirectory);
+                    cycleSmoke.Run();
+                    return;
+                }
                 if (args.Length is >= 7 and <= 10 && args[0] == "--skin-visual-profile-smoke"
                     && int.TryParse(args[2], out int profileKeyCount)
                     && TryParseLegacySkinMode(args[3], out Skin.LegacySkinCompatibilityMode initialMode)
@@ -79,6 +91,20 @@ namespace Nullscent
                         legacyCompatibilityMode: initialMode, switchCompatibilityMode: targetMode,
                         compatibilityOutputPath: args[6]);
                     profileSmoke.Run();
+                    return;
+                }
+                if (args.Length is >= 4 and <= 7 && args[0] == "--skin-visual-timeline-smoke"
+                    && int.TryParse(args[2], out int timelineKeyCount))
+                {
+                    bool timelineDownScroll = args.Length < 5 || !args[4].Equals("up", StringComparison.OrdinalIgnoreCase);
+                    int timelineWidth = args.Length >= 6 && int.TryParse(args[5], out int parsedTimelineWidth) ? parsedTimelineWidth : 1280;
+                    int timelineHeight = args.Length >= 7 && int.TryParse(args[6], out int parsedTimelineHeight) ? parsedTimelineHeight : 720;
+                    string outputDirectory = Path.GetFullPath(args[3]);
+                    using var timelineSmoke = new Skin.SkinVisualSmokeGame(args[1], timelineKeyCount,
+                        Path.Combine(outputDirectory, "00-approach-0700ms.png"), timelineDownScroll,
+                        viewportWidth: timelineWidth, viewportHeight: timelineHeight,
+                        timelineOutputDirectory: outputDirectory);
+                    timelineSmoke.Run();
                     return;
                 }
                 if (args.Length is >= 4 and <= 7 && args[0] == "--skin-visual-smoke" && int.TryParse(args[2], out int keyCount))
@@ -101,7 +127,8 @@ namespace Nullscent
                 Console.WriteLine(ex.StackTrace);
 #if DEBUG
                 if (args.Length > 0 && (args[0] == "--skin-tests" || args[0] == "--skin-visual-smoke" || args[0] == "--skin-visual-switch-smoke"
-                    || args[0] == "--skin-visual-profile-smoke" || args[0] == "--skin-visual-resize-smoke")) Environment.ExitCode = 1;
+                    || args[0] == "--skin-visual-profile-smoke" || args[0] == "--skin-visual-resize-smoke"
+                    || args[0] == "--skin-visual-timeline-smoke" || args[0] == "--skin-visual-cycle-smoke")) Environment.ExitCode = 1;
 #endif
             }
             finally

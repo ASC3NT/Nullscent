@@ -13,13 +13,17 @@ namespace Nullscent.Skin
     {
         public IReadOnlyList<Texture2D> Frames { get; }
         public IReadOnlyList<Texture2D> Textures => Frames;
-        public int FramesPerSecond { get; }
+        public double FramesPerSecond { get; }
+        public double FrameDurationMilliseconds { get; }
         public Texture2D? FirstFrame => Frames.Count == 0 ? null : Frames[0];
 
-        public ResolvedSkinAnimation(IEnumerable<Texture2D> frames, int framesPerSecond)
+        public ResolvedSkinAnimation(IEnumerable<Texture2D> frames, int framesPerSecond,
+            AnimationTimingDefinition? timing = null)
         {
             Frames = Array.AsReadOnly(frames.ToArray());
-            FramesPerSecond = ResolveFrameRate(framesPerSecond, Frames.Count);
+            int resolvedRate = ResolveFrameRate(framesPerSecond, Frames.Count);
+            FrameDurationMilliseconds = timing?.ResolveFrameDurationMs(Frames.Count) ?? 1000d / resolvedRate;
+            FramesPerSecond = 1000d / FrameDurationMilliseconds;
         }
 
         /// <summary>
@@ -33,18 +37,28 @@ namespace Nullscent.Skin
 
         public Texture2D? FrameAt(double timeMs)
         {
-            if (Frames.Count == 0) return null;
-            if (Frames.Count == 1 || !double.IsFinite(timeMs) || timeMs < 0) return Frames[0];
-            int index = (int)(timeMs * FramesPerSecond / 1000d) % Frames.Count;
-            return Frames[index];
+            int index = FrameIndexAt(timeMs);
+            return index < 0 ? null : Frames[index];
         }
 
         public Texture2D? FrameAtClamped(double timeMs)
         {
-            if (Frames.Count == 0) return null;
-            if (Frames.Count == 1 || !double.IsFinite(timeMs) || timeMs < 0) return Frames[0];
-            int index = (int)(timeMs * FramesPerSecond / 1000d);
-            return Frames[Math.Clamp(index, 0, Frames.Count - 1)];
+            int index = ClampedFrameIndexAt(timeMs);
+            return index < 0 ? null : Frames[index];
+        }
+
+        internal int FrameIndexAt(double timeMs)
+        {
+            if (Frames.Count == 0) return -1;
+            if (Frames.Count == 1 || !double.IsFinite(timeMs) || timeMs < 0) return 0;
+            return (int)(timeMs / FrameDurationMilliseconds) % Frames.Count;
+        }
+
+        internal int ClampedFrameIndexAt(double timeMs)
+        {
+            if (Frames.Count == 0) return -1;
+            if (Frames.Count == 1 || !double.IsFinite(timeMs) || timeMs < 0) return 0;
+            return Math.Clamp((int)(timeMs / FrameDurationMilliseconds), 0, Frames.Count - 1);
         }
     }
 

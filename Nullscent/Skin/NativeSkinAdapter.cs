@@ -87,6 +87,9 @@ namespace Nullscent.Skin
                     throw new InvalidDataException($"El keymode {keyCount}K requiere defaultHitPositionRatio entre 0 y 1.");
                 if (!IsValidFrameRate(mode.LightFramesPerSecond) || !IsValidFrameRate(mode.JudgementFramesPerSecond))
                     throw new InvalidDataException($"El keymode {keyCount}K contiene un FPS fuera del rango -1 o 1..1000.");
+                ValidateTiming(mode.JudgementTiming, keyCount, "judgementTiming");
+                ValidateTiming(mode.NoteLightingTiming, keyCount, "noteLightingTiming");
+                ValidateTiming(mode.HoldLightingTiming, keyCount, "holdLightingTiming");
                 if (!float.IsFinite(mode.BarlineHeight) || mode.BarlineHeight < 0f)
                     throw new InvalidDataException($"El keymode {keyCount}K contiene una barlineHeight inválida.");
                 if (mode.StageStyle is not { } stageStyle
@@ -140,6 +143,16 @@ namespace Nullscent.Skin
                 || style.HeightMode == SpriteHeightMode.LaneWidthFraction && style.HeightValue <= 0f
                 || style.FramesPerSecond is int fps && !IsValidFrameRate(fps))
                 throw new InvalidDataException($"El keymode {keyCount}K contiene un {role} inválido.");
+            ValidateTiming(style.Timing, keyCount, $"{role}.timing");
+        }
+
+        private static void ValidateTiming(AnimationTimingDefinition? timing, int keyCount, string role)
+        {
+            if (timing == null) return;
+            if (!double.IsFinite(timing.MinimumFrameDurationMs) || timing.MinimumFrameDurationMs <= 0d
+                || timing.TargetAnimationDurationMs is double targetDuration
+                    && (!double.IsFinite(targetDuration) || targetDuration <= 0d))
+                throw new InvalidDataException($"Keymode {keyCount} contains invalid animation timing for {role}.");
         }
 
         private static void ValidateNonNegativeFinite(float[] values, int keyCount, string role)

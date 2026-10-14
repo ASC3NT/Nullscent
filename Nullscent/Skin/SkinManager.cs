@@ -447,38 +447,38 @@ namespace Nullscent.Skin
                 string? noteName = First(lane.NoteAsset, profile.NoteStyle.Asset,
                     legacy ? $"mania-note{suffix}" : null);
                 var note = ResolveAnimationCascade("note", profile.NoteStyle.FramesPerSecond ?? 60, internalOnly,
-                    new[] { noteName }, new[] { "bar-note" });
+                    new[] { noteName }, new[] { "bar-note" }, profile.NoteStyle.Timing);
 
                 string? receptorName = First(lane.ReceptorAsset, profile.ReceptorStyle.Asset,
                     legacy ? $"mania-key{suffix}" : null);
                 var receptor = ResolveAnimationCascade("receptor", profile.ReceptorStyle.FramesPerSecond ?? generalAnimationFramerate, internalOnly,
-                    new[] { receptorName }, new[] { "bar-key" });
+                    new[] { receptorName }, new[] { "bar-key" }, profile.ReceptorStyle.Timing);
                 string? pressedName = First(lane.PressedReceptorAsset, profile.ReceptorStyle.PressedAsset,
                     legacy ? $"mania-key{suffix}D" : null);
                 var pressed = ResolveAnimationCascade("pressed receptor", profile.ReceptorStyle.FramesPerSecond ?? generalAnimationFramerate, internalOnly,
-                    new[] { pressedName, receptorName }, new[] { "bar-key-pressed", "bar-key" }) ?? receptor;
+                    new[] { pressedName, receptorName }, new[] { "bar-key-pressed", "bar-key" }, profile.ReceptorStyle.Timing) ?? receptor;
 
                 string? headName = First(lane.LongHeadAsset, profile.LongHeadStyle.Asset,
                     legacy ? $"mania-note{suffix}H" : null);
                 var head = ResolveAnimationCascade("hold head", profile.LongHeadStyle.FramesPerSecond ?? 60, internalOnly,
-                    new[] { headName, noteName }, new[] { "bar-hold-head", "bar-note" }) ?? note;
+                    new[] { headName, noteName }, new[] { "bar-hold-head", "bar-note" }, profile.LongHeadStyle.Timing) ?? note;
                 string? bodyName = First(lane.LongBodyAsset, profile.LongBodyStyle.Asset,
                     legacy ? $"mania-note{suffix}L" : null);
                 var body = ResolveAnimationCascade("hold body", profile.LongBodyStyle.FramesPerSecond ?? 30, internalOnly,
-                    new[] { bodyName }, new[] { "bar-hold-body" });
+                    new[] { bodyName }, new[] { "bar-hold-body" }, profile.LongBodyStyle.Timing);
                 string? tailName = First(lane.LongTailAsset, profile.LongTailStyle.Asset,
                     legacy ? $"mania-note{suffix}T" : null);
                 var tail = ResolveAnimationCascade("hold tail", profile.LongTailStyle.FramesPerSecond ?? 60, internalOnly,
-                    new[] { tailName, headName, noteName }, new[] { "bar-hold-tail", "bar-hold-head", "bar-note" }) ?? head;
+                    new[] { tailName, headName, noteName }, new[] { "bar-hold-tail", "bar-hold-head", "bar-note" }, profile.LongTailStyle.Timing) ?? head;
 
                 string lightSuffix = First(profile.LightingNoteAsset, legacy ? "lightingN" : null) ?? "bar-light-note";
                 string holdLightSuffix = First(profile.LightingHoldAsset, legacy ? "lightingL" : null) ?? "bar-light-hold";
-                // LightFramePerSecond belongs to StageLight. Mania note and hold
-                // lighting use their own fixed 60 FPS path, separate from General.
+                // LightFramePerSecond belongs to StageLight. Note/hold lighting
+                // uses its normalized timing policy, separate from General.
                 var noteLight = ResolveAnimationCascade("note lighting", 60, internalOnly,
-                    new[] { lightSuffix }, new[] { "bar-light-note" });
+                    new[] { lightSuffix }, new[] { "bar-light-note" }, profile.NoteLightingTiming);
                 var holdLight = ResolveAnimationCascade("hold lighting", 60, internalOnly,
-                    new[] { holdLightSuffix }, new[] { "bar-light-hold" });
+                    new[] { holdLightSuffix }, new[] { "bar-light-hold" }, profile.HoldLightingTiming);
                 lanes.Add(new ResolvedManiaLane(lane, note, receptor, pressed, head, body, tail, noteLight, holdLight));
             }
 
@@ -503,7 +503,7 @@ namespace Nullscent.Skin
                 string suffix = key[3..];
                 string? name = First(configured, $"mania-hit{suffix}", $"hit{suffix}");
                 var animation = ResolveAnimationCascade($"judgement {suffix}", profile.JudgementFramesPerSecond, internalOnly,
-                    new[] { name }, new[] { name });
+                    new[] { name }, new[] { name }, profile.JudgementTiming);
                 if (animation != null) judgements[suffix] = animation;
             }
 
@@ -536,19 +536,20 @@ namespace Nullscent.Skin
         }
 
         private ResolvedSkinAnimation? ResolveAnimationCascade(string role, int fps, bool internalOnly,
-            IEnumerable<string?> activeNames, IEnumerable<string?> internalNames)
+            IEnumerable<string?> activeNames, IEnumerable<string?> internalNames,
+            AnimationTimingDefinition? timing = null)
         {
             ResolvedSkinAnimation? resolved;
             if (internalOnly)
             {
                 resolved = SkinAssetCascade.FirstResolved(
-                    name => ResolveAnimationFromProvider(_internalAssets, name, fps), internalNames);
+                    name => ResolveAnimationFromProvider(_internalAssets, name, fps, timing), internalNames);
             }
             else
             {
                 resolved = SkinAssetCascade.Resolve(
-                    name => ResolveAnimationFromProvider(_assets, name, fps), activeNames,
-                    name => ResolveAnimationFromProvider(_internalAssets, name, fps), internalNames);
+                    name => ResolveAnimationFromProvider(_assets, name, fps, timing), activeNames,
+                    name => ResolveAnimationFromProvider(_internalAssets, name, fps, timing), internalNames);
             }
 
             if (!internalOnly && resolved?.FirstFrame != null && _assetInfo.TryGetValue(resolved.FirstFrame, out ResolvedSkinAsset? info)
@@ -564,13 +565,14 @@ namespace Nullscent.Skin
             return resolved;
         }
 
-        private ResolvedSkinAnimation? ResolveAnimationFromProvider(SkinAssetResolver provider, string fileName, int fps)
+        private ResolvedSkinAnimation? ResolveAnimationFromProvider(SkinAssetResolver provider, string fileName,
+            int fps, AnimationTimingDefinition? timing)
         {
             if (string.Equals(fileName, "_blank", StringComparison.OrdinalIgnoreCase))
-                return _blankTexture == null ? null : new ResolvedSkinAnimation(new[] { _blankTexture }, fps);
+                return _blankTexture == null ? null : new ResolvedSkinAnimation(new[] { _blankTexture }, fps, timing);
 
             IReadOnlyList<Texture2D>? frames = GetAnimationFromProvider(provider, fileName);
-            return frames == null ? null : new ResolvedSkinAnimation(frames, fps);
+            return frames == null ? null : new ResolvedSkinAnimation(frames, fps, timing);
         }
 
         private ResolvedSkinAsset ResolveFromInternal(string name)

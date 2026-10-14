@@ -25,9 +25,10 @@ namespace Nullscent.Skin
             TestLegacyColourLightIsStageOnly();
             TestLegacyHoldColourSuffixIsNotMisrepresentedAsSupported();
             TestLegacyAnimationRateSemantics();
+            TestAnimationTimingResolution();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 16 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 17 pruebas deterministas pasaron.");
         }
 
         private static void TestResolvedCollectionsAreReadOnlySnapshots()
@@ -196,6 +197,7 @@ namespace Nullscent.Skin
                         "4": {
                           "keyCount": 4,
                           "flipLightingHorizontallyWhenUpsideDown": true,
+                          "judgementTiming": { "minimumFrameDurationMs": 20, "targetAnimationDurationMs": 80 },
                           "stageStyle": { "sideHeightScale": 0.8, "hintHeightScale": 1.25, "bottomScale": 1.6 },
                           "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
                         }
@@ -206,6 +208,8 @@ namespace Nullscent.Skin
                 ManiaStageStyleDefinition stageStyle = nativeMode.StageStyle;
                 Assert(nativeMode.FlipLightingHorizontallyWhenUpsideDown,
                     "Native manifests should be able to opt in to the normalized upside-down lighting transform.");
+                Assert(nativeMode.JudgementTiming is { TargetAnimationDurationMs: 80d, MinimumFrameDurationMs: 20d },
+                    "Native manifests should be able to define a validated normalized animation timing policy.");
                 AssertNear(stageStyle.SideHeightScale, 0.8f, "Native stage side scaling should deserialize as normalized data.");
                 AssertNear(stageStyle.HintHeightScale, 1.25f, "Native stage hint scaling should deserialize as normalized data.");
                 AssertNear(stageStyle.BottomScale, 1.6f, "Native StageBottom scaling should deserialize as normalized data.");
@@ -380,8 +384,18 @@ namespace Nullscent.Skin
                     && lazer.Keymodes[4].BodyAnimationReleaseMode == HoldBodyAnimationReleaseMode.ResetToInitialFrame,
                     "The selected legacy profile should normalize its body-animation release behavior without changing providers.");
                 Assert(stableMode.JudgementFramesPerSecond == 60
-                    && lazer.Keymodes[4].JudgementFramesPerSecond == 20,
-                    "Stable hit bursts should use the wiki's fixed 60 FPS while the experimental Lazer profile follows its explicit 50 ms frame length.");
+                    && stableMode.JudgementTiming == null
+                    && lazer.Keymodes[4].JudgementFramesPerSecond == 20
+                    && lazer.Keymodes[4].JudgementTiming == null,
+                    "Stable hit bursts follow the wiki's fixed 60 FPS; Lazer's ManiaLegacySkinTransformer uses fixed 20 FPS.");
+                AssertNear((float)(lazer.Keymodes[4].NoteLightingTiming?.MinimumFrameDurationMs ?? 0), 1000f / 60f,
+                    "The Lazer lighting duration policy should cap playback at the source's 60 FPS minimum frame length.");
+                AssertNear((float)(lazer.Keymodes[4].NoteLightingTiming?.TargetAnimationDurationMs ?? 0), 170f,
+                    "Lazer note lighting should use the same duration-based frame pacing as LegacyHitExplosion.");
+                AssertNear((float)(lazer.Keymodes[4].HoldLightingTiming?.TargetAnimationDurationMs ?? 0), 170f,
+                    "Lazer hold lighting should use the same duration-based frame pacing as LegacyBodyPiece.");
+                AssertNear((float)(lazer.Keymodes[4].LongBodyStyle.Timing?.MinimumFrameDurationMs ?? 0), 30f,
+                    "Lazer legacy hold body frames should preserve the source's explicit 30 ms frame length.");
                 Assert(lazer.Provider == SkinProviderKind.OsuLegacy,
                     "Selecting Lazer compatibility must not change an osu! legacy source into another provider.");
 
@@ -627,6 +641,28 @@ namespace Nullscent.Skin
                 "AnimationFramerate -1 should play the complete animation in one second.");
             Assert(ResolvedSkinAnimation.ResolveFrameRate(24, 8) == 24,
                 "An explicit positive animation frame rate should be preserved.");
+        }
+
+        private static void TestAnimationTimingResolution()
+        {
+            AnimationTimingDefinition lazerLighting = AnimationTimingDefinition.SpreadOverDuration(170d, 60d);
+            AssertNear((float)lazerLighting.ResolveFrameDurationMs(4), 42.5f,
+                "Lazer legacy lighting should spread four frames over 170 ms when below the 60 FPS cap.");
+            AssertNear((float)lazerLighting.ResolveFrameDurationMs(1), 170f,
+                "A one-frame Lazer lighting animation should use the complete 170 ms duration.");
+            AssertNear((float)lazerLighting.ResolveFrameDurationMs(12), 1000f / 60f,
+                "Lazer legacy lighting should not exceed 60 FPS when the frame count is high.");
+
+            var resolved = new ResolvedSkinAnimation(
+                new Texture2D[] { null!, null!, null!, null! }, 60, lazerLighting);
+            AssertNear((float)resolved.FrameDurationMilliseconds, 42.5f,
+                "The resolved lighting snapshot should retain the duration computed from its own frame count.");
+            Assert(resolved.FrameIndexAt(42d) == 0 && resolved.FrameIndexAt(42.5d) == 1,
+                "Resolved animation playback should use the exact frame duration instead of an integer FPS approximation.");
+
+            AnimationTimingDefinition lazerBody = AnimationTimingDefinition.FixedFrameDuration(30d);
+            AssertNear((float)lazerBody.ResolveFrameDurationMs(20), 30f,
+                "The legacy Lazer LN body should keep its explicit 30 ms frame length for any frame count.");
         }
 
         private static void TestProviderScopedAssetCascade()

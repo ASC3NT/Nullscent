@@ -57,6 +57,50 @@ namespace Nullscent.Skin
     }
 
     /// <summary>
+    /// Normalized frame pacing. A target duration spreads an animation across that
+    /// duration while MinimumFrameDurationMs caps its maximum frame rate.
+    /// </summary>
+    public sealed class AnimationTimingDefinition
+    {
+        public double MinimumFrameDurationMs { get; init; } = 1000d / 60d;
+        public double? TargetAnimationDurationMs { get; init; }
+
+        public double ResolveFrameDurationMs(int frameCount)
+        {
+            if (!double.IsFinite(MinimumFrameDurationMs) || MinimumFrameDurationMs <= 0d)
+                throw new ArgumentOutOfRangeException(nameof(MinimumFrameDurationMs));
+            if (TargetAnimationDurationMs is not double targetDuration)
+                return MinimumFrameDurationMs;
+            if (!double.IsFinite(targetDuration) || targetDuration <= 0d)
+                throw new ArgumentOutOfRangeException(nameof(TargetAnimationDurationMs));
+            return frameCount > 0 ? Math.Max(MinimumFrameDurationMs, targetDuration / frameCount) : MinimumFrameDurationMs;
+        }
+
+        public static AnimationTimingDefinition FixedFramesPerSecond(double framesPerSecond)
+        {
+            if (!double.IsFinite(framesPerSecond) || framesPerSecond <= 0d)
+                throw new ArgumentOutOfRangeException(nameof(framesPerSecond));
+            return new AnimationTimingDefinition { MinimumFrameDurationMs = 1000d / framesPerSecond };
+        }
+
+        public static AnimationTimingDefinition FixedFrameDuration(double frameDurationMs) =>
+            new() { MinimumFrameDurationMs = frameDurationMs };
+
+        public static AnimationTimingDefinition SpreadOverDuration(double targetDurationMs, double maximumFramesPerSecond)
+        {
+            if (!double.IsFinite(targetDurationMs) || targetDurationMs <= 0d)
+                throw new ArgumentOutOfRangeException(nameof(targetDurationMs));
+            if (!double.IsFinite(maximumFramesPerSecond) || maximumFramesPerSecond <= 0d)
+                throw new ArgumentOutOfRangeException(nameof(maximumFramesPerSecond));
+            return new AnimationTimingDefinition
+            {
+                MinimumFrameDurationMs = 1000d / maximumFramesPerSecond,
+                TargetAnimationDurationMs = targetDurationMs
+            };
+        }
+    }
+
+    /// <summary>
     /// A normalized presentation recipe. Asset names are resolved once when a skin is
     /// activated; layout values are in the provider's declared design-space units.
     /// </summary>
@@ -104,6 +148,9 @@ namespace Nullscent.Skin
         public bool DrawColumnEdgesBothSides { get; init; } = true;
         public int LightFramesPerSecond { get; init; } = 60;
         public int JudgementFramesPerSecond { get; init; } = 60;
+        public AnimationTimingDefinition? JudgementTiming { get; init; }
+        public AnimationTimingDefinition? NoteLightingTiming { get; init; }
+        public AnimationTimingDefinition? HoldLightingTiming { get; init; }
         public ManiaHoldAssemblyDefinition HoldAssembly { get; init; } = new();
         public float[] ColumnLineWidths { get; init; } = Array.Empty<float>();
         public bool[] ColumnLines { get; init; } = Array.Empty<bool>();
@@ -187,6 +234,7 @@ namespace Nullscent.Skin
         public float OffsetXRatio { get; init; }
         public float OffsetY { get; init; }
         public int? FramesPerSecond { get; init; }
+        public AnimationTimingDefinition? Timing { get; init; }
     }
 
     public readonly record struct SkinColor(byte R, byte G, byte B, byte A = 255)
@@ -215,6 +263,9 @@ namespace Nullscent.Skin
             var modes = new Dictionary<int, ManiaKeymodeDefinition>();
             bool supportsBodyStyle = config.IsVersionAtLeast(2.5);
             bool supportsFlipOverrides = config.IsVersionAtLeast(2.5);
+            AnimationTimingDefinition? lazerLightingTiming = compatibilityMode == LegacySkinCompatibilityMode.Lazer
+                ? AnimationTimingDefinition.SpreadOverDuration(170d, 60d)
+                : null;
             double? version = double.TryParse(config.Version, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedVersion)
                 ? parsedVersion : null;
             // A conventional-name skin without skin.ini has a defined newest-rules
@@ -279,12 +330,15 @@ namespace Nullscent.Skin
                     DrawColumnEdgesBothSides = config.IsVersionAtLeast(2.4),
                     LightFramesPerSecond = source.LightFramePerSecond,
                     // Stable's wiki contract specifies a fixed looping 60 FPS for
-                    // mania-hit assets. The current Lazer legacy transformer instead
-                    // requests a 50 ms frame length (20 FPS); keep both as normalized
-                    // profile data instead of branching in the judgement renderer.
+                    // mania-hit assets. Lazer's legacy transformer uses 20 FPS for
+                    // those sprites; its separate lightingN/lightingL drawables
+                    // spread frames across 170 ms, capped at 60 FPS.
                     // https://osu.ppy.sh/wiki/en/Skinning/osu!mania#hit-bursts
                     // https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/ManiaLegacySkinTransformer.cs
+                    // https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyHitExplosion.cs
                     JudgementFramesPerSecond = compatibilityMode == LegacySkinCompatibilityMode.Lazer ? 20 : 60,
+                    NoteLightingTiming = lazerLightingTiming,
+                    HoldLightingTiming = lazerLightingTiming,
                     ColumnLineWidths = Expand(source.ColumnLineWidths, keys + 1, 2f).Select(v => v * StableScale).ToArray(),
                     ColumnLines = Expand(source.ColumnLines, keys + 1, true),
                     LightingNoteWidths = config.IsVersionAtLeast(2.5) ? source.LightingNWidths?.Select(v => v * StableScale).ToArray() ?? Array.Empty<float>() : Array.Empty<float>(),
@@ -310,7 +364,15 @@ namespace Nullscent.Skin
                     },
                     ReceptorStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.TextureAspect },
                     LongHeadStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.ReferenceWidthAspect, FramesPerSecond = 60 },
-                    LongBodyStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.TextureAspect, FramesPerSecond = 30 },
+                    LongBodyStyle = new SpriteStyleDefinition
+                    {
+                        LaneWidthRatio = 1f,
+                        HeightMode = SpriteHeightMode.TextureAspect,
+                        FramesPerSecond = 30,
+                        Timing = compatibilityMode == LegacySkinCompatibilityMode.Lazer
+                            ? AnimationTimingDefinition.FixedFrameDuration(30d)
+                            : null
+                    },
                     LongTailStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.ReferenceWidthAspect, FramesPerSecond = 60 },
                     // The wiki defines a 480px legacy stage canvas and says side pieces fit
                     // stage height. The official legacy renderer applies 1.6 to StageBottom

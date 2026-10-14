@@ -49,13 +49,23 @@ namespace Nullscent.Skin
         private readonly List<SkinValidation> entries = new();
         public string Root { get; }
         public string? BuiltInRoot { get; }
+        public LegacySkinCompatibilityMode CompatibilityMode { get; private set; }
         public IReadOnlyList<SkinValidation> Entries => entries;
         public event Action? CatalogChanged;
 
-        public SkinCatalog(string root, string? builtInRoot = null)
+        public SkinCatalog(string root, string? builtInRoot = null,
+            LegacySkinCompatibilityMode compatibilityMode = LegacySkinCompatibilityMode.Stable)
         {
             Root = Path.GetFullPath(root);
             BuiltInRoot = string.IsNullOrWhiteSpace(builtInRoot) ? null : Path.GetFullPath(builtInRoot);
+            CompatibilityMode = compatibilityMode;
+        }
+
+        public void SetCompatibilityMode(LegacySkinCompatibilityMode compatibilityMode)
+        {
+            if (CompatibilityMode == compatibilityMode) return;
+            CompatibilityMode = compatibilityMode;
+            Refresh();
         }
 
         public void Refresh()
@@ -85,7 +95,7 @@ namespace Nullscent.Skin
             }
         }
 
-        public SkinValidation Validate(string directory)
+        public SkinValidation Validate(string directory, LegacySkinCompatibilityMode? compatibilityMode = null)
         {
             var result = new SkinValidation { Directory = Path.GetFullPath(directory) };
             if (!System.IO.Directory.Exists(directory))
@@ -131,7 +141,8 @@ namespace Nullscent.Skin
                         result.Errors.Add(result.Config.ParseError!);
                         return result;
                     }
-                    result.Definition = LegacyManiaSkinAdapter.Decode(result.Config, result.Directory);
+                    result.Definition = LegacyManiaSkinAdapter.Decode(result.Config, result.Directory,
+                        compatibilityMode ?? CompatibilityMode);
 
                     if (result.HasSkinIni)
                     {

@@ -74,6 +74,34 @@ namespace Nullscent
         public string? SkinNotice { get; private set; }
         private double _skinNoticeTimer;
 
+        public bool SetLegacySkinCompatibilityMode(LegacySkinCompatibilityMode compatibilityMode)
+        {
+            if (_skinManager == null || _skinCatalog == null || _settings == null
+                || !Enum.IsDefined(compatibilityMode)) return false;
+            if (_settings.LegacySkinCompatibilityMode == compatibilityMode) return true;
+
+            LegacySkinCompatibilityMode previousMode = _settings.LegacySkinCompatibilityMode;
+            bool PersistMode()
+            {
+                SettingsService.Instance.LegacySkinCompatibilityMode = compatibilityMode;
+                if (_settings.TrySave()) return true;
+                SettingsService.Instance.LegacySkinCompatibilityMode = previousMode;
+                return false;
+            }
+
+            if (!_skinManager.TrySetLegacyCompatibilityMode(compatibilityMode, PersistMode))
+            {
+                ShowSkinNotice("No se pudo cambiar el perfil de skin legacy; se conservó el anterior.");
+                return false;
+            }
+
+            _skinCatalog.SetCompatibilityMode(compatibilityMode);
+            ShowSkinNotice(compatibilityMode == LegacySkinCompatibilityMode.Stable
+                ? "Perfil de skins legacy Stable activo."
+                : "Perfil de skins legacy Lazer experimental activo.");
+            return true;
+        }
+
         public bool SelectSkin(string? path)
         {
             if (_skinManager == null || _skinCatalog == null || _settings == null) return false;
@@ -289,7 +317,7 @@ namespace Nullscent
 
             var (skinsRoot, selectedSkin) = _settings!.ResolveSkinPaths();
             string builtInSkinsRoot = Path.Combine(AppContext.BaseDirectory, "Skins");
-            _skinCatalog = new SkinCatalog(skinsRoot, builtInSkinsRoot);
+            _skinCatalog = new SkinCatalog(skinsRoot, builtInSkinsRoot, _settings.LegacySkinCompatibilityMode);
             _skinCatalog.Refresh();
             string? resolvedSelection = selectedSkin;
             if (selectedSkin?.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase) == true)

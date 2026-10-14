@@ -27,8 +27,10 @@ namespace Nullscent.Skin
         private readonly Dictionary<int, ResolvedManiaKeymode> _resolvedKeymodes = new();
         private readonly HashSet<string> _reportedDiagnostics = new(StringComparer.OrdinalIgnoreCase);
         private Texture2D? _blankTexture;
+        private LegacySkinCompatibilityMode _legacyCompatibilityMode;
 
         public ManiaSkinDefinition CurrentDefinition => _currentDefinition;
+        public LegacySkinCompatibilityMode LegacyCompatibilityMode => _legacyCompatibilityMode;
         public string CurrentSkinDirectory { get; private set; } = string.Empty;
         public long Version { get; private set; }
         public event Action<long>? SkinChanged;
@@ -37,6 +39,7 @@ namespace Nullscent.Skin
         public SkinManager(GraphicsDevice graphicsDevice)
         {
             _graphicsDevice = graphicsDevice;
+            _legacyCompatibilityMode = Core.SettingsService.Instance.LegacySkinCompatibilityMode;
             _internalSkinDirectory = Path.Combine(AppContext.BaseDirectory, "Skins", "Bars");
             try { _internalDefinition = NativeSkinAdapter.Load(_internalSkinDirectory); }
             catch (Exception ex)
@@ -62,13 +65,22 @@ namespace Nullscent.Skin
             return TryActivate(new SkinCatalog(Path.GetDirectoryName(Path.GetFullPath(skinDirectory))!).Validate(skinDirectory));
         }
 
-        public bool TryActivate(SkinValidation validation, Func<bool>? persistSelection = null)
+        public bool TryActivate(SkinValidation validation, Func<bool>? persistSelection = null,
+            LegacySkinCompatibilityMode? compatibilityModeOverride = null)
         {
             if (validation.Status == SkinValidity.Invalid) return false;
             SkinAssetResolver? candidate = null;
             try
             {
-                ManiaSkinDefinition definition = validation.Definition ?? SkinSourceDecoder.Load(validation.Directory, out _);
+                LegacySkinCompatibilityMode candidateCompatibilityMode = compatibilityModeOverride ?? _legacyCompatibilityMode;
+                ManiaSkinDefinition definition;
+                if (validation.IsNative)
+                    definition = validation.Definition ?? NativeSkinAdapter.Load(validation.Directory);
+                else if (validation.Config != null)
+                    definition = LegacyManiaSkinAdapter.Decode(validation.Config, validation.Directory, candidateCompatibilityMode);
+                else
+                    definition = SkinSourceDecoder.Load(validation.Directory, out _, candidateCompatibilityMode);
+
                 candidate = new SkinAssetResolver(_graphicsDevice, validation.Directory, Core.SettingsService.Instance.HighResolutionSkins);
                 var names = new HashSet<string>(SkinCatalog.ReferencedImages(definition), StringComparer.OrdinalIgnoreCase)
                 { "cursor", "mania-note1", "mania-note2", "mania-key1", "mania-key2" };
@@ -83,9 +95,12 @@ namespace Nullscent.Skin
                 var previousDefinition = _currentDefinition;
                 var previousDirectory = CurrentSkinDirectory;
                 var previousValidation = CurrentValidation;
+                var previousCompatibilityMode = _legacyCompatibilityMode;
                 _assets = candidate;
                 candidate = null;
                 _currentDefinition = definition;
+                if (definition.Provider == SkinProviderKind.OsuLegacy)
+                    _legacyCompatibilityMode = candidateCompatibilityMode;
                 CurrentSkinDirectory = validation.Directory;
                 CurrentValidation = validation;
                 bool persisted;
@@ -98,6 +113,7 @@ namespace Nullscent.Skin
                     _currentDefinition = previousDefinition;
                     CurrentSkinDirectory = previousDirectory;
                     CurrentValidation = previousValidation;
+                    _legacyCompatibilityMode = previousCompatibilityMode;
                     validation.Errors.Add("No se pudo guardar la selección; se conservó la skin anterior.");
                     return false;
                 }
@@ -117,6 +133,31 @@ namespace Nullscent.Skin
                 candidate?.Dispose();
                 return false;
             }
+        }
+
+        public bool TrySetLegacyCompatibilityMode(LegacySkinCompatibilityMode compatibilityMode, Func<bool>? persistSelection = null)
+        {
+            if (_legacyCompatibilityMode == compatibilityMode) return true;
+
+            if (_currentDefinition.Provider != SkinProviderKind.OsuLegacy || string.IsNullOrWhiteSpace(CurrentSkinDirectory))
+            {
+                bool persisted;
+                try { persisted = persistSelection?.Invoke() ?? true; }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SkinManager] Could not persist legacy compatibility mode: {ex.Message}");
+                    return false;
+                }
+
+                if (!persisted) return false;
+                _legacyCompatibilityMode = compatibilityMode;
+                return true;
+            }
+
+            string root = Path.GetDirectoryName(Path.GetFullPath(CurrentSkinDirectory))!;
+            var validation = new SkinCatalog(root, compatibilityMode: compatibilityMode)
+                .Validate(CurrentSkinDirectory, compatibilityMode);
+            return TryActivate(validation, persistSelection, compatibilityMode);
         }
 
         /// <summary>
@@ -338,7 +379,7 @@ namespace Nullscent.Skin
                 string? configured = profile.JudgementAssets.TryGetValue(key, out string? hit) ? hit : null;
                 string suffix = key[3..];
                 string? name = First(configured, $"mania-hit{suffix}", $"hit{suffix}");
-                var animation = ResolveAnimationCascade($"judgement {suffix}", generalAnimationFramerate, internalOnly,
+                var animation = ResolveAnimationCascade($"judgement {suffix}", profile.JudgementFramesPerSecond, internalOnly,
                     new[] { name }, new[] { name });
                 if (animation != null) judgements[suffix] = animation;
             }
@@ -456,6 +497,7 @@ namespace Nullscent.Skin
                 LongBodyStyle = baseMode?.LongBodyStyle ?? new SpriteStyleDefinition { Asset = "bar-hold-body", LaneWidthRatio = .88f },
                 LongTailStyle = baseMode?.LongTailStyle ?? new SpriteStyleDefinition { Asset = "bar-hold-tail", LaneWidthRatio = .94f },
                 BodyMode = baseMode?.BodyMode ?? NoteBodyRenderMode.Stretch,
+                BodyAnimationReleaseMode = baseMode?.BodyAnimationReleaseMode ?? HoldBodyAnimationReleaseMode.FreezeAtRelease,
                 StageAssets = baseMode?.StageAssets ?? new Dictionary<string, string?> { ["hint"] = "bar-stage-hint" },
                 LightFramesPerSecond = baseMode?.LightFramesPerSecond ?? 60
             };
@@ -677,7 +719,7 @@ namespace Nullscent.Skin
                 "Ok" => "100", "Meh" => "50", "Miss" => "0", _ => ""
             };
             return suffix.Length > 0 && GetResolvedKeymode(keyCount).Judgements.TryGetValue(suffix, out ResolvedSkinAnimation? animation)
-                ? animation.FrameAtClamped(elapsedMs) : null;
+                ? animation.FrameAt(elapsedMs) : null;
         }
 
         /// <summary>
@@ -736,17 +778,11 @@ namespace Nullscent.Skin
             var lanes = Profile(keyCount).Lanes;
             return columnIndex >= 0 && columnIndex < lanes.Count ? ToTuple(lanes[columnIndex].LaneColor) : null;
         }
-        public int GetNoteBodyStyle(int keyCount, int columnIndex)
+        public NoteBodyRenderMode GetNoteBodyMode(int keyCount, int columnIndex)
         {
             var profile = Profile(keyCount);
-            NoteBodyRenderMode mode = columnIndex >= 0 && columnIndex < profile.Lanes.Count
+            return columnIndex >= 0 && columnIndex < profile.Lanes.Count
                 ? profile.Lanes[columnIndex].BodyMode ?? profile.BodyMode : profile.BodyMode;
-            return mode switch
-            {
-                NoteBodyRenderMode.Stretch => 0,
-                NoteBodyRenderMode.TileFromHead => 2,
-                _ => 1
-            };
         }
 
         private static (byte R, byte G, byte B, byte A)? ToTuple(SkinColor? color) => color is { } value

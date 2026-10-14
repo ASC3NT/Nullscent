@@ -14,6 +14,7 @@ namespace Nullscent.Rulesets.Mania.UI
         private readonly GraphicsDevice _graphicsDevice;
         private readonly SpriteBatch _spriteBatch;
         private readonly TrueTypeFontRenderer _fontRenderer;
+        private readonly Texture2D _pixel;
 
         private int _selectedIndex;
         private KeyboardState _previousKeyboardState;
@@ -29,6 +30,8 @@ namespace Nullscent.Rulesets.Mania.UI
             _graphicsDevice = graphicsDevice;
             _spriteBatch = spriteBatch;
             _fontRenderer = fontRenderer;
+            _pixel = new Texture2D(graphicsDevice, 1, 1);
+            _pixel.SetData(new[] { Color.White });
         }
 
         public void Show()
@@ -84,11 +87,8 @@ namespace Nullscent.Rulesets.Mania.UI
             int screenWidth = _graphicsDevice.Viewport.Width;
             int screenHeight = _graphicsDevice.Viewport.Height;
 
-            var pixel = new Texture2D(_graphicsDevice, 1, 1);
-            pixel.SetData(new[] { Color.White });
-
             var overlayRect = new Rectangle(0, 0, screenWidth, screenHeight);
-            _spriteBatch.Draw(pixel, overlayRect, new Color(0, 0, 0, 200));
+            _spriteBatch.Draw(_pixel, overlayRect, new Color(0, 0, 0, 200));
 
             _fontRenderer.SetFontSize(48);
             _fontRenderer.DrawTextCentered("PAUSED", screenWidth / 2, 150, new Color(255, 102, 171), 1.0f);
@@ -118,7 +118,7 @@ namespace Nullscent.Rulesets.Mania.UI
 
         public void Dispose()
         {
-            // Cleanup if needed
+            _pixel.Dispose();
         }
     }
 }

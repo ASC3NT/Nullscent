@@ -61,8 +61,24 @@ namespace Nullscent
                 {
                     bool switchDownScroll = args.Length == 6 || !args[6].Equals("up", StringComparison.OrdinalIgnoreCase);
                     using var switchSmoke = new Skin.SkinVisualSmokeGame(
-                        args[1], switchKeyCount, args[2], switchDownScroll, args[4], args[5]);
+                        args[1], switchKeyCount, args[4], switchDownScroll, args[2], args[5]);
                     switchSmoke.Run();
+                    return;
+                }
+                if (args.Length is >= 7 and <= 10 && args[0] == "--skin-visual-profile-smoke"
+                    && int.TryParse(args[2], out int profileKeyCount)
+                    && TryParseLegacySkinMode(args[3], out Skin.LegacySkinCompatibilityMode initialMode)
+                    && TryParseLegacySkinMode(args[4], out Skin.LegacySkinCompatibilityMode targetMode))
+                {
+                    bool profileDownScroll = args.Length < 8 || !args[7].Equals("up", StringComparison.OrdinalIgnoreCase);
+                    int profileWidth = args.Length >= 9 && int.TryParse(args[8], out int parsedProfileWidth) ? parsedProfileWidth : 1280;
+                    int profileHeight = args.Length >= 10 && int.TryParse(args[9], out int parsedProfileHeight) ? parsedProfileHeight : 720;
+                    using var profileSmoke = new Skin.SkinVisualSmokeGame(
+                        args[1], profileKeyCount, args[5], profileDownScroll,
+                        viewportWidth: profileWidth, viewportHeight: profileHeight,
+                        legacyCompatibilityMode: initialMode, switchCompatibilityMode: targetMode,
+                        compatibilityOutputPath: args[6]);
+                    profileSmoke.Run();
                     return;
                 }
                 if (args.Length is >= 4 and <= 7 && args[0] == "--skin-visual-smoke" && int.TryParse(args[2], out int keyCount))
@@ -84,7 +100,8 @@ namespace Nullscent
                 Console.WriteLine($"[FATAL] Unhandled Crash: {ex.GetType().Name} - {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
 #if DEBUG
-                if (args.Length > 0 && (args[0] == "--skin-visual-smoke" || args[0] == "--skin-visual-switch-smoke")) Environment.ExitCode = 1;
+                if (args.Length > 0 && (args[0] == "--skin-tests" || args[0] == "--skin-visual-smoke" || args[0] == "--skin-visual-switch-smoke"
+                    || args[0] == "--skin-visual-profile-smoke" || args[0] == "--skin-visual-resize-smoke")) Environment.ExitCode = 1;
 #endif
             }
             finally
@@ -93,6 +110,25 @@ namespace Nullscent
                 fileStream.Close();
             }
         }
+
+#if DEBUG
+        private static bool TryParseLegacySkinMode(string value, out Skin.LegacySkinCompatibilityMode mode)
+        {
+            if (value.Equals("stable", StringComparison.OrdinalIgnoreCase))
+            {
+                mode = Skin.LegacySkinCompatibilityMode.Stable;
+                return true;
+            }
+            if (value.Equals("lazer", StringComparison.OrdinalIgnoreCase))
+            {
+                mode = Skin.LegacySkinCompatibilityMode.Lazer;
+                return true;
+            }
+
+            mode = default;
+            return false;
+        }
+#endif
     }
 
     /// <summary>

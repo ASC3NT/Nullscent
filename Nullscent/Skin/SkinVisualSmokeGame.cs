@@ -33,6 +33,9 @@ internal sealed class SkinVisualSmokeGame : Game
     private readonly string? resizeOutputPath;
     private readonly int? resizedViewportWidth;
     private readonly int? resizedViewportHeight;
+    private readonly LegacySkinCompatibilityMode legacyCompatibilityMode;
+    private readonly LegacySkinCompatibilityMode? switchCompatibilityMode;
+    private readonly string? compatibilityOutputPath;
     private SpriteBatch? batch;
     private SkinManager? skin;
     private ManiaPlayfield? playfield;
@@ -42,7 +45,9 @@ internal sealed class SkinVisualSmokeGame : Game
 
     public SkinVisualSmokeGame(string skinPath, int keyCount, string outputPath, bool downScroll,
         string? switchSkinPath = null, string? switchOutputPath = null, int viewportWidth = 1280, int viewportHeight = 720,
-        string? resizeOutputPath = null, int? resizedViewportWidth = null, int? resizedViewportHeight = null)
+        string? resizeOutputPath = null, int? resizedViewportWidth = null, int? resizedViewportHeight = null,
+        LegacySkinCompatibilityMode legacyCompatibilityMode = LegacySkinCompatibilityMode.Stable,
+        LegacySkinCompatibilityMode? switchCompatibilityMode = null, string? compatibilityOutputPath = null)
     {
         if (keyCount < 1 || keyCount > 18) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (viewportWidth < 640 || viewportHeight < 480) throw new ArgumentOutOfRangeException(nameof(viewportWidth), "La resolución de smoke debe ser de al menos 640x480.");
@@ -51,6 +56,10 @@ internal sealed class SkinVisualSmokeGame : Game
             throw new ArgumentException("El resize smoke requiere ruta de salida y ambas dimensiones destino.");
         if (resizedViewportWidth is < 640 || resizedViewportHeight is < 480)
             throw new ArgumentOutOfRangeException(nameof(resizedViewportWidth), "La resoluciÃ³n destino debe ser de al menos 640x480.");
+        if ((switchCompatibilityMode == null) != (compatibilityOutputPath == null))
+            throw new ArgumentException("El cambio de perfil requiere un perfil destino y captura de salida.");
+        if (switchCompatibilityMode != null && (switchSkinPath != null || resizeOutputPath != null))
+            throw new ArgumentException("El smoke de perfil se ejecuta separado del cambio de skin y resize.");
         this.skinPath = skinPath;
         this.keyCount = keyCount;
         this.outputPath = Path.GetFullPath(outputPath);
@@ -62,6 +71,9 @@ internal sealed class SkinVisualSmokeGame : Game
         this.resizeOutputPath = resizeOutputPath == null ? null : Path.GetFullPath(resizeOutputPath);
         this.resizedViewportWidth = resizedViewportWidth;
         this.resizedViewportHeight = resizedViewportHeight;
+        this.legacyCompatibilityMode = legacyCompatibilityMode;
+        this.switchCompatibilityMode = switchCompatibilityMode;
+        this.compatibilityOutputPath = compatibilityOutputPath == null ? null : Path.GetFullPath(compatibilityOutputPath);
         graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth = viewportWidth,
@@ -74,7 +86,7 @@ internal sealed class SkinVisualSmokeGame : Game
     protected override void LoadContent()
     {
         batch = new SpriteBatch(GraphicsDevice);
-        SettingsService.Instance.Initialize(new GameSettings());
+        SettingsService.Instance.Initialize(new GameSettings { LegacySkinCompatibilityMode = legacyCompatibilityMode });
         skin = new SkinManager(GraphicsDevice);
         if (!ActivateSkin(skinPath)) throw new InvalidDataException($"No se pudo activar skin inicial: {skin.CurrentValidation?.Summary ?? skinPath}");
         ReportResolvedHighResolutionAssets();
@@ -109,14 +121,31 @@ internal sealed class SkinVisualSmokeGame : Game
             SaveBackbuffer(outputPath);
             Console.WriteLine($"[SkinVisualSmoke] {keyCount}K initial: {outputPath}");
             captureStage = 1;
-            if (switchSkinPath == null)
+            if (switchSkinPath == null && switchCompatibilityMode == null)
             {
                 if (resizeOutputPath == null) Exit();
+            }
+            else if (switchCompatibilityMode != null)
+            {
+                long previousVersion = skin!.Version;
+                SkinProviderKind previousProvider = skin.CurrentDefinition.Provider;
+                if (previousProvider != SkinProviderKind.OsuLegacy)
+                    throw new InvalidOperationException("El smoke de perfil requiere una skin osu! legacy activa.");
+                if (!skin.TrySetLegacyCompatibilityMode(switchCompatibilityMode.Value, () => true))
+                    throw new InvalidDataException("No se pudo reconstruir la skin con el perfil de compatibilidad destino.");
+                ManiaSkinCompatibilityProfile expectedProfile = switchCompatibilityMode == LegacySkinCompatibilityMode.Stable
+                    ? ManiaSkinCompatibilityProfile.StableLegacy : ManiaSkinCompatibilityProfile.LazerLegacy;
+                if (skin.Version != previousVersion + 1
+                    || skin.CurrentDefinition.Provider != previousProvider
+                    || skin.CurrentDefinition.CompatibilityProfile != expectedProfile)
+                    throw new InvalidOperationException("El cambio de perfil no fue atÃ³mico o cambiÃ³ el proveedor de la skin.");
+                playfield!.Update(1040, score!, 8, null, downScroll);
+                Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {legacyCompatibilityMode} -> {switchCompatibilityMode}; proveedor={skin.CurrentDefinition.Provider}; {compatibilityOutputPath}");
             }
             else
             {
                 long previousVersion = skin!.Version;
-                if (!ActivateSkin(switchSkinPath)) throw new InvalidDataException($"No se pudo activar skin destino: {skin.CurrentValidation?.Summary ?? switchSkinPath}");
+                if (!ActivateSkin(switchSkinPath!)) throw new InvalidDataException($"No se pudo activar skin destino: {skin.CurrentValidation?.Summary ?? switchSkinPath}");
                 ReportResolvedHighResolutionAssets();
                 if (skin.Version != previousVersion + 1) throw new InvalidOperationException("La versión de skin no avanzó exactamente una vez.");
                 playfield!.Update(1040, score!, 8, null, downScroll);
@@ -127,6 +156,13 @@ internal sealed class SkinVisualSmokeGame : Game
         {
             SaveBackbuffer(switchOutputPath);
             Console.WriteLine($"[SkinVisualSmoke] {keyCount}K after switch: {switchOutputPath}");
+            captureStage = 2;
+            Exit();
+        }
+        else if (captureStage == 1 && compatibilityOutputPath != null)
+        {
+            SaveBackbuffer(compatibilityOutputPath);
+            Console.WriteLine($"[SkinVisualSmoke] {keyCount}K tras cambio de perfil: {compatibilityOutputPath}");
             captureStage = 2;
             Exit();
         }
@@ -160,7 +196,8 @@ internal sealed class SkinVisualSmokeGame : Game
             return skin!.TryActivateInternal();
 
         string fullPath = Path.GetFullPath(path);
-        var validation = new SkinCatalog(Path.GetDirectoryName(fullPath)!).Validate(fullPath);
+        var validation = new SkinCatalog(Path.GetDirectoryName(fullPath)!,
+            compatibilityMode: skin!.LegacyCompatibilityMode).Validate(fullPath, skin.LegacyCompatibilityMode);
         Console.WriteLine($"[SkinVisualSmoke] validation: {validation.Status}; {validation.Summary}");
         return skin!.TryActivate(validation);
     }

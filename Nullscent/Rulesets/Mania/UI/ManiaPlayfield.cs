@@ -61,6 +61,7 @@ namespace Nullscent.Rulesets.Mania.UI
         private int _screenHeight;
         private int _screenWidth;
         public int ReceptorY { get; private set; }
+        public int ReceptorSpriteY { get; private set; }
 
         // Recursos compartidos de renderizado
         private Texture2D? _whitePixel;
@@ -217,6 +218,7 @@ namespace Nullscent.Rulesets.Mania.UI
             _stageX = (int)MathF.Round(_layoutResult.Playfield.X);
             _stageWidth = (int)MathF.Round(_layoutResult.Playfield.Width);
             ReceptorY = (int)MathF.Round(_layoutResult.ReceptorY);
+            ReceptorSpriteY = (int)MathF.Round(_layoutResult.ReceptorSpriteY);
             for (int i = 0; i < _columns.Count; i++)
             {
                 SkinRect lane = _layoutResult.Lanes[i];
@@ -265,6 +267,7 @@ namespace Nullscent.Rulesets.Mania.UI
 
             float effectiveReceptorRatio = receptorPosition ?? ReceptorY / (float)Math.Max(1, _screenHeight);
             ReceptorY = (int)MathF.Round(_layoutResult?.ReceptorY ?? effectiveReceptorRatio * _screenHeight);
+            ReceptorSpriteY = (int)MathF.Round(_layoutResult?.ReceptorSpriteY ?? ReceptorY);
 
             // Propagar actualización a cada columna
             foreach (var column in _columns)
@@ -317,7 +320,7 @@ namespace Nullscent.Rulesets.Mania.UI
             // top-level effects. osu! draws StageBottom between these layers.
             foreach (var column in _columns)
             {
-                column.Draw(_spriteBatch, _whitePixel, currentTime, scrollSpeed, downScroll, ReceptorY,
+                column.Draw(_spriteBatch, _whitePixel, currentTime, scrollSpeed, downScroll, ReceptorY, ReceptorSpriteY,
                     _layoutResult?.Scale ?? 1f, (int)MathF.Round(_layoutResult?.OffsetY ?? 0));
             }
 
@@ -422,67 +425,37 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             if (_whitePixel == null || _spriteBatch == null) return;
             ManiaKeymodeDefinition? profile = _skinManager?.GetManiaProfile(_columnCount);
+            ManiaLayoutResult? layout = _layoutResult;
 
             // Fondo oscuro para la pista
             var stageRect = new Rectangle(_stageX, 0, _stageWidth, _screenHeight);
             if (profile == null)
                 _spriteBatch.Draw(_whitePixel, stageRect, new Color(15, 15, 20, 220));
 
-            foreach (var column in _columns)
-                column.DrawBackground(_spriteBatch, _whitePixel);
-
-            // Dibujar StageHint (línea de impacto visual)
-            Texture2D? stageHint = _skinManager?.GetStageTexture(_columnCount, "hint");
-            if (stageHint != null)
-            {
-                Vector2 hintSize = _skinManager!.GetLogicalSize(stageHint);
-                float aspect = hintSize.Y / hintSize.X;
-                int hintH = Math.Max(1, (int)MathF.Round(_stageWidth * aspect * 0.9f));
-                var hintRect = new Rectangle(_stageX, ReceptorY - hintH / 2, _stageWidth, hintH);
-                _spriteBatch.Draw(stageHint, hintRect, Color.White);
-            }
-
-            // Dibujar Judgement Line si está activa (blanca por defecto o tintada según skin.ini)
-            bool drawJudgementLine = profile?.JudgementLine ?? true;
-            if (drawJudgementLine)
-            {
-                int lineHeight = Math.Max(1, (int)MathF.Round(_layoutResult?.Scale ?? 1f));
-                var lineRect = new Rectangle(_stageX, ReceptorY - lineHeight / 2, _stageWidth, lineHeight);
-                Color lineColor = Color.White;
-                
-                var customJudgementColor = _skinManager?.GetColourJudgementLine(_columnCount);
-                if (customJudgementColor.HasValue)
-                {
-                    lineColor = new Color(customJudgementColor.Value.R, customJudgementColor.Value.G, customJudgementColor.Value.B,
-                        customJudgementColor.Value.A);
-                }
-                
-                _spriteBatch.Draw(_whitePixel, lineRect, lineColor);
-            }
-
-            // Dibujar separadores de columnas y bordes laterales sin estiramiento vertical (Vertical Tiling)
+            ManiaStageStyleDefinition stageStyle = profile?.StageStyle ?? ManiaStageStyleDefinition.Default;
             Texture2D? stageLeft = _skinManager?.GetStageTexture(_columnCount, "left");
             Texture2D? stageRight = _skinManager?.GetStageTexture(_columnCount, "right");
-            float unscaledSpriteScale = _layoutResult?.Scale ?? 1f;
+            float layoutScale = layout?.Scale ?? 1f;
 
-            if (stageLeft != null)
+            // Legacy stage pieces are composed back-to-front: side artwork, lane
+            // backgrounds/lines, then the centered hit target. See osu!'s legacy
+            // StageBackground child order:
+            // https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyStageBackground.cs
+            if (layout != null && _skinManager != null && stageLeft != null)
             {
-                Vector2 leftSize = _skinManager!.GetLogicalSize(stageLeft);
-                int borderW = Math.Max(1, (int)MathF.Round(leftSize.X * unscaledSpriteScale));
-                int borderH = Math.Max(1, (int)MathF.Round(leftSize.Y * unscaledSpriteScale));
-                int borderY = (int)MathF.Round((_layoutResult?.OffsetY ?? 0) +
-                    (ManiaLayoutEngine.DesignHeight * unscaledSpriteScale - borderH) / 2f);
-                _spriteBatch.Draw(stageLeft, new Rectangle(_stageX - borderW, borderY, borderW, borderH), Color.White);
+                Vector2 size = _skinManager.GetLogicalSize(stageLeft);
+                SkinRect rect = ManiaLayoutEngine.GetStageSideRect(layout, size.X, isRight: false, stageStyle);
+                _spriteBatch.Draw(stageLeft, ToRectangle(rect), Color.White);
             }
-            if (stageRight != null)
+            if (layout != null && _skinManager != null && stageRight != null)
             {
-                Vector2 rightSize = _skinManager!.GetLogicalSize(stageRight);
-                int borderW = Math.Max(1, (int)MathF.Round(rightSize.X * unscaledSpriteScale));
-                int borderH = Math.Max(1, (int)MathF.Round(rightSize.Y * unscaledSpriteScale));
-                int borderY = (int)MathF.Round((_layoutResult?.OffsetY ?? 0) +
-                    (ManiaLayoutEngine.DesignHeight * unscaledSpriteScale - borderH) / 2f);
-                _spriteBatch.Draw(stageRight, new Rectangle(_stageX + _stageWidth, borderY, borderW, borderH), Color.White);
+                Vector2 size = _skinManager.GetLogicalSize(stageRight);
+                SkinRect rect = ManiaLayoutEngine.GetStageSideRect(layout, size.X, isRight: true, stageStyle);
+                _spriteBatch.Draw(stageRight, ToRectangle(rect), Color.White);
             }
+
+            foreach (var column in _columns)
+                column.DrawBackground(_spriteBatch, _whitePixel);
 
             // Dibujar lineas de columna (Column Lines)
             if (profile != null && _skinManager != null)
@@ -493,6 +466,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 Color lineColor = colour.HasValue
                     ? new Color(colour.Value.R, colour.Value.G, colour.Value.B, colour.Value.A) : Color.White;
                 bool drawBothEdges = profile.DrawColumnEdgesBothSides;
+                float unscaledSpriteScale = layoutScale;
                 for (int i = 0; i < _columns.Count; i++)
                 {
                     if (enabled != null && i < enabled.Length && !enabled[i]) continue;
@@ -533,25 +507,46 @@ namespace Nullscent.Rulesets.Mania.UI
                 _spriteBatch.Draw(_whitePixel, leftBorderRect, neonColor);
                 _spriteBatch.Draw(_whitePixel, rightBorderRect, neonColor);
             }
+
+            // osu! places the hit target after stage/column backgrounds and before
+            // StageLight, notes and keys. StageHint is centered on the judgement line.
+            Texture2D? stageHint = _skinManager?.GetStageTexture(_columnCount, "hint");
+            if (layout != null && _skinManager != null && stageHint != null)
+            {
+                Vector2 size = _skinManager.GetLogicalSize(stageHint);
+                SkinRect rect = ManiaLayoutEngine.GetStageHintRect(layout, size.X, size.Y, stageStyle);
+                _spriteBatch.Draw(stageHint, ToRectangle(rect), Color.White);
+            }
+
+            bool drawJudgementLine = profile?.JudgementLine ?? true;
+            if (drawJudgementLine)
+            {
+                int lineHeight = Math.Max(1, (int)MathF.Round(layoutScale));
+                var lineRect = new Rectangle(_stageX, ReceptorY - lineHeight / 2, _stageWidth, lineHeight);
+                Color lineColor = Color.White;
+                var customJudgementColor = _skinManager?.GetColourJudgementLine(_columnCount);
+                if (customJudgementColor.HasValue)
+                    lineColor = new Color(customJudgementColor.Value.R, customJudgementColor.Value.G,
+                        customJudgementColor.Value.B, customJudgementColor.Value.A);
+                _spriteBatch.Draw(_whitePixel, lineRect, lineColor);
+            }
         }
 
         private void DrawStageBottom(bool downScroll, double currentTime)
         {
             ResolvedManiaKeymode? mode = _skinManager?.GetResolvedKeymode(_columnCount);
-            Texture2D? stageBottom = mode != null && mode.StageAssets.TryGetValue("bottom", out ResolvedSkinAnimation? bottomAnimation)
-                ? bottomAnimation.FrameAt(currentTime) : null;
-            if (stageBottom == null) return;
-
+            if (mode == null || !mode.StageAssets.TryGetValue("bottom", out ResolvedSkinAnimation? bottomAnimation)) return;
+            Texture2D? stageBottom = bottomAnimation.FrameAt(currentTime);
+            if (stageBottom == null || _layoutResult == null) return;
             Vector2 size = _skinManager!.GetLogicalSize(stageBottom);
-            float scale = _layoutResult?.Scale ?? 1f;
-            int width = Math.Max(1, (int)MathF.Round(size.X * scale));
-            int height = Math.Max(1, (int)MathF.Round(size.Y * scale));
-            int x = _stageX + (_stageWidth - width) / 2;
-            int contentTop = (int)MathF.Round(_layoutResult?.OffsetY ?? 0);
-            int contentBottom = (int)MathF.Round(contentTop + ManiaLayoutEngine.DesignHeight * scale);
-            int y = downScroll ? contentBottom - height : contentTop;
-            _spriteBatch.Draw(stageBottom, new Rectangle(x, y, width, height), Color.White);
+            SkinRect rect = ManiaLayoutEngine.GetStageBottomRect(_layoutResult, size.X, size.Y, downScroll,
+                mode.Definition.StageStyle);
+            _spriteBatch.Draw(stageBottom, ToRectangle(rect), Color.White);
         }
+
+        private static Rectangle ToRectangle(SkinRect rect) => new(
+            (int)MathF.Round(rect.X), (int)MathF.Round(rect.Y),
+            Math.Max(1, (int)MathF.Round(rect.Width)), Math.Max(1, (int)MathF.Round(rect.Height)));
 
         internal static Color GetDoubledAlphaColour(Color color)
         {
@@ -1009,7 +1004,7 @@ namespace Nullscent.Rulesets.Mania.UI
         }
 
         public void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime, double scrollSpeed,
-            bool downScroll, int receptorY, float layoutScale, int layoutOffsetY)
+            bool downScroll, int receptorY, int receptorSpriteY, float layoutScale, int layoutOffsetY)
         {
 
             // StageLight is part of the column background, below notes and keys.
@@ -1036,10 +1031,8 @@ namespace Nullscent.Rulesets.Mania.UI
                     float aspect = lightSize.Y / lightSize.X;
                     int lightW = _width;
                     int fullLightHeight = Math.Max(1, (int)MathF.Round(_width * aspect));
-                    int lightH = Math.Max(1, (int)MathF.Round(fullLightHeight * stageLightProgress));
-                    
-                    int lightY = downScroll ? lightPos - lightH : lightPos;
-                    var lightRect = new Rectangle(_x, lightY, lightW, lightH);
+                    int lightY = downScroll ? lightPos - fullLightHeight : lightPos;
+                    var lightRect = new Rectangle(_x, lightY, lightW, fullLightHeight);
                     
                     SpriteEffects effects = downScroll ? SpriteEffects.None : SpriteEffects.FlipVertically;
                     spriteBatch.End();
@@ -1102,7 +1095,7 @@ namespace Nullscent.Rulesets.Mania.UI
                         _ => keyWidth * keySize.Y / keySize.X
                     } * ReceptorHeightScale;
 
-                    int keyY = (int)MathF.Round(downScroll ? receptorY - keyHeight + metrics.OffsetY * LayoutScale : receptorY + metrics.OffsetY * LayoutScale);
+                    int keyY = (int)MathF.Round(downScroll ? receptorSpriteY - keyHeight + metrics.OffsetY * LayoutScale : receptorSpriteY + metrics.OffsetY * LayoutScale);
                     int keyX = (int)MathF.Round(_x + (_width - keyWidth) / 2f + _width * metrics.OffsetXRatio);
                     var keyRect = new Rectangle(keyX, keyY, Math.Max(1, (int)MathF.Round(keyWidth)), Math.Max(1, (int)MathF.Round(keyHeight)));
                     SpriteEffects effects = _skinManager.FlipKey(_totalColumnCount, _index, _isPressed, downScroll)
@@ -1112,7 +1105,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 else
                 {
                     int keyHeight = 20;
-                    int keyY = downScroll ? receptorY - keyHeight : receptorY;
+                    int keyY = downScroll ? receptorSpriteY - keyHeight : receptorSpriteY;
                     var keyRect = new Rectangle(_x + 3, keyY, _width - 6, keyHeight);
                     Color keyBgColor = _isPressed ? GetLaneColor(_index) * 0.4f : Color.Black * 0.5f;
                     spriteBatch.Draw(pixel, keyRect, keyBgColor);

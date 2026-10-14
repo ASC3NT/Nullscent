@@ -16,10 +16,14 @@ namespace Nullscent.Skin
             TestNativeManifests();
             TestUserOverridePrecedence();
             TestSkinScrollPreferenceAndLegacyFlips();
+            TestCompatibilityProfilesAndReceptorAnchors();
+            TestStagePresentationNormalizationAndLayout();
+            TestLongNoteBodyVisualRules();
             TestCatalogReflectsAppliedColumnHoldColour();
             TestLegacyAnimationRateSemantics();
             TestProviderScopedAssetCascade();
-            Console.WriteLine("[SkinTests] 10 pruebas deterministas pasaron.");
+            TestHitSoundSourcePrecedence();
+            Console.WriteLine("[SkinTests] 14 pruebas deterministas pasaron.");
         }
 
         private static void TestLegacyNormalizationAndTextAlias()
@@ -60,6 +64,8 @@ namespace Nullscent.Skin
                 Assert(mode.BodyMode == NoteBodyRenderMode.Stretch, "The textual stretch alias should parse.");
                 Assert(skin.AnimationFramerate == 24 && mode.NoteStyle.FramesPerSecond == 60,
                     "General animation speed should normalize without overriding mania note animation speed.");
+                Assert(mode.JudgementFramesPerSecond == 60,
+                    "Mania hit bursts should retain their fixed 60 FPS rate despite the general animation setting.");
                 Assert(mode.Lanes[2].BodyMode == NoteBodyRenderMode.TileFromHead, "Per-column body style should survive normalization.");
                 Assert(mode.UpsideDown == true, "The skin orientation preference should survive normalization.");
                 Assert(mode.SupportsFlipOverrides && mode.NoteFlipWhenUpsideDown == false && mode.KeyFlipWhenUpsideDown == false,
@@ -123,10 +129,58 @@ namespace Nullscent.Skin
             ManiaSkinDefinition circles = NativeSkinAdapter.Load(Path.Combine(root, "Circles"));
             Assert(bars.Provider == SkinProviderKind.NullscentNative && circles.Provider == SkinProviderKind.NullscentNative,
                 "Built-in definitions should use the native provider.");
+            ManiaSkinDefinition lazerRequested = SkinSourceDecoder.Load(Path.Combine(root, "Bars"), out _,
+                LegacySkinCompatibilityMode.Lazer);
+            Assert(lazerRequested.Provider == SkinProviderKind.NullscentNative
+                && lazerRequested.CompatibilityProfile == ManiaSkinCompatibilityProfile.NullscentNative,
+                "Selecting the Lazer legacy mode must not reinterpret a native manifest or change its provider.");
             Assert(bars.Keymodes[4].Lanes[0].Width != circles.Keymodes[4].Lanes[0].Width,
                 "Native families should define their own lane geometry.");
             Assert(circles.Keymodes[4].NoteStyle.LaneWidthRatio < circles.Keymodes[4].ReceptorStyle.LaneWidthRatio,
                 "Native note and receptor widths should remain independent.");
+            AssertNear(bars.Keymodes[4].StageStyle.BottomScale, 1f,
+                "Native manifests without stage overrides should keep their native StageBottom scale.");
+
+            string temp = Path.Combine(Path.GetTempPath(), "NullscentNativeStageTest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, NativeSkinAdapter.ManifestFileName), """
+                    {
+                      "formatVersion": 1,
+                      "name": "Stage style test",
+                      "keymodes": {
+                        "4": {
+                          "keyCount": 4,
+                          "stageStyle": { "sideHeightScale": 0.8, "hintHeightScale": 1.25, "bottomScale": 1.6 },
+                          "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
+                        }
+                      }
+                    }
+                    """);
+                ManiaStageStyleDefinition stageStyle = NativeSkinAdapter.Load(temp).Keymodes[4].StageStyle;
+                AssertNear(stageStyle.SideHeightScale, 0.8f, "Native stage side scaling should deserialize as normalized data.");
+                AssertNear(stageStyle.HintHeightScale, 1.25f, "Native stage hint scaling should deserialize as normalized data.");
+                AssertNear(stageStyle.BottomScale, 1.6f, "Native StageBottom scaling should deserialize as normalized data.");
+
+                File.WriteAllText(Path.Combine(temp, NativeSkinAdapter.ManifestFileName), """
+                    {
+                      "formatVersion": 1,
+                      "keymodes": {
+                        "4": {
+                          "keyCount": 4,
+                          "stageStyle": { "bottomScale": 0 },
+                          "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
+                        }
+                      }
+                    }
+                    """);
+                bool invalidStageRejected = false;
+                try { _ = NativeSkinAdapter.Load(temp); }
+                catch (InvalidDataException) { invalidStageRejected = true; }
+                Assert(invalidStageRejected, "Native stage scales must be validated before the skin can activate.");
+            }
+            finally { Directory.Delete(temp, true); }
         }
 
         private static void TestNativeLeftPlacement()
@@ -170,6 +224,223 @@ namespace Nullscent.Skin
                 "An explicit user scroll direction should take precedence over the skin.");
             Assert(!ManiaSkinRules.ResolveDownScroll(false, true, skinUpsideDown: null),
                 "When the skin does not specify orientation, preserve the user direction.");
+        }
+
+        private static void TestCompatibilityProfilesAndReceptorAnchors()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "NullscentSkinTest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 4
+                    HitPosition: 400
+                    NoteBodyStyle: 1
+                    """);
+                SkinConfig config = SkinConfigParser.Parse(temp);
+                ManiaSkinDefinition stable = LegacyManiaSkinAdapter.Decode(config, "legacy-test", LegacySkinCompatibilityMode.Stable);
+                ManiaSkinDefinition lazer = LegacyManiaSkinAdapter.Decode(config, "legacy-test", LegacySkinCompatibilityMode.Lazer);
+                ManiaKeymodeDefinition stableMode = stable.Keymodes[4];
+
+                Assert(stable.CompatibilityProfile == ManiaSkinCompatibilityProfile.StableLegacy,
+                    "Legacy skins should default to the explicitly selected Stable compatibility profile.");
+                Assert(lazer.CompatibilityProfile == ManiaSkinCompatibilityProfile.LazerLegacy,
+                    "Lazer compatibility should be an explicit interpretation profile, not a provider kind.");
+                Assert(stableMode.ReceptorAnchor == ReceptorAnchorMode.StageEdge,
+                    "Legacy key images should anchor to the stage edge when the user has not overridden receptor position.");
+                Assert(stableMode.BodyMode == NoteBodyRenderMode.TileFromTail
+                    && lazer.Keymodes[4].BodyMode == NoteBodyRenderMode.TileFromTail,
+                    "Stable and experimental Lazer profiles should normalize their body direction before rendering.");
+                Assert(LegacyManiaSkinAdapter.DecodeBodyMode(2, LegacySkinCompatibilityMode.Stable) == NoteBodyRenderMode.TileFromHead
+                    && LegacyManiaSkinAdapter.DecodeBodyMode(2, LegacySkinCompatibilityMode.Lazer) == NoteBodyRenderMode.TileFromTail,
+                    "Stable style 2 should anchor to the head, while current Lazer collapses every repeated style to its top/tail anchor.");
+                Assert(stableMode.BodyAnimationReleaseMode == HoldBodyAnimationReleaseMode.FreezeAtRelease
+                    && lazer.Keymodes[4].BodyAnimationReleaseMode == HoldBodyAnimationReleaseMode.ResetToInitialFrame,
+                    "The selected legacy profile should normalize its body-animation release behavior without changing providers.");
+                Assert(lazer.Provider == SkinProviderKind.OsuLegacy,
+                    "Selecting Lazer compatibility must not change an osu! legacy source into another provider.");
+
+                ManiaLayoutResult down = ManiaLayoutEngine.Calculate(stableMode, 4, 1920, 1080, true);
+                ManiaLayoutResult up = ManiaLayoutEngine.Calculate(stableMode, 4, 1920, 1080, false);
+                ManiaLayoutResult userOverride = ManiaLayoutEngine.Calculate(stableMode, 4, 1920, 1080, true,
+                    new ManiaLayoutOverrides(ReceptorPositionRatio: 0.4f));
+                AssertNear(down.ReceptorSpriteY, down.Playfield.Bottom,
+                    "Legacy downscroll keys should be placed on the stage bottom independently from HitPosition.");
+                AssertNear(up.ReceptorSpriteY, up.Playfield.Y,
+                    "Legacy upscroll keys should be placed on the stage top independently from HitPosition.");
+                AssertNear(userOverride.ReceptorSpriteY, userOverride.ReceptorY,
+                    "An explicit user receptor position should override the legacy stage-edge anchor.");
+
+                var native = new ManiaKeymodeDefinition
+                {
+                    KeyCount = 4,
+                    ReceptorAnchor = ReceptorAnchorMode.ReceptorLine,
+                    Lanes = new System.Collections.Generic.List<ManiaLaneDefinition>
+                    {
+                        new() { Width = 48 }, new() { Width = 48 }, new() { Width = 48 }, new() { Width = 48 }
+                    }
+                };
+                ManiaLayoutResult nativeLayout = ManiaLayoutEngine.Calculate(native, 4, 1920, 1080, true);
+                AssertNear(nativeLayout.ReceptorSpriteY, nativeLayout.ReceptorY,
+                    "Native skins should keep the receptor attached to their normalized receptor line.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestStagePresentationNormalizationAndLayout()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "NullscentStageSkinTest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.5
+                    [Mania]
+                    Keys: 4
+                    """);
+                ManiaSkinDefinition legacy = SkinSourceDecoder.Load(temp, out _);
+                ManiaKeymodeDefinition legacyMode = legacy.Keymodes[4];
+                AssertNear(legacyMode.StageStyle.SideHeightScale, 1f,
+                    "Legacy side pieces should use the full stage height.");
+                AssertNear(legacyMode.StageStyle.BottomScale, 1.6f,
+                    "Legacy StageBottom assets should be scaled from the 480-high skin canvas.");
+                AssertNear(legacyMode.StageStyle.HintHeightScale, 0.9f * 1.6025f,
+                    "The legacy hit target should retain the source-backed vertical StageHint scale.");
+
+                foreach ((int width, int height) in new[] { (1920, 1080), (1366, 768) })
+                {
+                    ManiaLayoutResult layout = ManiaLayoutEngine.Calculate(legacyMode, 4, width, height, downScroll: true);
+                    SkinRect left = ManiaLayoutEngine.GetStageSideRect(layout, 18f, isRight: false, legacyMode.StageStyle);
+                    SkinRect right = ManiaLayoutEngine.GetStageSideRect(layout, 18f, isRight: true, legacyMode.StageStyle);
+                    AssertNear(left.Y, layout.Playfield.Y, "StageLeft should start at the top edge of the stage.");
+                    AssertNear(left.Height, layout.Playfield.Height, "StageLeft should fit the full stage height.");
+                    AssertNear(left.Right, layout.Playfield.X, "StageLeft should align its inner edge with the playfield.");
+                    AssertNear(right.X, layout.Playfield.Right, "StageRight should align its inner edge with the playfield.");
+                    AssertNear(right.Height, layout.Playfield.Height, "StageRight should fit the full stage height.");
+
+                    SkinRect hint = ManiaLayoutEngine.GetStageHintRect(layout, 100f, 20f, legacyMode.StageStyle);
+                    AssertNear(hint.X, layout.Playfield.X, "StageHint should span the full playfield width.");
+                    AssertNear(hint.Width, layout.Playfield.Width, "StageHint width should follow the stage width.");
+                    AssertNear(hint.Y + hint.Height / 2f, layout.ReceptorY,
+                        "StageHint should be centred on the judgement target.");
+
+                    SkinRect bottomDown = ManiaLayoutEngine.GetStageBottomRect(layout, 80f, 40f,
+                        downScroll: true, legacyMode.StageStyle);
+                    SkinRect bottomUp = ManiaLayoutEngine.GetStageBottomRect(layout, 80f, 40f,
+                        downScroll: false, legacyMode.StageStyle);
+                    AssertNear(bottomDown.Width, 80f * 1.6f * layout.Scale,
+                        "StageBottom should use its legacy scale without stretching to stage width.");
+                    AssertNear(bottomDown.X + bottomDown.Width / 2f,
+                        layout.Playfield.X + layout.Playfield.Width / 2f,
+                        "StageBottom should remain centred on the stage.");
+                    AssertNear(bottomDown.Bottom, layout.Playfield.Bottom,
+                        "Downscroll StageBottom should anchor to the bottom of the stage.");
+                    AssertNear(bottomUp.Y, layout.Playfield.Y,
+                        "Upscroll StageBottom should anchor to the top of the stage.");
+                }
+
+                var nativeMode = new ManiaKeymodeDefinition { KeyCount = 4 };
+                AssertNear(nativeMode.StageStyle.BottomScale, 1f,
+                    "Native stage sizing should use its own data default instead of legacy scaling.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestHitSoundSourcePrecedence()
+        {
+            string[] skinFirst = Nullscent.Audio.HitSoundPlayer.BuildSearchDirectoryOrder(
+                "beatmap", "skin", "application", useSkinHitsounds: true, overrideMapHitsounds: true);
+            Assert(skinFirst.Length == 3 && skinFirst[0] == "skin" && skinFirst[1] == "beatmap" && skinFirst[2] == "application",
+                "OverrideMapHitsounds should prioritize the active skin while preserving map and application fallbacks.");
+
+            string[] mapFirst = Nullscent.Audio.HitSoundPlayer.BuildSearchDirectoryOrder(
+                "beatmap", "skin", "application", useSkinHitsounds: true, overrideMapHitsounds: false);
+            Assert(mapFirst.Length == 3 && mapFirst[0] == "beatmap" && mapFirst[1] == "skin" && mapFirst[2] == "application",
+                "Enabled skin hitsounds should follow beatmap hitsounds unless explicitly overridden.");
+
+            string[] skinDisabled = Nullscent.Audio.HitSoundPlayer.BuildSearchDirectoryOrder(
+                "beatmap", "skin", "application", useSkinHitsounds: false, overrideMapHitsounds: false);
+            Assert(skinDisabled.Length == 2 && skinDisabled[0] == "beatmap" && skinDisabled[1] == "application",
+                "UseSkinHitsounds should disable only the skin source, keeping map and application fallbacks.");
+
+            string[] disabledWithOverride = Nullscent.Audio.HitSoundPlayer.BuildSearchDirectoryOrder(
+                "beatmap", "skin", "application", useSkinHitsounds: false, overrideMapHitsounds: true);
+            Assert(disabledWithOverride.Length == 2 && disabledWithOverride[0] == "beatmap" && disabledWithOverride[1] == "application",
+                "OverrideMapHitsounds should not re-enable a skin source that the user has disabled.");
+        }
+
+        private static void TestLongNoteBodyVisualRules()
+        {
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromTail, true)
+                && !Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromHead, true),
+                "In downscroll the tail is physically above the head, so tail-anchored and head-anchored tiling must start at opposite ends.");
+            Assert(!Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromTail, false)
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromHead, false),
+                "In upscroll the tail is physically below the head, so their tiling anchors must mirror downscroll.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(
+                    0, 95, 40, NoteBodyRenderMode.TileFromTail, true, 0) == 0
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(
+                    0, 95, 40, NoteBodyRenderMode.TileFromTail, false, 0) == 55
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(
+                    0, 95, 40, NoteBodyRenderMode.TileFromHead, true, 0) == 55
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(
+                    0, 95, 40, NoteBodyRenderMode.TileFromHead, false, 0) == 0,
+                "Each semantic LN anchor should map to its actual physical edge in both scroll directions.");
+
+            foreach (NoteBodyRenderMode mode in new[] { NoteBodyRenderMode.TileFromTail, NoteBodyRenderMode.TileFromHead })
+            foreach (bool downScroll in new[] { false, true })
+            {
+                var coverage = new int[95];
+                for (int tileIndex = 0; tileIndex < 3; tileIndex++)
+                {
+                    int origin = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(
+                        0, 95, 40, mode, downScroll, tileIndex);
+                    int visibleTop = Math.Max(0, origin);
+                    int visibleBottom = Math.Min(95, origin + 40);
+                    for (int y = visibleTop; y < visibleBottom; y++) coverage[y]++;
+                }
+                Assert(Array.TrueForAll(coverage, count => count == 1),
+                    $"{mode} must cover the complete body exactly once in {(downScroll ? "downscroll" : "upscroll")}.");
+            }
+
+            var firstTailTile = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetTileSourceRange(
+                0, 40, 0, 95, 40, 400, NoteBodyRenderMode.TileFromTail, true, false);
+            Assert(firstTailTile == (0, 400), "The first full tile should preserve the complete physical texture region.");
+            var partialTailTile = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetTileSourceRange(
+                0, 15, 0, 95, 40, 400, NoteBodyRenderMode.TileFromTail, true, false);
+            Assert(partialTailTile == (0, 150), "A partial tail-anchored tile should begin at the texture origin without stretching.");
+            var partialHeadTile = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetTileSourceRange(
+                0, 15, 0, 95, 40, 400, NoteBodyRenderMode.TileFromHead, true, false);
+            Assert(partialHeadTile == (250, 150), "A head-anchored partial tile at the opposite end should crop the matching source pixels.");
+            var flippedTile = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetTileSourceRange(
+                15, 10, 0, 95, 40, 400, NoteBodyRenderMode.TileFromTail, true, true);
+            Assert(flippedTile == (150, 100), "A vertically flipped tile should crop the corresponding reversed source interval.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.MaxTileSegmentHeight(
+                35, 8, 0, 95, 40, NoteBodyRenderMode.TileFromTail, true) == 5,
+                "Hidden-fade segments should split at tile boundaries to avoid sampling across a repeat seam.");
+
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.BodyAnimationElapsedMs(
+                Nullscent.Rulesets.Mania.Objects.LongNoteState.Idle, 1200, 1000, 0, true,
+                HoldBodyAnimationReleaseMode.FreezeAtRelease) == 0,
+                "An idle hold body should remain on its first frame while the note approaches.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.BodyAnimationElapsedMs(
+                Nullscent.Rulesets.Mania.Objects.LongNoteState.Holding, 1200, 1000, 0, true,
+                HoldBodyAnimationReleaseMode.FreezeAtRelease) == 200,
+                "The body animation should advance from the successful head hit while holding.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.BodyAnimationElapsedMs(
+                Nullscent.Rulesets.Mania.Objects.LongNoteState.Broken, 1500, 1000, 1175, true,
+                HoldBodyAnimationReleaseMode.FreezeAtRelease) == 175,
+                "A broken hold body should freeze at the release time instead of following global song time.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.BodyAnimationElapsedMs(
+                Nullscent.Rulesets.Mania.Objects.LongNoteState.Finished, 1500, 1000, 1450, true,
+                HoldBodyAnimationReleaseMode.FreezeAtRelease) == 450,
+                "A successful release at the tail should also freeze its body animation at the actual release time.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.BodyAnimationElapsedMs(
+                Nullscent.Rulesets.Mania.Objects.LongNoteState.Broken, 1500, 1000, 1175, true,
+                HoldBodyAnimationReleaseMode.ResetToInitialFrame) == 0,
+                "The Lazer legacy profile should reset its body animation after release, matching LegacyBodyPiece.");
         }
 
         private static void TestCatalogReflectsAppliedColumnHoldColour()

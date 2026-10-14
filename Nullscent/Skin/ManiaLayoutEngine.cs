@@ -20,6 +20,7 @@ namespace Nullscent.Skin
         public required IReadOnlyList<SkinRect> Lanes { get; init; }
         public required SkinRect Playfield { get; init; }
         public required float ReceptorY { get; init; }
+        public required float ReceptorSpriteY { get; init; }
         public required float Scale { get; init; }
         public required float OffsetX { get; init; }
         public required float OffsetY { get; init; }
@@ -120,13 +121,20 @@ namespace Nullscent.Skin
             if (!downScroll)
                 logicalHit = DesignHeight - logicalHit;
 
+            float receptorY = offsetY + logicalHit * scale;
+            float receptorSpriteY = profile?.ReceptorAnchor == ReceptorAnchorMode.StageEdge
+                && overrides.ReceptorPositionRatio is null
+                    ? offsetY + (downScroll ? DesignHeight : 0f) * scale
+                    : receptorY;
+
             var playfield = new SkinRect(offsetX + left * scale, offsetY,
                 totalWidth * scale, DesignHeight * scale);
             return new ManiaLayoutResult
             {
                 Lanes = lanes,
                 Playfield = playfield,
-                ReceptorY = offsetY + logicalHit * scale,
+                ReceptorY = receptorY,
+                ReceptorSpriteY = receptorSpriteY,
                 Scale = scale,
                 OffsetX = offsetX,
                 OffsetY = offsetY,
@@ -137,8 +145,39 @@ namespace Nullscent.Skin
             };
         }
 
+        public static SkinRect GetStageSideRect(ManiaLayoutResult layout, float logicalTextureWidth,
+            bool isRight, ManiaStageStyleDefinition style)
+        {
+            float width = PositiveOr(logicalTextureWidth, 1f) * layout.Scale;
+            float height = layout.Playfield.Height * ScaleOr(style.SideHeightScale, 1f);
+            float x = isRight ? layout.Playfield.Right : layout.Playfield.X - width;
+            return new SkinRect(x, layout.Playfield.Y, width, height);
+        }
+
+        public static SkinRect GetStageHintRect(ManiaLayoutResult layout, float logicalTextureWidth,
+            float logicalTextureHeight, ManiaStageStyleDefinition style)
+        {
+            float width = layout.Playfield.Width;
+            float aspect = PositiveOr(logicalTextureHeight, 1f) / PositiveOr(logicalTextureWidth, 1f);
+            float height = width * aspect * ScaleOr(style.HintHeightScale, 0.9f);
+            return new SkinRect(layout.Playfield.X, layout.ReceptorY - height / 2f, width, height);
+        }
+
+        public static SkinRect GetStageBottomRect(ManiaLayoutResult layout, float logicalTextureWidth,
+            float logicalTextureHeight, bool downScroll, ManiaStageStyleDefinition style)
+        {
+            float scale = layout.Scale * ScaleOr(style.BottomScale, 1f);
+            float width = PositiveOr(logicalTextureWidth, 1f) * scale;
+            float height = PositiveOr(logicalTextureHeight, 1f) * scale;
+            float x = layout.Playfield.CenterX - width / 2f;
+            float y = downScroll ? layout.Playfield.Bottom - height : layout.Playfield.Y;
+            return new SkinRect(x, y, width, height);
+        }
+
         private static float ClampScale(float scale) => !float.IsFinite(scale) || scale <= 0 ? 1f : Math.Clamp(scale, 0.1f, 4f);
         private static float FiniteOr(float value, float fallback) => float.IsFinite(value) ? value : fallback;
         private static float PositiveOr(float value, float fallback) => float.IsFinite(value) && value > 0 ? value : fallback;
+        private static float ScaleOr(float value, float fallback) =>
+            float.IsFinite(value) && value > 0 ? Math.Clamp(value, 0.05f, 4f) : fallback;
     }
 }

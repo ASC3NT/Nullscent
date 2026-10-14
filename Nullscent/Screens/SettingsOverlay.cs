@@ -316,6 +316,19 @@ namespace Nullscent.Screens
             );
             _settingItems.Add(_skinSelector);
 
+            _settingItems.Add(OverlaySettingItem.CreateSelector(
+                "Legacy Skin Profile",
+                new[] { "osu!stable", "osu!lazer (experimental)" },
+                () => _settings.LegacySkinCompatibilityMode == LegacySkinCompatibilityMode.Lazer ? 1 : 0,
+                index =>
+                {
+                    if (index == 0)
+                        _game.SetLegacySkinCompatibilityMode(LegacySkinCompatibilityMode.Stable);
+                    else if (index == 1)
+                        _game.SetLegacySkinCompatibilityMode(LegacySkinCompatibilityMode.Lazer);
+                }
+            ));
+
             _settingItems.Add(OverlaySettingItem.CreateToggle(
                 "HD Skin Assets",
                 () => _settings.HighResolutionSkins ? "ON" : "OFF",

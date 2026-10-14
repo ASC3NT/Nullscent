@@ -37,6 +37,11 @@ namespace Nullscent.Audio
         public string SkinDirectory { get; set; } = string.Empty;
 
         /// <summary>
+        /// Si es true, permite usar la skin activa como fuente de hitsounds.
+        /// </summary>
+        public bool UseSkinHitsounds { get; set; } = true;
+
+        /// <summary>
         /// Si es true, ignora los hitsounds del mapa y usa siempre los de la skin.
         /// </summary>
         public bool OverrideMapHitsounds { get; set; } = false;
@@ -56,6 +61,7 @@ namespace Nullscent.Audio
             // Apply volume from settings
             _hitsoundVolume = Core.SettingsService.Instance.HitsoundVolume;
             OverrideMapHitsounds = Core.SettingsService.Instance.OverrideMapHitsounds;
+            UseSkinHitsounds = Core.SettingsService.Instance.UseSkinHitsounds;
 
             // Subscribe to settings changes
             Core.SettingsService.Instance.SettingChanged += OnSettingChanged;
@@ -79,25 +85,8 @@ namespace Nullscent.Audio
                 return existingSample;
 
             string fullPath = string.Empty;
-            var searchDirectories = new List<string>();
-
-            // Prioridades de directorios para hitsounds
-            if (OverrideMapHitsounds && !string.IsNullOrEmpty(SkinDirectory))
-            {
-                searchDirectories.Add(SkinDirectory);
-            }
-
-            if (!string.IsNullOrEmpty(BaseDirectory))
-            {
-                searchDirectories.Add(BaseDirectory);
-            }
-
-            if (!OverrideMapHitsounds && !string.IsNullOrEmpty(SkinDirectory))
-            {
-                searchDirectories.Add(SkinDirectory);
-            }
-
-            searchDirectories.Add(AppDomain.CurrentDomain.BaseDirectory);
+            string[] searchDirectories = BuildSearchDirectoryOrder(BaseDirectory, SkinDirectory,
+                AppDomain.CurrentDomain.BaseDirectory, UseSkinHitsounds, OverrideMapHitsounds);
 
             foreach (var dir in searchDirectories)
             {
@@ -248,6 +237,23 @@ namespace Nullscent.Audio
             Console.WriteLine("[HitSoundPlayer] Cache cleared");
         }
 
+        internal static string[] BuildSearchDirectoryOrder(string baseDirectory, string skinDirectory,
+            string applicationDirectory, bool useSkinHitsounds, bool overrideMapHitsounds)
+        {
+            var searchDirectories = new List<string>(3);
+
+            if (useSkinHitsounds && overrideMapHitsounds && !string.IsNullOrEmpty(skinDirectory))
+                searchDirectories.Add(skinDirectory);
+            if (!string.IsNullOrEmpty(baseDirectory))
+                searchDirectories.Add(baseDirectory);
+            if (useSkinHitsounds && !overrideMapHitsounds && !string.IsNullOrEmpty(skinDirectory))
+                searchDirectories.Add(skinDirectory);
+            if (!string.IsNullOrEmpty(applicationDirectory))
+                searchDirectories.Add(applicationDirectory);
+
+            return searchDirectories.ToArray();
+        }
+
         /// <summary>
         /// Libera todos los recursos.
         /// </summary>
@@ -284,6 +290,13 @@ namespace Nullscent.Audio
                 OverrideMapHitsounds = overrideHitsounds;
                 ClearCache();
                 Console.WriteLine($"[HitSoundPlayer] OverrideMapHitsounds changed to {overrideHitsounds}");
+            }
+
+            if (key == nameof(Core.SettingsService.Instance.UseSkinHitsounds) && value is bool useSkinHitsounds)
+            {
+                UseSkinHitsounds = useSkinHitsounds;
+                ClearCache();
+                Console.WriteLine($"[HitSoundPlayer] UseSkinHitsounds changed to {useSkinHitsounds}");
             }
         }
     }

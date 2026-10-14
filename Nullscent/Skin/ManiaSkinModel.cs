@@ -14,11 +14,39 @@ namespace Nullscent.Skin
         Emergency
     }
 
+    /// <summary>A persisted user choice for interpreting osu! legacy skin sources.</summary>
+    public enum LegacySkinCompatibilityMode
+    {
+        Stable,
+        Lazer
+    }
+
+    /// <summary>Records which interpretation produced a normalized skin definition.</summary>
+    public enum ManiaSkinCompatibilityProfile
+    {
+        StableLegacy,
+        LazerLegacy,
+        NullscentNative,
+        Emergency
+    }
+
+    public enum ReceptorAnchorMode
+    {
+        ReceptorLine,
+        StageEdge
+    }
+
     public enum NoteBodyRenderMode
     {
         Stretch,
         TileFromTail,
         TileFromHead
+    }
+
+    public enum HoldBodyAnimationReleaseMode
+    {
+        FreezeAtRelease,
+        ResetToInitialFrame
     }
 
     public enum SpriteHeightMode
@@ -39,6 +67,7 @@ namespace Nullscent.Skin
         public string Name { get; init; } = "Untitled";
         public string Author { get; init; } = string.Empty;
         public SkinProviderKind Provider { get; init; }
+        public ManiaSkinCompatibilityProfile CompatibilityProfile { get; init; } = ManiaSkinCompatibilityProfile.Emergency;
         public bool UsesStableLegacyUnits { get; init; }
         public double? LegacyVersion { get; init; }
         public float LegacyHudScale { get; init; } = 1f;
@@ -62,6 +91,8 @@ namespace Nullscent.Skin
         public float? ComboPosition { get; init; }
         public float? NoteHeightReferenceWidth { get; init; }
         public float DefaultHitPositionRatio { get; init; } = 0.86f;
+        public ReceptorAnchorMode ReceptorAnchor { get; init; } = ReceptorAnchorMode.ReceptorLine;
+        public HoldBodyAnimationReleaseMode BodyAnimationReleaseMode { get; init; } = HoldBodyAnimationReleaseMode.FreezeAtRelease;
         public bool KeysUnderNotes { get; init; }
         public bool JudgementLine { get; init; } = true;
         public bool ColumnLighting { get; init; } = true;
@@ -71,6 +102,7 @@ namespace Nullscent.Skin
         public bool? KeyFlipWhenUpsideDown { get; init; }
         public bool DrawColumnEdgesBothSides { get; init; } = true;
         public int LightFramesPerSecond { get; init; } = 60;
+        public int JudgementFramesPerSecond { get; init; } = 60;
         public float[] ColumnLineWidths { get; init; } = Array.Empty<float>();
         public bool[] ColumnLines { get; init; } = Array.Empty<bool>();
         public float[] LightingNoteWidths { get; init; } = Array.Empty<float>();
@@ -87,12 +119,26 @@ namespace Nullscent.Skin
         public SpriteStyleDefinition LongHeadStyle { get; init; } = new();
         public SpriteStyleDefinition LongBodyStyle { get; init; } = new();
         public SpriteStyleDefinition LongTailStyle { get; init; } = new();
+        public ManiaStageStyleDefinition StageStyle { get; init; } = new();
         public Dictionary<string, string?> StageAssets { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, string> JudgementAssets { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public string? LightingNoteAsset { get; init; }
         public string? LightingHoldAsset { get; init; }
         public Dictionary<string, bool> NoteFlips { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, bool> KeyFlips { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Normalized stage asset geometry. Texture dimensions provide the natural horizontal
+    /// size for side pieces and the aspect ratio for the hint; legacy adapters supply the
+    /// format-specific scale factors instead of making the renderer inspect the provider.
+    /// </summary>
+    public sealed class ManiaStageStyleDefinition
+    {
+        public static ManiaStageStyleDefinition Default { get; } = new();
+        public float SideHeightScale { get; init; } = 1f;
+        public float HintHeightScale { get; init; } = 0.9f;
+        public float BottomScale { get; init; } = 1f;
     }
 
     public sealed class ManiaLaneDefinition
@@ -146,7 +192,8 @@ namespace Nullscent.Skin
         public const float StableScale = 1.6f;
         public const float StableDesignHeight = 768f;
 
-        public static ManiaSkinDefinition Decode(SkinConfig config, string? id = null)
+        public static ManiaSkinDefinition Decode(SkinConfig config, string? id = null,
+            LegacySkinCompatibilityMode compatibilityMode = LegacySkinCompatibilityMode.Stable)
         {
             var modes = new Dictionary<int, ManiaKeymodeDefinition>();
             bool supportsBodyStyle = config.IsVersionAtLeast(2.5);
@@ -176,7 +223,7 @@ namespace Nullscent.Skin
                         LongBodyAsset = Value(source.NoteBodyImages, i),
                         LongTailAsset = Value(source.NoteTailImages, i),
                         BodyMode = supportsBodyStyle && source.NoteBodyStyles.TryGetValue(i, out int columnBodyMode)
-                            ? DecodeBodyMode(columnBodyMode) : null,
+                            ? DecodeBodyMode(columnBodyMode, compatibilityMode) : null,
                         LaneColor = SkinColor.FromLegacy(Value(source.ColumnColorsMap, i)),
                         LightColor = SkinColor.FromLegacy(Value(source.ColourLights, i)),
                         HoldColor = SkinColor.FromLegacy(Value(source.ColourHolds, i))
@@ -192,6 +239,7 @@ namespace Nullscent.Skin
                     KeyCount = keys,
                     Placement = "legacy",
                     Lanes = lanes,
+                    ReceptorAnchor = ReceptorAnchorMode.StageEdge,
                     ColumnStart = (source.ColumnStart ?? 136f) * StableScale,
                     ColumnRight = (source.ColumnRight ?? 19f) * StableScale,
                     HitPosition = (source.HitPosition ?? 402) * StableScale,
@@ -200,6 +248,9 @@ namespace Nullscent.Skin
                     ComboPosition = (source.ComboPosition ?? 111) * StableScale,
                     NoteHeightReferenceWidth = noteReference,
                     KeysUnderNotes = source.KeysUnderNotes,
+                    BodyAnimationReleaseMode = compatibilityMode == LegacySkinCompatibilityMode.Lazer
+                        ? HoldBodyAnimationReleaseMode.ResetToInitialFrame
+                        : HoldBodyAnimationReleaseMode.FreezeAtRelease,
                     JudgementLine = source.JudgementLine,
                     ColumnLighting = source.ColumnLighting,
                     UpsideDown = source.UpsideDown,
@@ -208,6 +259,9 @@ namespace Nullscent.Skin
                     KeyFlipWhenUpsideDown = supportsFlipOverrides ? source.KeyFlipWhenUpsideDown : null,
                     DrawColumnEdgesBothSides = config.IsVersionAtLeast(2.4),
                     LightFramesPerSecond = source.LightFramePerSecond,
+                    // Mania hit bursts have a fixed 60 FPS animation independent of
+                    // the general skin AnimationFramerate setting.
+                    JudgementFramesPerSecond = 60,
                     ColumnLineWidths = Expand(source.ColumnLineWidths, keys + 1, 2f).Select(v => v * StableScale).ToArray(),
                     ColumnLines = Expand(source.ColumnLines, keys + 1, true),
                     LightingNoteWidths = config.IsVersionAtLeast(2.5) ? source.LightingNWidths?.Select(v => v * StableScale).ToArray() ?? Array.Empty<float>() : Array.Empty<float>(),
@@ -224,7 +278,7 @@ namespace Nullscent.Skin
                     JudgementLineColor = SkinColor.FromLegacy(source.ColourJudgementLine),
                     HoldColor = SkinColor.FromLegacy(source.ColourHold),
                     BreakColor = SkinColor.FromLegacy(source.ColourBreak),
-                    BodyMode = DecodeBodyMode(supportsBodyStyle ? source.NoteBodyStyle : 1),
+                    BodyMode = DecodeBodyMode(supportsBodyStyle ? source.NoteBodyStyle : 1, compatibilityMode),
                     NoteStyle = new SpriteStyleDefinition
                     {
                         LaneWidthRatio = 1f,
@@ -235,6 +289,18 @@ namespace Nullscent.Skin
                     LongHeadStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.ReferenceWidthAspect, FramesPerSecond = 60 },
                     LongBodyStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.TextureAspect, FramesPerSecond = 30 },
                     LongTailStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.ReferenceWidthAspect, FramesPerSecond = 60 },
+                    // The wiki defines a 480px legacy stage canvas and says side pieces fit
+                    // stage height. The official legacy renderer applies 1.6 to StageBottom
+                    // and 0.9 * 1.6025 to the centered StageHint:
+                    // https://osu.ppy.sh/wiki/en/Skinning/osu%21mania#stage
+                    // https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyStageForeground.cs
+                    // https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyHitTarget.cs
+                    StageStyle = new ManiaStageStyleDefinition
+                    {
+                        SideHeightScale = 1f,
+                        HintHeightScale = 0.9f * 1.6025f,
+                        BottomScale = StableScale
+                    },
                     StageAssets = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["left"] = source.StageLeft, ["right"] = source.StageRight,
@@ -254,6 +320,9 @@ namespace Nullscent.Skin
                 Name = config.Name,
                 Author = config.Author,
                 Provider = SkinProviderKind.OsuLegacy,
+                CompatibilityProfile = compatibilityMode == LegacySkinCompatibilityMode.Lazer
+                    ? ManiaSkinCompatibilityProfile.LazerLegacy
+                    : ManiaSkinCompatibilityProfile.StableLegacy,
                 UsesStableLegacyUnits = true,
                 LegacyVersion = version,
                 LegacyHudScale = config.IsVersionAtLeast(2.4) ? 1f : StableScale,
@@ -264,12 +333,27 @@ namespace Nullscent.Skin
             };
         }
 
-        public static NoteBodyRenderMode DecodeBodyMode(int style) => style switch
+        public static NoteBodyRenderMode DecodeBodyMode(int style,
+            LegacySkinCompatibilityMode compatibilityMode = LegacySkinCompatibilityMode.Stable)
         {
-            0 => NoteBodyRenderMode.Stretch,
-            2 => NoteBodyRenderMode.TileFromHead,
-            _ => NoteBodyRenderMode.TileFromTail
-        };
+            if (compatibilityMode == LegacySkinCompatibilityMode.Lazer)
+            {
+                // Current lazer legacy rendering stretches style 0 and treats all other
+                // styles as repeats from one anchor. Its LegacyBodyPiece anchors that
+                // repeated texture at the tail side for either scroll direction, so style
+                // 1 and 2 intentionally collapse to the same normalized mode here.
+                return style == 0 ? NoteBodyRenderMode.Stretch : NoteBodyRenderMode.TileFromTail;
+            }
+
+            // Stable/wiki legacy contract: 0 stretches, 1 repeats from the tail,
+            // and 2 repeats from the head.
+            return style switch
+            {
+                0 => NoteBodyRenderMode.Stretch,
+                2 => NoteBodyRenderMode.TileFromHead,
+                _ => NoteBodyRenderMode.TileFromTail
+            };
+        }
 
         private static T? Value<T>(Dictionary<int, T> values, int index) => values.TryGetValue(index, out T? value) ? value : default;
         private static float Read(float[]? values, int index, float fallback) =>

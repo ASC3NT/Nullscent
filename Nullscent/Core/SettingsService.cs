@@ -3,6 +3,7 @@
 using System;
 using System.ComponentModel;
 using Nullscent.Config;
+using Nullscent.Skin;
 
 namespace Nullscent.Core
 {
@@ -244,6 +245,20 @@ namespace Nullscent.Core
             }
         }
 
+        public LegacySkinCompatibilityMode LegacySkinCompatibilityMode
+        {
+            get => Settings.LegacySkinCompatibilityMode;
+            set
+            {
+                if (Settings.LegacySkinCompatibilityMode != value)
+                {
+                    Settings.LegacySkinCompatibilityMode = value;
+                    RaisePropertyChanged(nameof(LegacySkinCompatibilityMode));
+                    RaiseSettingChanged(nameof(LegacySkinCompatibilityMode), value);
+                }
+            }
+        }
+
         public float SkinNoteHeightScale
         {
             get => Settings.SkinNoteHeightScale;
@@ -282,6 +297,20 @@ namespace Nullscent.Core
                     Settings.OverrideMapHitsounds = value;
                     RaisePropertyChanged(nameof(OverrideMapHitsounds));
                     RaiseSettingChanged(nameof(OverrideMapHitsounds), value);
+                }
+            }
+        }
+
+        public bool UseSkinHitsounds
+        {
+            get => Settings.UseSkinHitsounds;
+            set
+            {
+                if (Settings.UseSkinHitsounds != value)
+                {
+                    Settings.UseSkinHitsounds = value;
+                    RaisePropertyChanged(nameof(UseSkinHitsounds));
+                    RaiseSettingChanged(nameof(UseSkinHitsounds), value);
                 }
             }
         }

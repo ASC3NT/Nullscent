@@ -72,7 +72,7 @@ bar-hold-body.png
 bar-hold-tail.png
 ```
 
-`formatVersion` is currently `1`. The manifest contains `id`, `name`, `author`, and a `keymodes` object keyed by key count. Every keymode declares its `keyCount`, `placement`, optional hit position, column line settings, shared sprite styles, stage/lighting names, and a `lanes` array with one record per column.
+`formatVersion` is currently `1`. The manifest contains `id`, `name`, `author`, and a `keymodes` object keyed by key count. Every keymode declares its `keyCount`, `placement`, optional hit position, column line settings, shared sprite styles, stage/lighting names, optional `stageStyle`, and a `lanes` array with one record per column. `stageStyle` independently controls `sideHeightScale`, `hintHeightScale`, and `bottomScale`; omitted values keep native defaults.
 
 Sprite styles can set `asset`, `pressedAsset`, `laneWidthRatio`, `heightMode`, `heightValue`, offsets, and `framesPerSecond`. `heightMode` is `TextureAspect`, `ReferenceWidthAspect`, or `LaneWidthFraction`. Lane definitions independently support width, following gap, note/receptor/body width ratios, per-piece asset overrides, body mode, and lane/light/hold colors. JSON enums are case-insensitive.
 
@@ -101,6 +101,14 @@ The adapter uses the `skin.ini` version contract:
 
 Each `[Mania]` section is keyed by `Keys`. Extra list entries are ignored and missing entries use format defaults. The adapter emits profiles for the keycounts supported by conventional names even if the folder has no explicit `Keys` section.
 
+### Compatibility profile
+
+`SkinProviderKind` records the source (osu! legacy, Nullscent native, or emergency); `ManiaSkinCompatibilityProfile` records the interpretation used to normalize that source. The persistent `LegacySkinCompatibilityMode` defaults to `Stable` and is consulted only for osu! legacy folders. Changing it rebuilds the selected legacy skin transactionally. Native manifests keep `NullscentNative` semantics and appearance under either setting.
+
+The legacy LN body animation clock is normalized into the keymode model. It stays at its initial frame before the head is hit, advances from the hit time while held, and follows a per-profile release policy. Stable uses `FreezeAtRelease` after either a successful tail release or an early break, interpreting the wiki's “stops if released” contract as holding the current frame; the wiki does not specify cursor reset details, so this is the conservative policy rather than a claim of exact Stable internals. Lazer uses `ResetToInitialFrame`, matching the current `LegacyBodyPiece.Update()` behavior in the local osu! checkout. This Lazer subset remains experimental.
+
+Mania judgement sprites (`mania-hit0`, `mania-hit50`, `mania-hit100`, `mania-hit200`, `mania-hit300`, `mania-hit300g`) use their documented fixed 60 FPS looping animation. The general `AnimationFramerate` value does not control them.
+
 ### Legacy property status
 
 `SUPPORTED` means the property reaches an active renderer/layout consumer. `ADAPTED` means it is applied using a documented Nullscent policy where exact Stable semantics are not established. `IGNORED BY DESIGN` means it is parsed for useful diagnostics but the corresponding feature is not part of this renderer. `UNSUPPORTED` means no usable normalized behavior exists.
@@ -114,18 +122,18 @@ Each `[Mania]` section is keyed by `Keys`. Extra list entries are ignored and mi
 | `WidthForNoteHeightScale` | SUPPORTED | Sets note/head/tail height reference; absent uses the narrowest lane. |
 | `JudgementLine`, `KeysUnderNotes`, `ColumnLighting` | SUPPORTED | Reach judgement line visibility, receptor/note ordering, and column light state. |
 | `NoteImage#`, `NoteImage#H/#L/#T`, `KeyImage#`, `KeyImage#D` | SUPPORTED | Resolve per-column assets; absent LN tail may reuse the head. Missing active-skin assets fall back to built-in assets. |
-| `NoteBodyStyle`, `NoteBodyStyle#` | ADAPTED | `0` stretch, `1` tile from tail, `2` tile from head; recognized textual aliases normalize to the same enum. Applied for version 2.5+. |
+| `NoteBodyStyle`, `NoteBodyStyle#` | ADAPTED | Stable `0` stretches, `1` tiles from tail to head, `2` from head to tail; recognized textual aliases normalize to the same enum. Applied for version 2.5+. The Lazer profile collapses all non-stretch styles to one repeat mode to reflect its current shared legacy branch, not as the Stable contract. |
 | `NoteFlipWhenUpsideDown[#][H/L/T]`, `KeyFlipWhenUpsideDown[#][D]` | SUPPORTED | Global, column, note-piece, and pressed-key rules normalize to profile maps; only active for version 2.5+. |
 | `UpsideDown` | ADAPTED | A skin orientation preference; it controls scroll only while the user has enabled “Use Skin Scroll Direction”. Explicit user choice wins. |
 | `Colour#`, `ColourLight#`, `ColourHold#`, `ColourHold`, `ColourBreak`, `ColourJudgementLine`, `ColourColumnLine` | SUPPORTED | Alpha is preserved; hold/light/lane colors feed their intended consumers. |
-| `StageLeft`, `StageRight`, `StageBottom`, `StageHint`, `StageLight`, `LightingN`, `LightingL`, `LightFramePerSecond`, `LightingNWidth`, `LightingLWidth` | SUPPORTED | Stage and lighting assets resolve through the same provider-aware animation system. `LightFramePerSecond` is used by `StageLight`. |
+| `StageLeft`, `StageRight`, `StageBottom`, `StageHint`, `StageLight`, `LightingN`, `LightingL`, `LightFramePerSecond`, `LightingNWidth`, `LightingLWidth` | SUPPORTED | Stage geometry is normalized separately from lanes and assets; `LightFramePerSecond` controls `StageLight`. Legacy side pieces fit the stage height, `StageBottom` uses the legacy 1.6 scale and scroll-edge anchor, and `StageHint` spans the stage and centers on the judgement line. |
 | `SpecialStyle` | IGNORED BY DESIGN | Parser retains it for reporting; Nullscent does not implement split-stage/special-column layout. |
 | `BarlineHeight`, `ColourBarline` | IGNORED BY DESIGN | Parser retains them for reporting; no barline renderer exists yet. |
 | `SplitStages`, `StageSeparation`, `SeparateScore`, `WarningArrow`, `ColourKeyWarning` | UNSUPPORTED | Not converted to a renderer feature. The catalog reports unsupported legacy entries it detects. |
 
 `NoteBodyStyle` string aliases currently accepted are `stretch`; `repeatbottom`, `repeat-bottom`, `bottom`, `tilefromtail`, `tile-from-tail`; and `repeattop`, `repeat-top`, `top`, `tilefromhead`, `tile-from-head`.
 
-The two tile directions are anchored to opposite ends of the visible body and crop partial end tiles. Stretch maps the whole source image over the body. This implementation supports the documented direction distinction while retaining Nullscent's own clipping and logical-size rules; it does not claim exact reproduction of every Stable-version edge case. Lazer's legacy body implementation was used as a structural reference, not copied, and known lazer regressions were not treated as the Stable contract.
+The normalized tile modes name the semantic anchor: the note head is the hold start, and the tail is its end. Downscroll places the tail at the upper edge and head at the lower edge; upscroll mirrors those positions. `TileFromTail` therefore starts at the upper edge in downscroll and the lower edge in upscroll. `TileFromHead` uses the opposite edge. Partial end tiles crop the matching source rows instead of stretching them. Stretch maps the whole source image over the body. The direction mapping is covered by geometry tests for both scroll directions. The mapping follows the published Stable behavior, not the known current Lazer regression where style 1 and 2 do not retain distinct directions.
 
 ## Assets, `@2x`, and fallbacks
 
@@ -158,7 +166,7 @@ The local lazer source uses an effect-lifetime based frame length for hit lighti
 
 The current playfield order is:
 
-1. Stage background and lane backgrounds.
+1. Stage background and side pieces, then lane backgrounds/lines and the centered hit target.
 2. Stage/column light behind notes.
 3. Notes and receptors in the order selected by `KeysUnderNotes`.
 4. `StageBottom` over the lane pass.
@@ -166,7 +174,7 @@ The current playfield order is:
 6. Legacy judgement/combo display.
 7. Foreground hit explosions and active LN lighting.
 
-`StageLeft` and `StageRight` are side pieces sized from their logical texture aspect; `StageBottom` and `StageHint` have distinct draw paths. The stage does not define note lane geometry. Nullscent score/accuracy/progress UI remains engine UI; legacy score/combo positions and skin digit assets feed the legacy presentation path where present.
+`StageLeft` and `StageRight` keep their logical texture width and fit the stage height. `StageHint` fits the full playfield width and uses a normalized vertical multiplier centered at `ReceptorY`. `StageBottom` keeps its logical pixel dimensions, applies the normalized scale, and anchors to the bottom for downscroll or top for upscroll; it is drawn over the notes. Native manifests can tune the three scales through `stageStyle`. Legacy normalization uses the 1.6 conversion for its 480-high art and the osu! legacy hit-target multiplier `0.9 * 1.6025`; the latter is taken from osu!'s current legacy implementation because the wiki describes the centered, full-width contract but does not publish that vertical factor. Nullscent score/accuracy/progress UI remains engine UI; legacy score/combo positions and skin digit assets feed the legacy presentation path where present.
 
 ## User preferences and precedence
 
@@ -174,6 +182,8 @@ The current playfield order is:
 * Scroll direction: when `UseSkinScrollDirection` is on and the skin defines `UpsideDown`, `0` means downscroll and `1` means upscroll. Otherwise retain the saved user `DownScroll`. Toggling `Down Scroll` sets an explicit user direction and disables following the skin.
 * Note height and receptor height are independent settings. They are passed through the layout result to drawables; neither changes lane width.
 * Skin files are not mutated to apply user preferences.
+
+Hitsound source selection remains independent from visual asset resolution. `UseSkinHitsounds` controls whether the active skin directory participates; `OverrideMapHitsounds` chooses whether that directory precedes beatmap samples or follows them. If skin hitsounds are disabled, map samples remain first even when override is enabled. The application sound directory remains the final fallback, and skin changes or either setting change clear the sample cache.
 
 ## Validation states and diagnostics
 
@@ -187,7 +197,7 @@ The current catalog marks properties by actual adapter/consumer status, not by p
 
 `Skin/Aristia Refreshed` is a local-only third-party regression fixture copied from the user's osu! installation. It exercises multiple Mania sections, asymmetric per-column values, legacy stage pieces, `@2x`, and missing LN-tail fallback. `Skin/` is ignored by Git; do not distribute this fixture. It is not a named-skin branch or product dependency.
 
-The DEBUG-only harness is `SkinVisualSmokeGame`, invoked by `--skin-visual-smoke`, `--skin-visual-switch-smoke`, and `--skin-visual-resize-smoke`. It accepts arbitrary skin paths, keycounts, resolutions, up/downscroll, controlled chords and LN patterns. It is excluded from Release by `#if DEBUG`. Representative final outputs are written under `bin/Debug/net8.0-windows/Screenshots/skinning-v2-final/`.
+The DEBUG-only harness is `SkinVisualSmokeGame`, invoked by `--skin-visual-smoke`, `--skin-visual-switch-smoke`, `--skin-visual-profile-smoke`, and `--skin-visual-resize-smoke`. It accepts arbitrary skin paths, keycounts, resolutions, up/downscroll, controlled chords and LN patterns. The profile smoke captures a legacy skin before and after calling the same `SkinManager.TrySetLegacyCompatibilityMode()` transaction used by the game, with an in-memory persistence callback. It is excluded from Release by `#if DEBUG`. Representative outputs are written under `bin/Debug/net8.0-windows/Screenshots/skinning-v2-final/`.
 
 ## Adding a fourth skin
 
@@ -202,6 +212,8 @@ The DEBUG-only harness is `SkinVisualSmokeGame`, invoked by `--skin-visual-smoke
 ## References and limits
 
 * Official [osu! skin.ini wiki](https://osu.ppy.sh/wiki/en/Skinning/skin.ini): version defaults, 480-pixel Mania coordinate reference, missing/extra list rules, `NoteBodyStyle`, and animation exceptions.
+* Official [osu!mania skinning wiki](https://osu.ppy.sh/wiki/en/Skinning/osu!mania): note origins, per-column width scaling, long-note pieces, stage layering, lighting blend mode, and animation contracts.
+* Official osu! issue [#35502: `NoteBodyStyle` setting broken in mania](https://github.com/ppy/osu/issues/35502): documents Stable's three body styles and the current Lazer direction regression.
 * Official [blank skin.ini template](https://osu.ppy.sh/wiki/en/Skinning/skin.ini/Blank): property sections and accepted legacy field names.
 * osu!Lazer source, local read-only checkout: `osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyBodyPiece.cs`, `LegacyColumnBackground.cs`, `LegacyHitExplosion.cs`, `LegacyNotePiece.cs`, `ManiaLegacySkinTransformer.cs`, and `osu.Game/Skinning/LegacyManiaSkinDecoder.cs`. Used to follow asset selection, StageLight FPS, layer ownership, and LN animation structure. No source files were copied into Nullscent.
 * osu!Lazer PR [#22389](https://github.com/ppy/osu/pull/22389): reference for decoding oversized images on CPU before GPU upload. Nullscent uses its own MonoGame resolver/downscale implementation.

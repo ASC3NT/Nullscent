@@ -128,8 +128,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
 
             // Obtener texturas de cabeza y cola para calcular su altura real
-            ResolvedManiaLane? resolvedLane = skinManager != null && columnIndex >= 0 && columnIndex < skinManager.GetResolvedKeymode(keyCount).Lanes.Count
-                ? skinManager.GetResolvedKeymode(keyCount).Lanes[columnIndex] : null;
+            ResolvedManiaKeymode? resolvedMode = skinManager?.GetResolvedKeymode(keyCount);
+            ResolvedManiaLane? resolvedLane = resolvedMode != null && columnIndex >= 0 && columnIndex < resolvedMode.Lanes.Count
+                ? resolvedMode.Lanes[columnIndex] : null;
             ResolvedSkinAnimation? headAnimation = resolvedLane?.LongHead;
             ResolvedSkinAnimation? tailAnimation = resolvedLane?.LongTail;
             Texture2D? headTexture = headAnimation?.FrameAt(currentTime);
@@ -225,8 +226,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             if (bodyHeight > 0)
             {
                 ResolvedSkinAnimation? bodyAnimation = resolvedLane?.LongBody;
-                double animationTime = _longNote.State == LongNoteState.Holding
-                    ? Math.Max(0, currentTime - _longNote.HeadHitTime) : currentTime;
+                double animationTime = LongNoteRenderRules.BodyAnimationElapsedMs(_longNote.State, currentTime,
+                    _longNote.HeadHitTime, _longNote.TailReleaseTime, _longNote.HeadResult != HitResult.Miss,
+                    resolvedMode?.Definition.BodyAnimationReleaseMode ?? HoldBodyAnimationReleaseMode.FreezeAtRelease);
                 Texture2D? bodyTexture = bodyAnimation?.FrameAt(animationTime);
                 if (bodyTexture != null)
                 {
@@ -234,7 +236,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                     if (totalLNHeight > 0)
                     {
                         double stateAlphaMult = (_longNote.State == LongNoteState.Broken) ? 0.5 : 1.0;
-                        int bodyStyle = skinManager?.GetNoteBodyStyle(keyCount, columnIndex) ?? 1;
+                        NoteBodyRenderMode bodyMode = skinManager?.GetNoteBodyMode(keyCount, columnIndex)
+                            ?? NoteBodyRenderMode.TileFromTail;
                         bool flipBody = skinManager!.FlipNote(keyCount, columnIndex, "L", downScroll);
 
                         Vector2 bodySize = skinManager!.GetLogicalSize(bodyTexture);
@@ -243,24 +246,26 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                         // the original legacy image dimensions.
                         int blockH = (int)MathF.Round(bodySize.Y * (bodyWidth / bodySize.X) * noteHeightScale);
                         if (blockH <= 0) blockH = 1;
-                        float sourcePixelsPerDisplayPixel = (float)bodyTexture.Height / blockH;
-
                         Color holdColor = Color.White;
 
                         if (IsHiddenActive)
                         {
                             int segmentHeight = 8;
-                            for (int currY = clampedTopY; currY < clampedBottomY; currY += segmentHeight)
+                            for (int currY = clampedTopY; currY < clampedBottomY;)
                             {
                                 int h = Math.Min(segmentHeight, clampedBottomY - currY);
+                                if (bodyMode != NoteBodyRenderMode.Stretch)
+                                    h = LongNoteRenderRules.MaxTileSegmentHeight(currY, h, topY, bottomY, blockH, bodyMode, downScroll);
                                 double bodyAlpha = GetHiddenAlpha(currY + h / 2, downScroll, receptorY, screenHeight, CurrentCombo) * stateAlphaMult;
-                                if (bodyAlpha <= 0.0) continue;
-
-                                var bodyRect = new Rectangle(bodyX, currY, (int)MathF.Round(bodyWidth), h);
-                                SpriteEffects effects;
-                                Rectangle srcRect = GetSourceRectForSegment(currY, h, topY, bottomY, totalLNHeight, bodyStyle, bodyTexture, sourcePixelsPerDisplayPixel, blockH, downScroll, flipBody, out effects);
-
-                                spriteBatch.Draw(bodyTexture, bodyRect, srcRect, holdColor * (float)bodyAlpha, 0f, Vector2.Zero, effects, 0f);
+                                if (bodyAlpha > 0.0)
+                                {
+                                    var bodyRect = new Rectangle(bodyX, currY, (int)MathF.Round(bodyWidth), h);
+                                    Rectangle srcRect = GetSourceRectForSegment(currY, h, topY, bottomY,
+                                        bodyMode, bodyTexture, blockH, downScroll, flipBody, out SpriteEffects effects);
+                                    spriteBatch.Draw(bodyTexture, bodyRect, srcRect, holdColor * (float)bodyAlpha,
+                                        0f, Vector2.Zero, effects, 0f);
+                                }
+                                currY += h;
                             }
                         }
                         else
@@ -268,136 +273,33 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             double bodyAlpha = GetHiddenAlpha((clampedTopY + clampedBottomY) / 2, downScroll, receptorY, screenHeight, CurrentCombo) * stateAlphaMult;
                             if (bodyAlpha > 0.0)
                             {
-                                if (bodyStyle == 0) // Stretch
+                                if (bodyMode == NoteBodyRenderMode.Stretch)
                                 {
                                     var bodyRect = new Rectangle(bodyX, clampedTopY, (int)MathF.Round(bodyWidth), bodyHeight);
                                     var srcRect = GetSourceRectForSegment(clampedTopY, bodyHeight, topY, bottomY,
-                                        totalLNHeight, bodyStyle, bodyTexture, sourcePixelsPerDisplayPixel, blockH,
+                                        bodyMode, bodyTexture, blockH,
                                         downScroll, flipBody, out SpriteEffects effects);
                                     spriteBatch.Draw(bodyTexture, bodyRect, srcRect, holdColor * (float)bodyAlpha,
                                         0f, Vector2.Zero, effects, 0f);
                                 }
-                                else // Tiled (style 1 or 2)
+                                else
                                 {
-                                    bool tileFromTail = (bodyStyle == 1);
-
-                                    if (downScroll)
+                                    int tileCount = (totalLNHeight + blockH - 1) / blockH;
+                                    int drawWidth = Math.Max(1, (int)MathF.Round(bodyWidth));
+                                    for (int tileIndex = 0; tileIndex < tileCount; tileIndex++)
                                     {
-                                        if (tileFromTail)
-                                        {
-                                            for (int currY = bodyTopY; currY < bodyBottomY; currY += blockH)
-                                            {
-                                                int drawH = Math.Min(blockH, bodyBottomY - currY);
-                                                int drawY = currY;
+                                        int tileOriginY = LongNoteRenderRules.TileOriginY(topY, bottomY, blockH,
+                                            bodyMode, downScroll, tileIndex);
+                                        int drawY = Math.Max(clampedTopY, tileOriginY);
+                                        int drawBottomY = Math.Min(clampedBottomY, tileOriginY + blockH);
+                                        int drawH = drawBottomY - drawY;
+                                        if (drawH <= 0) continue;
 
-                                                if (drawY + drawH < clampedTopY || drawY > clampedBottomY)
-                                                    continue;
-
-                                                int finalY = Math.Max(clampedTopY, drawY);
-                                                int finalH = Math.Min(clampedBottomY, drawY + drawH) - finalY;
-                                                if (finalH <= 0) continue;
-
-                                                int cropTop = finalY - drawY;
-                                                int cropBottom = (drawY + drawH) - (finalY + finalH);
-
-                                                int srcY = (int)(cropTop * sourcePixelsPerDisplayPixel);
-                                                int srcH = (int)MathF.Ceiling(finalH * sourcePixelsPerDisplayPixel);
-                                                srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
-                                                srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
-
-                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
-                                                var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
-                                                spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            for (int currY = bodyBottomY; currY > bodyTopY; currY -= blockH)
-                                            {
-                                                int drawH = Math.Min(blockH, currY - bodyTopY);
-                                                int drawY = currY - drawH;
-
-                                                if (drawY + drawH < clampedTopY || drawY > clampedBottomY)
-                                                    continue;
-
-                                                int finalY = Math.Max(clampedTopY, drawY);
-                                                int finalH = Math.Min(clampedBottomY, drawY + drawH) - finalY;
-                                                if (finalH <= 0) continue;
-
-                                                int cropTop = finalY - drawY;
-                                                int cropBottom = (drawY + drawH) - (finalY + finalH);
-
-                                                int srcY = (int)(cropBottom * sourcePixelsPerDisplayPixel);
-                                                int srcH = (int)MathF.Ceiling(finalH * sourcePixelsPerDisplayPixel);
-                                                srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
-                                                srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
-
-                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
-                                                var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
-                                                spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha);
-                                            }
-                                        }
-                                    }
-                                    else // upScroll
-                                    {
-                                        if (tileFromTail)
-                                        {
-                                            for (int currY = bodyBottomY; currY > bodyTopY; currY -= blockH)
-                                            {
-                                                int drawH = Math.Min(blockH, currY - bodyTopY);
-                                                int drawY = currY - drawH;
-
-                                                if (drawY + drawH < clampedTopY || drawY > clampedBottomY)
-                                                    continue;
-
-                                                int finalY = Math.Max(clampedTopY, drawY);
-                                                int finalH = Math.Min(clampedBottomY, drawY + drawH) - finalY;
-                                                if (finalH <= 0) continue;
-
-                                                int cropTop = finalY - drawY;
-                                                int cropBottom = (drawY + drawH) - (finalY + finalH);
-
-                                                int srcY = flipBody
-                                                    ? (int)(cropBottom * sourcePixelsPerDisplayPixel)
-                                                    : bodyTexture.Height - (int)MathF.Ceiling((cropBottom + finalH) * sourcePixelsPerDisplayPixel);
-                                                int srcH = (int)MathF.Ceiling(finalH * sourcePixelsPerDisplayPixel);
-                                                srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
-                                                srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
-
-                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
-                                                var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
-                                                spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha,
-                                                    0f, Vector2.Zero, flipBody ? SpriteEffects.FlipVertically : SpriteEffects.None, 0f);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            for (int currY = bodyTopY; currY < bodyBottomY; currY += blockH)
-                                            {
-                                                int drawH = Math.Min(blockH, bodyBottomY - currY);
-                                                int drawY = currY;
-
-                                                if (drawY + drawH < clampedTopY || drawY > clampedBottomY)
-                                                    continue;
-
-                                                int finalY = Math.Max(clampedTopY, drawY);
-                                                int finalH = Math.Min(clampedBottomY, drawY + drawH) - finalY;
-                                                if (finalH <= 0) continue;
-
-                                                int cropTop = finalY - drawY;
-                                                int cropBottom = (drawY + drawH) - (finalY + finalH);
-
-                                                int srcY = (int)(cropTop * sourcePixelsPerDisplayPixel);
-                                                int srcH = (int)MathF.Ceiling(finalH * sourcePixelsPerDisplayPixel);
-                                                srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
-                                                srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
-
-                                                var blockRect = new Rectangle(bodyX, finalY, (int)MathF.Round(bodyWidth), finalH);
-                                                var srcRectBlock = new Rectangle(0, srcY, bodyTexture.Width, srcH);
-                                                spriteBatch.Draw(bodyTexture, blockRect, srcRectBlock, holdColor * (float)bodyAlpha,
-                                                    0f, Vector2.Zero, flipBody ? SpriteEffects.FlipVertically : SpriteEffects.None, 0f);
-                                            }
-                                        }
+                                        Rectangle srcRect = GetSourceRectForSegment(drawY, drawH, topY, bottomY,
+                                            bodyMode, bodyTexture, blockH, downScroll, flipBody, out SpriteEffects effects);
+                                        var tileRect = new Rectangle(bodyX, drawY, drawWidth, drawH);
+                                        spriteBatch.Draw(bodyTexture, tileRect, srcRect, holdColor * (float)bodyAlpha,
+                                            0f, Vector2.Zero, effects, 0f);
                                     }
                                 }
                             }
@@ -610,78 +512,32 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             return (HitResult)average;
         }
 
-        private Rectangle GetSourceRectForSegment(int currY, int h, int bodyTopY, int bodyBottomY, int totalLNHeight, int bodyStyle, Texture2D bodyTexture, float sourcePixelsPerDisplayPixel, int blockH, bool downScroll, bool flipBody, out SpriteEffects effects)
+        private Rectangle GetSourceRectForSegment(int currY, int h, int bodyTopY, int bodyBottomY,
+            NoteBodyRenderMode bodyMode, Texture2D bodyTexture, int blockH, bool downScroll,
+            bool flipBody, out SpriteEffects effects)
         {
             effects = flipBody ? SpriteEffects.FlipVertically : SpriteEffects.None;
 
-            if (totalLNHeight <= 0)
+            int totalLNHeight = bodyBottomY - bodyTopY;
+            if (totalLNHeight <= 0 || h <= 0)
                 return new Rectangle(0, 0, bodyTexture.Width, bodyTexture.Height);
 
-            if (bodyStyle == 0) // Stretch
+            if (bodyMode == NoteBodyRenderMode.Stretch)
             {
-                if (!flipBody)
-                {
-                    float startPct = (float)(currY - bodyTopY) / totalLNHeight;
-                    float endPct = (float)(currY + h - bodyTopY) / totalLNHeight;
-                    
-                    int srcY = (int)(startPct * bodyTexture.Height);
-                    int srcH = (int)((endPct - startPct) * bodyTexture.Height);
-                    srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
-                    srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
-                    return new Rectangle(0, srcY, bodyTexture.Width, srcH);
-                }
-                else // upscroll (flipped)
-                {
-                    float startPct = (float)(bodyBottomY - (currY + h)) / totalLNHeight;
-                    float endPct = (float)(bodyBottomY - currY) / totalLNHeight;
-                    
-                    int srcY = (int)(startPct * bodyTexture.Height);
-                    int srcH = (int)((endPct - startPct) * bodyTexture.Height);
-                    srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
-                    srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
-                    return new Rectangle(0, srcY, bodyTexture.Width, srcH);
-                }
+                int displaySourceY = flipBody
+                    ? bodyBottomY - (currY + h)
+                    : currY - bodyTopY;
+                double sourcePixelsPerDisplayPixel = bodyTexture.Height / (double)totalLNHeight;
+                int stretchSourceY = (int)Math.Floor(displaySourceY * sourcePixelsPerDisplayPixel);
+                int stretchSourceBottom = (int)Math.Ceiling((displaySourceY + h) * sourcePixelsPerDisplayPixel);
+                stretchSourceY = Math.Clamp(stretchSourceY, 0, bodyTexture.Height - 1);
+                stretchSourceBottom = Math.Clamp(stretchSourceBottom, stretchSourceY + 1, bodyTexture.Height);
+                return new Rectangle(0, stretchSourceY, bodyTexture.Width, stretchSourceBottom - stretchSourceY);
             }
-            else // Tiled (1 or 2)
-            {
-                bool tileFromTail = (bodyStyle == 1);
-                int srcY;
-                
-                if (downScroll)
-                {
-                    if (tileFromTail)
-                    {
-                        int offsetY = Math.Max(0, currY - bodyTopY);
-                        srcY = (int)((offsetY % blockH) * sourcePixelsPerDisplayPixel);
-                    }
-                    else // tile from head
-                    {
-                        int offsetY = Math.Max(0, bodyBottomY - (currY + h));
-                        srcY = (int)((offsetY % blockH) * sourcePixelsPerDisplayPixel);
-                    }
-                }
-                else // upscroll
-                {
-                    if (tileFromTail)
-                    {
-                        int offsetY = Math.Max(0, bodyBottomY - (currY + h));
-                        srcY = flipBody
-                            ? (int)((offsetY % blockH) * sourcePixelsPerDisplayPixel)
-                            : bodyTexture.Height - (int)MathF.Ceiling(((offsetY % blockH) + h) * sourcePixelsPerDisplayPixel);
-                    }
-                    else // tile from head
-                    {
-                        int offsetY = Math.Max(0, currY - bodyTopY);
-                        int offsetInBlock = offsetY % blockH;
-                        srcY = (int)((flipBody ? blockH - offsetInBlock - h : offsetInBlock) * sourcePixelsPerDisplayPixel);
-                    }
-                }
 
-                int srcH = (int)(h * sourcePixelsPerDisplayPixel);
-                srcY = Math.Clamp(srcY, 0, bodyTexture.Height - 1);
-                srcH = Math.Clamp(srcH, 1, bodyTexture.Height - srcY);
-                return new Rectangle(0, srcY, bodyTexture.Width, srcH);
-            }
+            (int tileSourceY, int sourceHeight) = LongNoteRenderRules.GetTileSourceRange(currY, h,
+                bodyTopY, bodyBottomY, blockH, bodyTexture.Height, bodyMode, downScroll, flipBody);
+            return new Rectangle(0, tileSourceY, bodyTexture.Width, sourceHeight);
         }
     }
 }

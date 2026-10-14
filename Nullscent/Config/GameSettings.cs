@@ -3,6 +3,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using Nullscent.Skin;
 
 namespace Nullscent.Config
 {
@@ -158,6 +159,9 @@ namespace Nullscent.Config
         /// Multiplicador de escala de altura para los receptores en la skin (0.5 - 2.0).
         /// </summary>
         public float SkinReceptorHeightScale { get; set; } = 1.0f;
+
+        /// <summary>Interpretation used for osu! legacy skins. Native skins are unaffected.</summary>
+        public LegacySkinCompatibilityMode LegacySkinCompatibilityMode { get; set; } = Nullscent.Skin.LegacySkinCompatibilityMode.Stable;
 
         /// <summary>
         /// Indica si los hitsounds de la skin sobrescriben a los del beatmap.
@@ -365,6 +369,8 @@ namespace Nullscent.Config
             NoteSpeedMultiplier = Math.Clamp(NoteSpeedMultiplier, 0.5f, 2.0f);
             MouseSensitivity = Math.Clamp(MouseSensitivity, 0.1f, 3.0f);
             CursorSize = Math.Clamp(CursorSize, 0.5f, 2.0f);
+            if (!Enum.IsDefined(LegacySkinCompatibilityMode))
+                LegacySkinCompatibilityMode = Nullscent.Skin.LegacySkinCompatibilityMode.Stable;
         }
 
         /// <summary>
@@ -383,6 +389,7 @@ namespace Nullscent.Config
             ReceptorPosition = defaults.ReceptorPosition;
             UseSkinReceptorPosition = defaults.UseSkinReceptorPosition;
             UseSkinScrollDirection = defaults.UseSkinScrollDirection;
+            LegacySkinCompatibilityMode = defaults.LegacySkinCompatibilityMode;
             DownScroll = defaults.DownScroll;
             HealthDrainEnabled = defaults.HealthDrainEnabled;
             WindowWidth = defaults.WindowWidth;

@@ -351,10 +351,11 @@ namespace Nullscent.Skin
         {
             if (compatibilityMode == LegacySkinCompatibilityMode.Lazer)
             {
-                // Current lazer legacy rendering stretches style 0 and treats all other
-                // styles as repeats from one anchor. Its LegacyBodyPiece anchors that
-                // repeated texture at the tail side for either scroll direction, so style
-                // 1 and 2 intentionally collapse to the same normalized mode here.
+                // Current Lazer LegacyBodyPiece stretches style 0 and treats other
+                // styles as repeats from the tail-side anchor. Its repeat sizing also
+                // scales the sprite to 32800 / DrawHeight; Nullscent does not model that
+                // period, so this profile remains an explicit experimental subset.
+                // https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyBodyPiece.cs
                 return style == 0 ? NoteBodyRenderMode.Stretch : NoteBodyRenderMode.TileFromTail;
             }
 

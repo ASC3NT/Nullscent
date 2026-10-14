@@ -353,9 +353,11 @@ namespace Nullscent.Skin
                 Assert(stableMode.BodyMode == NoteBodyRenderMode.TileFromTail
                     && lazer.Keymodes[4].BodyMode == NoteBodyRenderMode.TileFromTail,
                     "Stable and experimental Lazer profiles should normalize their body direction before rendering.");
-                Assert(LegacyManiaSkinAdapter.DecodeBodyMode(2, LegacySkinCompatibilityMode.Stable) == NoteBodyRenderMode.TileFromHead
+                Assert(LegacyManiaSkinAdapter.DecodeBodyMode(1, LegacySkinCompatibilityMode.Stable) == NoteBodyRenderMode.TileFromTail
+                    && LegacyManiaSkinAdapter.DecodeBodyMode(2, LegacySkinCompatibilityMode.Stable) == NoteBodyRenderMode.TileFromHead
+                    && LegacyManiaSkinAdapter.DecodeBodyMode(1, LegacySkinCompatibilityMode.Lazer) == NoteBodyRenderMode.TileFromTail
                     && LegacyManiaSkinAdapter.DecodeBodyMode(2, LegacySkinCompatibilityMode.Lazer) == NoteBodyRenderMode.TileFromTail,
-                    "Stable style 2 should anchor to the head, while current Lazer collapses every repeated style to its top/tail anchor.");
+                    "Stable must preserve the distinct style 1/2 anchors; the experimental Lazer profile intentionally collapses both repeated styles to its tail-side repeat.");
                 Assert(stableMode.BodyAnimationReleaseMode == HoldBodyAnimationReleaseMode.FreezeAtRelease
                     && lazer.Keymodes[4].BodyAnimationReleaseMode == HoldBodyAnimationReleaseMode.ResetToInitialFrame,
                     "The selected legacy profile should normalize its body-animation release behavior without changing providers.");

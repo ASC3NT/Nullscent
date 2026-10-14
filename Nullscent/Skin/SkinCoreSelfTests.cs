@@ -18,7 +18,8 @@ namespace Nullscent.Skin
             TestSkinScrollPreferenceAndLegacyFlips();
             TestCatalogReflectsAppliedColumnHoldColour();
             TestLegacyAnimationRateSemantics();
-            Console.WriteLine("[SkinTests] 9 pruebas deterministas pasaron.");
+            TestProviderScopedAssetCascade();
+            Console.WriteLine("[SkinTests] 10 pruebas deterministas pasaron.");
         }
 
         private static void TestLegacyNormalizationAndTextAlias()
@@ -195,6 +196,48 @@ namespace Nullscent.Skin
                 "AnimationFramerate -1 should play the complete animation in one second.");
             Assert(ResolvedSkinAnimation.ResolveFrameRate(24, 8) == 24,
                 "An explicit positive animation frame rate should be preserved.");
+        }
+
+        private static void TestProviderScopedAssetCascade()
+        {
+            var active = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["note"] = "user-note",
+                ["head"] = "user-head",
+                ["blank"] = "intentional-blank"
+            };
+            var internalAssets = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["bar-note"] = "internal-note",
+                ["bar-hold-head"] = "internal-head",
+                ["bar-hold-tail"] = "internal-tail",
+                ["blank"] = "internal-blank"
+            };
+            int internalReads = 0;
+            string? ResolveActive(string name) => active.TryGetValue(name, out string? value) ? value : null;
+            string? ResolveInternal(string name)
+            {
+                internalReads++;
+                return internalAssets.TryGetValue(name, out string? value) ? value : null;
+            }
+
+            string? head = SkinAssetCascade.Resolve(ResolveActive, new string?[] { "missing-head", "note" },
+                ResolveInternal, new string?[] { "bar-hold-head", "bar-note" });
+            Assert(head == "user-note", "A missing head should reuse the note from the active provider before consulting built-in assets.");
+            Assert(internalReads == 0, "The internal provider must not be queried while the active provider can satisfy the semantic cascade.");
+
+            string? tail = SkinAssetCascade.Resolve(ResolveActive, new string?[] { "missing-tail", "head", "note" },
+                ResolveInternal, new string?[] { "bar-hold-tail", "bar-hold-head", "bar-note" });
+            Assert(tail == "user-head", "A missing tail should reuse the resolved head from the active provider.");
+            Assert(internalReads == 0, "A same-provider tail fallback must finish before internal fallback starts.");
+
+            string? fallback = SkinAssetCascade.Resolve(ResolveActive, new string?[] { "missing" },
+                ResolveInternal, new string?[] { "bar-hold-tail", "bar-note" });
+            Assert(fallback == "internal-tail", "Internal fallback should be used after all active-provider candidates are exhausted.");
+
+            string? intentionalBlank = SkinAssetCascade.Resolve(ResolveActive, new string?[] { "blank" },
+                ResolveInternal, new string?[] { "blank" });
+            Assert(intentionalBlank == "intentional-blank", "An intentional blank asset is present and must suppress built-in fallback.");
         }
 
         private static void Assert(bool condition, string message)

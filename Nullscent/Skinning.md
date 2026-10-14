@@ -153,12 +153,12 @@ The `SkinAssetResolver` is owned by a single provider and caches decoded texture
 
 ## Animation rules
 
-The resolver discovers numbered frames once and stores them in `ResolvedSkinAnimation`; draw calls do not enumerate the filesystem. `FrameAt()` loops, while hit judgement frames use a clamped timeline.
+The resolver discovers numbered frames once and stores them in `ResolvedSkinAnimation`; draw calls do not enumerate the filesystem. `FrameAt()` loops through the cached frames.
 
 * `AnimationFramerate` is normalized from `[General]`. A positive value is preserved; `-1` resolves to the frame count, meaning the complete animation spans one second.
 * Mania note, LN head/body/tail, and note/hold lighting use explicit Mania rates and do not inherit the general rate.
 * `LightFramePerSecond` controls the `StageLight` animation only.
-* Receptors, non-light stage parts, and judgement assets use the general rate.
+* Receptors and non-light stage parts use the general rate. Legacy `mania-hit#` judgement assets use their documented fixed 60 FPS looping rate, independent of `AnimationFramerate`; native keymodes may set `judgementFramesPerSecond` (default 60).
 
 The local lazer source uses an effect-lifetime based frame length for hit lighting and a fixed 30 FPS for legacy body animations. Nullscent currently uses its own cached fixed-rate animation model for note/hold lighting; the timing of very short multi-frame lighting effects remains an approximation for manual review.
 

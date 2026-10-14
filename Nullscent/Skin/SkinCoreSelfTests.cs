@@ -1,7 +1,9 @@
 #nullable enable
 #if DEBUG
 using System;
+using System.Collections.Generic;
 using System.IO;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace Nullscent.Skin
 {
@@ -10,6 +12,7 @@ namespace Nullscent.Skin
         public static void RunAll()
         {
             TestLegacyNormalizationAndTextAlias();
+            TestResolvedCollectionsAreReadOnlySnapshots();
             TestSkinWithoutIniHasConventionalKeymodes();
             TestResponsiveLayoutAndScrollMirror();
             TestNativeLeftPlacement();
@@ -23,7 +26,36 @@ namespace Nullscent.Skin
             TestLegacyAnimationRateSemantics();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 14 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 15 pruebas deterministas pasaron.");
+        }
+
+        private static void TestResolvedCollectionsAreReadOnlySnapshots()
+        {
+            var sourceFrames = new List<Texture2D>();
+            var animation = new ResolvedSkinAnimation(sourceFrames, 24);
+            sourceFrames.Add(null!);
+            Assert(animation.Frames.Count == 0, "Resolved animation must own a snapshot, not the provider's mutable frame list.");
+            Assert(ReferenceEquals(animation.Frames, animation.Textures), "The compatibility texture view should share the immutable frame snapshot.");
+            Assert(animation.Textures is not IList<Texture2D> textures || textures.IsReadOnly,
+                "Resolved animation must not expose a mutable texture list to renderer consumers.");
+
+            var sourceAssets = new Dictionary<string, ResolvedSkinAnimation> { ["hint"] = animation };
+            var sourceLanes = new List<ResolvedManiaLane>
+            {
+                new(new ManiaLaneDefinition(), null, null, null, null, null, null, null, null)
+            };
+            var mode = new ResolvedManiaKeymode(new ManiaKeymodeDefinition(), sourceLanes, sourceAssets, sourceAssets);
+            sourceLanes.Clear();
+            sourceAssets.Clear();
+            Assert(mode.Lanes.Count == 1 && mode.Lanes is IList<ResolvedManiaLane> lanes && lanes.IsReadOnly,
+                "Resolved lane definitions must be copied into a read-only snapshot.");
+            Assert(mode.StageAssets.Count == 1, "Resolved stage assets must be copied from the mutable staging dictionary.");
+            bool stageAssetsReadOnly = mode.StageAssets is not IDictionary<string, ResolvedSkinAnimation> stageMap
+                || stageMap.IsReadOnly;
+            Assert(stageAssetsReadOnly, "Resolved stage assets must not expose a mutable dictionary.");
+            bool judgementsReadOnly = mode.Judgements is not IDictionary<string, ResolvedSkinAnimation> judgementMap
+                || judgementMap.IsReadOnly;
+            Assert(judgementsReadOnly, "Resolved judgement assets must not expose a mutable dictionary.");
         }
 
         private static void TestLegacyNormalizationAndTextAlias()

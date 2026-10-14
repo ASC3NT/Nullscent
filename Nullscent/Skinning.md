@@ -155,7 +155,7 @@ The `SkinAssetResolver` is owned by a single provider and caches decoded texture
 
 ## Animation rules
 
-The resolver discovers numbered frames during keymode preparation and stores them in `ResolvedSkinAnimation`; Mania draw calls read the prepared snapshot and do not discover keymode assets or enumerate animation frames. The DEBUG smoke harness asserts that all supported keymode snapshots exist before the first draw and checks rollback after injected persistence failures. `FrameAt()` loops through the cached frames. Generic non-Mania assets retain the resolver's lazy, per-name cache.
+The resolver discovers numbered frames during keymode preparation and stores them in `ResolvedSkinAnimation`; Mania draw calls read the prepared snapshot and do not discover keymode assets or enumerate animation frames. Frames, stage assets, and judgement maps are exposed as read-only snapshots; animation lookup APIs return `IReadOnlyList<Texture2D>` so callers cannot reorder or remove cached frames. The DEBUG smoke harness asserts that all supported keymode snapshots exist before the first draw and checks rollback after injected persistence failures. `FrameAt()` loops through the cached frames. Generic non-Mania assets retain the resolver's lazy, per-name cache.
 
 * `AnimationFramerate` is normalized from `[General]`. A positive value is preserved; `-1` resolves to the frame count, meaning the complete animation spans one second.
 * Mania note, LN head/body/tail, and note/hold lighting use explicit Mania rates and do not inherit the general rate.

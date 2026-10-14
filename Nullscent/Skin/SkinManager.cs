@@ -23,7 +23,7 @@ namespace Nullscent.Skin
         private readonly SkinAssetResolver _internalAssets;
         private SkinAssetResolver _assets;
         private readonly Dictionary<Texture2D, ResolvedSkinAsset> _assetInfo = new();
-        private readonly Dictionary<string, List<Texture2D>?> _animationCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, IReadOnlyList<Texture2D>?> _animationCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, ResolvedManiaKeymode> _resolvedKeymodes = new();
         private readonly Dictionary<string, ResolvedNumberSet> _resolvedNumberSets = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _reportedDiagnostics = new(StringComparer.OrdinalIgnoreCase);
@@ -52,7 +52,7 @@ namespace Nullscent.Skin
             public SkinValidation? Validation { get; }
             public LegacySkinCompatibilityMode CompatibilityMode { get; }
             public Dictionary<Texture2D, ResolvedSkinAsset> AssetInfo { get; }
-            public Dictionary<string, List<Texture2D>?> AnimationCache { get; }
+            public Dictionary<string, IReadOnlyList<Texture2D>?> AnimationCache { get; }
             public Dictionary<int, ResolvedManiaKeymode> ResolvedKeymodes { get; }
             public Dictionary<string, ResolvedNumberSet> ResolvedNumberSets { get; }
             public HashSet<string> ReportedDiagnostics { get; }
@@ -65,7 +65,7 @@ namespace Nullscent.Skin
                 Validation = manager.CurrentValidation;
                 CompatibilityMode = manager._legacyCompatibilityMode;
                 AssetInfo = new Dictionary<Texture2D, ResolvedSkinAsset>(manager._assetInfo);
-                AnimationCache = new Dictionary<string, List<Texture2D>?>(manager._animationCache, StringComparer.OrdinalIgnoreCase);
+                AnimationCache = new Dictionary<string, IReadOnlyList<Texture2D>?>(manager._animationCache, StringComparer.OrdinalIgnoreCase);
                 ResolvedKeymodes = new Dictionary<int, ResolvedManiaKeymode>(manager._resolvedKeymodes);
                 ResolvedNumberSets = new Dictionary<string, ResolvedNumberSet>(manager._resolvedNumberSets, StringComparer.OrdinalIgnoreCase);
                 ReportedDiagnostics = new HashSet<string>(manager._reportedDiagnostics, StringComparer.OrdinalIgnoreCase);
@@ -360,26 +360,26 @@ namespace Nullscent.Skin
         /// Resolves an exact animation name from the active provider, then the internal provider.
         /// Semantic alternatives such as hold head-to-note fallback are handled by the resolved-keymode cascade.
         /// </summary>
-        public List<Texture2D>? GetAnimation(string fileName)
+        public IReadOnlyList<Texture2D>? GetAnimation(string fileName)
         {
-            List<Texture2D>? active = GetAnimationFromProvider(_assets, fileName);
+            IReadOnlyList<Texture2D>? active = GetAnimationFromProvider(_assets, fileName);
             if (active != null || ReferenceEquals(_assets, _internalAssets)) return active;
             return GetAnimationFromProvider(_internalAssets, fileName);
         }
 
-        private List<Texture2D>? GetAnimationFromProvider(SkinAssetResolver provider, string fileName)
+        private IReadOnlyList<Texture2D>? GetAnimationFromProvider(SkinAssetResolver provider, string fileName)
         {
             string providerKey = ReferenceEquals(provider, _internalAssets) ? "internal" : "active";
             string cacheKey = $"{providerKey}:{fileName}";
             if (_animationCache.TryGetValue(cacheKey, out var cachedAnimation))
                 return cachedAnimation;
 
-            List<Texture2D>? frames = LoadAnimationFrom(provider, fileName);
+            IReadOnlyList<Texture2D>? frames = LoadAnimationFrom(provider, fileName);
             _animationCache[cacheKey] = frames;
             return frames;
         }
 
-        private List<Texture2D>? LoadAnimationFrom(SkinAssetResolver provider, string fileName)
+        private IReadOnlyList<Texture2D>? LoadAnimationFrom(SkinAssetResolver provider, string fileName)
         {
             var frames = new List<Texture2D>();
             for (int i = 0; i < 1000; i++)
@@ -389,12 +389,12 @@ namespace Nullscent.Skin
                 RememberResolvedAsset(provider, frame);
                 frames.Add(frame.Texture);
             }
-            if (frames.Count > 0) return frames;
+            if (frames.Count > 0) return Array.AsReadOnly(frames.ToArray());
 
             ResolvedSkinAsset single = provider.Resolve(fileName);
             if (single.Texture == null) return null;
             RememberResolvedAsset(provider, single);
-            return new List<Texture2D> { single.Texture };
+            return Array.AsReadOnly(new[] { single.Texture });
         }
 
         private void RememberResolvedAsset(SkinAssetResolver provider, ResolvedSkinAsset asset)
@@ -569,7 +569,7 @@ namespace Nullscent.Skin
             if (string.Equals(fileName, "_blank", StringComparison.OrdinalIgnoreCase))
                 return _blankTexture == null ? null : new ResolvedSkinAnimation(new[] { _blankTexture }, fps);
 
-            List<Texture2D>? frames = GetAnimationFromProvider(provider, fileName);
+            IReadOnlyList<Texture2D>? frames = GetAnimationFromProvider(provider, fileName);
             return frames == null ? null : new ResolvedSkinAnimation(frames, fps);
         }
 
@@ -654,7 +654,7 @@ namespace Nullscent.Skin
         /// <summary>
         /// Resuelve el frame activo de una animación basándose en el tiempo y el framerate de la skin.
         /// </summary>
-        public Texture2D? GetAnimationFrame(List<Texture2D>? animation, double timeMs, int? framesPerSecond = null)
+        public Texture2D? GetAnimationFrame(IReadOnlyList<Texture2D>? animation, double timeMs, int? framesPerSecond = null)
         {
             if (animation == null || animation.Count == 0) return null;
             if (animation.Count == 1) return animation[0];
@@ -682,7 +682,7 @@ namespace Nullscent.Skin
             return anim != null && anim.Count > 0 ? anim[0] : null;
         }
 
-        public List<Texture2D>? GetNoteAnimation(int keyCount, int columnIndex)
+        public IReadOnlyList<Texture2D>? GetNoteAnimation(int keyCount, int columnIndex)
         {
             ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
             int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
@@ -698,7 +698,7 @@ namespace Nullscent.Skin
             return anim != null && anim.Count > 0 ? anim[0] : null;
         }
 
-        public List<Texture2D>? GetLNHeadAnimation(int keyCount, int columnIndex)
+        public IReadOnlyList<Texture2D>? GetLNHeadAnimation(int keyCount, int columnIndex)
         {
             ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
             int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
@@ -714,7 +714,7 @@ namespace Nullscent.Skin
             return anim != null && anim.Count > 0 ? anim[0] : null;
         }
 
-        public List<Texture2D>? GetLNBodyAnimation(int keyCount, int columnIndex)
+        public IReadOnlyList<Texture2D>? GetLNBodyAnimation(int keyCount, int columnIndex)
         {
             ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
             int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
@@ -730,7 +730,7 @@ namespace Nullscent.Skin
             return anim != null && anim.Count > 0 ? anim[0] : null;
         }
 
-        public List<Texture2D>? GetLNTailAnimation(int keyCount, int columnIndex)
+        public IReadOnlyList<Texture2D>? GetLNTailAnimation(int keyCount, int columnIndex)
         {
             ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
             int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
@@ -746,7 +746,7 @@ namespace Nullscent.Skin
             return anim != null && anim.Count > 0 ? anim[0] : null;
         }
 
-        public List<Texture2D>? GetKeyAnimation(int keyCount, int columnIndex, bool pressed = false)
+        public IReadOnlyList<Texture2D>? GetKeyAnimation(int keyCount, int columnIndex, bool pressed = false)
         {
             ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
             int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
@@ -756,14 +756,14 @@ namespace Nullscent.Skin
         /// <summary>
         /// Obtiene la animación de lighting (haz de luz).
         /// </summary>
-        public List<Texture2D>? GetLightingAnimation(int keyCount, int columnIndex)
+        public IReadOnlyList<Texture2D>? GetLightingAnimation(int keyCount, int columnIndex)
         {
             ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
             int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
             return mode.Lanes[index].NoteLighting?.Textures;
         }
 
-        public List<Texture2D>? GetLightingLAnimation(int keyCount, int columnIndex)
+        public IReadOnlyList<Texture2D>? GetLightingLAnimation(int keyCount, int columnIndex)
         {
             ResolvedManiaKeymode mode = GetResolvedKeymode(keyCount);
             int index = Math.Clamp(columnIndex, 0, mode.Lanes.Count - 1);
@@ -792,7 +792,7 @@ namespace Nullscent.Skin
                 ? animation.FirstFrame : null;
         }
 
-        public List<Texture2D>? GetStageAnimation(int keyCount, string part)
+        public IReadOnlyList<Texture2D>? GetStageAnimation(int keyCount, string part)
         {
             return GetResolvedKeymode(keyCount).StageAssets.TryGetValue(part, out ResolvedSkinAnimation? animation)
                 ? animation.Textures : null;
@@ -803,7 +803,7 @@ namespace Nullscent.Skin
         // instead of the 480-high stage space (480 / 768 = 0.625).
         public float GetLegacyHudScale(float layoutScale) => layoutScale * _currentDefinition.LegacyHudScale;
 
-        public List<Texture2D>? GetHitExplosionAnimation(int keyCount, int columnIndex)
+        public IReadOnlyList<Texture2D>? GetHitExplosionAnimation(int keyCount, int columnIndex)
         {
             return GetLightingAnimation(keyCount, columnIndex);
         }
@@ -822,7 +822,7 @@ namespace Nullscent.Skin
             return frames is { Count: > 0 } ? frames[0] : null;
         }
 
-        public List<Texture2D>? GetJudgementAnimation(int keyCount, string judgement)
+        public IReadOnlyList<Texture2D>? GetJudgementAnimation(int keyCount, string judgement)
         {
             string suffix = judgement switch
             {

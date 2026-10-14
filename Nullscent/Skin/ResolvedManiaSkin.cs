@@ -3,6 +3,7 @@
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 
 namespace Nullscent.Skin
@@ -11,14 +12,13 @@ namespace Nullscent.Skin
     public sealed class ResolvedSkinAnimation
     {
         public IReadOnlyList<Texture2D> Frames { get; }
-        public List<Texture2D> Textures { get; }
+        public IReadOnlyList<Texture2D> Textures => Frames;
         public int FramesPerSecond { get; }
         public Texture2D? FirstFrame => Frames.Count == 0 ? null : Frames[0];
 
         public ResolvedSkinAnimation(IEnumerable<Texture2D> frames, int framesPerSecond)
         {
-            Textures = frames.ToList();
-            Frames = Textures.AsReadOnly();
+            Frames = Array.AsReadOnly(frames.ToArray());
             FramesPerSecond = ResolveFrameRate(framesPerSecond, Frames.Count);
         }
 
@@ -79,8 +79,8 @@ namespace Nullscent.Skin
     }
 
     /// <summary>
-    /// Immutable per-keymode snapshot consumed by the renderer. It contains normalized
-    /// metrics and loaded assets, so the draw path performs no config parsing or file lookup.
+    /// Resolved per-keymode snapshot consumed by the renderer. Its animation and asset
+    /// collections are read-only, so consumers cannot mutate cached frame or asset order.
     /// </summary>
     public sealed class ResolvedManiaKeymode
     {
@@ -94,8 +94,10 @@ namespace Nullscent.Skin
         {
             Definition = definition;
             Lanes = Array.AsReadOnly(lanes.ToArray());
-            StageAssets = new Dictionary<string, ResolvedSkinAnimation>(stageAssets, StringComparer.OrdinalIgnoreCase);
-            Judgements = new Dictionary<string, ResolvedSkinAnimation>(judgements, StringComparer.OrdinalIgnoreCase);
+            StageAssets = new ReadOnlyDictionary<string, ResolvedSkinAnimation>(
+                new Dictionary<string, ResolvedSkinAnimation>(stageAssets, StringComparer.OrdinalIgnoreCase));
+            Judgements = new ReadOnlyDictionary<string, ResolvedSkinAnimation>(
+                new Dictionary<string, ResolvedSkinAnimation>(judgements, StringComparer.OrdinalIgnoreCase));
         }
     }
 }

@@ -17,7 +17,7 @@ Still early in development but fully playable. The core gameplay loop is solid.
 - Pause and fail states
 - Results screen after a map ends
 - Mod selection: AT, EZ, NF, HT, HR, DT, HD, FL, RD, MR, 1K/4K/7K
-- **Partial skin support** — `skin.ini` parsing and custom assets are working, but there are still quite a few visual bugs and unfinished parts.
+- **Skinning system (WIP)** — built-in Bars/Circles skins and a partial osu!mania legacy adapter use a shared pipeline. Compatibility and visual validation are incomplete; this system is not ready for production use.
 - Per-column key bindings, configurable
 - Settings overlay (toggled in-game)
 - FPS counter toggle
@@ -27,7 +27,7 @@ Still early in development but fully playable. The core gameplay loop is solid.
 ## What's still in progress
 
 - Some mod effects are defined but not fully implemented (HD fade, FL masking, etc.)
-- Skin system is functional but not complete — fallback rendering is still common
+- Skin support is actively being developed. It does not provide full osu!stable parity, and some legacy features and visual cases remain unsupported or unverified.
 - Settings are being refactored
 - Anything beyond local singleplayer is out of scope for now
 
@@ -47,3 +47,7 @@ You need Visual Studio 2022+ and the .NET 8 SDK. Clone the repo, open `Nullscent
 Drop a `Songs` folder with your `.osz` files (or drag them into the window) and they'll be picked up automatically.
 
 > Work in progress.
+
+## Skinning status
+
+The skinning architecture and built-in skins are still a work in progress and are **not considered finished or production-ready**. Native Nullscent skins and osu!mania legacy skins currently share a normalized model, but legacy compatibility is a limited subset, and visual/gameplay validation is ongoing. Beatmap skins, barlines, split stages, and some historical osu!stable behavior are not implemented. See [the skinning notes](Nullscent/Skinning.md) for the current architecture, supported subset, and known limits.

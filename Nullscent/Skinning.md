@@ -1,5 +1,7 @@
 # Mania skin system
 
+> **Work in progress:** this system is not finished or production-ready. The status labels below describe what Nullscent currently applies; they do not claim full osu!stable parity. Legacy coverage and visual/gameplay validation remain incomplete. See the final section for known limits.
+
 Nullscent has its own normalized presentation model. Native Nullscent skins and osu!mania legacy skins enter through different decoders, then use the same resolved assets, layout engine, and drawables.
 
 ```mermaid

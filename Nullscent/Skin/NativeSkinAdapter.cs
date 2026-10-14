@@ -39,6 +39,10 @@ namespace Nullscent.Skin
                     || !IsPositiveFinite(stageStyle.HintHeightScale)
                     || !IsPositiveFinite(stageStyle.BottomScale))
                     throw new InvalidDataException($"El keymode {pair.Key}K contiene escalas de stage inválidas.");
+                if (pair.Value.HoldAssembly is not { } holdAssembly
+                    || !IsValidHoldAnchor(holdAssembly.HeadConnectionRatio)
+                    || !IsValidHoldAnchor(holdAssembly.TailConnectionRatio))
+                    throw new InvalidDataException($"El keymode {pair.Key}K contiene anchors de LN inválidos (rango permitido: 0 a 0.5).");
                 foreach (var lane in pair.Value.Lanes)
                     if (!float.IsFinite(lane.Width) || lane.Width <= 0 || !float.IsFinite(lane.GapAfter) || lane.GapAfter < 0)
                         throw new InvalidDataException($"El keymode {pair.Key}K contiene métricas de lane inválidas.");
@@ -63,6 +67,7 @@ namespace Nullscent.Skin
         }
 
         private static bool IsPositiveFinite(float value) => float.IsFinite(value) && value > 0;
+        private static bool IsValidHoldAnchor(float value) => float.IsFinite(value) && value >= 0 && value <= 0.5f;
     }
 
     public static class SkinSourceDecoder

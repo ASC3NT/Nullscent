@@ -187,17 +187,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 tailHeight = 0;
             }
 
-            // ALINEACIÓN DE CUERPO (osu!stable style):
-            // El cuerpo se dibuja entre el extremo de la cola y el extremo de la cabeza (o receptor si está holding).
-            // Dibujar el cuerpo cubriendo las notas evita saltos de posición al pulsar la cabeza.
-            int bodyTopY = downScroll ? tailY : headY;
-            int bodyBottomY = downScroll ? headY : tailY;
-
-            if (_longNote.State == LongNoteState.Holding && _longNote.HasHeldContinuously)
-            {
-                if (downScroll) bodyBottomY = receptorY;
-                else bodyTopY = receptorY;
-            }
+            // The keymode supplies overlap ratios for cap/body assembly. Legacy uses
+            // edge joins; native families can extend the body under transparent caps.
+            ManiaHoldAssemblyDefinition assembly = resolvedMode?.Definition.HoldAssembly ?? ManiaHoldAssemblyDefinition.Default;
+            (int bodyTopY, int bodyBottomY) = LongNoteRenderRules.GetBodySpan(
+                headY, tailY, headHeight, tailHeight, downScroll,
+                assembly.HeadConnectionRatio, assembly.TailConnectionRatio);
 
             // Capping: prevent the body from extending past the receptor in the direction of scroll
             if (downScroll)

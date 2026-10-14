@@ -103,6 +103,7 @@ namespace Nullscent.Skin
         public bool DrawColumnEdgesBothSides { get; init; } = true;
         public int LightFramesPerSecond { get; init; } = 60;
         public int JudgementFramesPerSecond { get; init; } = 60;
+        public ManiaHoldAssemblyDefinition HoldAssembly { get; init; } = new();
         public float[] ColumnLineWidths { get; init; } = Array.Empty<float>();
         public bool[] ColumnLines { get; init; } = Array.Empty<bool>();
         public float[] LightingNoteWidths { get; init; } = Array.Empty<float>();
@@ -126,6 +127,18 @@ namespace Nullscent.Skin
         public string? LightingHoldAsset { get; init; }
         public Dictionary<string, bool> NoteFlips { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, bool> KeyFlips { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Describes how far the rendered hold body overlaps its head and tail caps.
+    /// Ratios are measured inward from the cap edge that faces the body: 0 touches
+    /// at the edge, while 0.5 reaches the cap centre.
+    /// </summary>
+    public sealed class ManiaHoldAssemblyDefinition
+    {
+        public static ManiaHoldAssemblyDefinition Default { get; } = new();
+        public float HeadConnectionRatio { get; init; }
+        public float TailConnectionRatio { get; init; }
     }
 
     /// <summary>

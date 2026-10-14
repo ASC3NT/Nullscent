@@ -9,6 +9,22 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     /// <summary>Pure geometry and clock rules shared by the long-note renderer and tests.</summary>
     internal static class LongNoteRenderRules
     {
+        public static (int TopY, int BottomY) GetBodySpan(int headY, int tailY, int headHeight, int tailHeight,
+            bool downScroll, float headConnectionRatio, float tailConnectionRatio)
+        {
+            float headRatio = NormalizeAnchorRatio(headConnectionRatio);
+            float tailRatio = NormalizeAnchorRatio(tailConnectionRatio);
+            float headConnection = downScroll
+                ? headY - Math.Max(0, headHeight) * headRatio
+                : headY + Math.Max(0, headHeight) * headRatio;
+            float tailConnection = downScroll
+                ? tailY + Math.Max(0, tailHeight) * tailRatio
+                : tailY - Math.Max(0, tailHeight) * tailRatio;
+
+            return ((int)MathF.Round(Math.Min(headConnection, tailConnection)),
+                (int)MathF.Round(Math.Max(headConnection, tailConnection)));
+        }
+
         public static double BodyAnimationElapsedMs(LongNoteState state, double currentTime,
             double headHitTime, double tailReleaseTime, bool headWasHit,
             HoldBodyAnimationReleaseMode releaseMode)
@@ -86,5 +102,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             int distanceFromBottom = Math.Max(1, bodyBottomY - y);
             return Math.Max(0, (distanceFromBottom - 1) / blockHeight);
         }
+
+        private static float NormalizeAnchorRatio(float value) =>
+            float.IsFinite(value) ? Math.Clamp(value, 0f, 0.5f) : 0f;
     }
 }

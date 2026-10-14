@@ -140,6 +140,10 @@ namespace Nullscent.Skin
                 "Native note and receptor widths should remain independent.");
             AssertNear(bars.Keymodes[4].StageStyle.BottomScale, 1f,
                 "Native manifests without stage overrides should keep their native StageBottom scale.");
+            AssertNear(bars.Keymodes[4].HoldAssembly.HeadConnectionRatio, 0f,
+                "Native skins should default to edge-to-edge hold assembly.");
+            AssertNear(circles.Keymodes[4].HoldAssembly.HeadConnectionRatio, 0.5f,
+                "A native circle family should be able to overlap the body beneath the centre of its caps.");
 
             string temp = Path.Combine(Path.GetTempPath(), "NullscentNativeStageTest-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
@@ -179,6 +183,23 @@ namespace Nullscent.Skin
                 try { _ = NativeSkinAdapter.Load(temp); }
                 catch (InvalidDataException) { invalidStageRejected = true; }
                 Assert(invalidStageRejected, "Native stage scales must be validated before the skin can activate.");
+
+                File.WriteAllText(Path.Combine(temp, NativeSkinAdapter.ManifestFileName), """
+                    {
+                      "formatVersion": 1,
+                      "keymodes": {
+                        "4": {
+                          "keyCount": 4,
+                          "holdAssembly": { "headConnectionRatio": 0.75 },
+                          "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
+                        }
+                      }
+                    }
+                    """);
+                bool invalidHoldAnchorRejected = false;
+                try { _ = NativeSkinAdapter.Load(temp); }
+                catch (InvalidDataException) { invalidHoldAnchorRejected = true; }
+                Assert(invalidHoldAnchorRejected, "Native hold connection anchors outside 0..0.5 must be rejected during validation.");
             }
             finally { Directory.Delete(temp, true); }
         }
@@ -379,6 +400,13 @@ namespace Nullscent.Skin
             Assert(!Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromTail, false)
                 && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromHead, false),
                 "In upscroll the tail is physically below the head, so their tiling anchors must mirror downscroll.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetBodySpan(
+                    200, 500, 40, 60, true, 0f, 0f) == (200, 500)
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetBodySpan(
+                    200, 500, 40, 60, true, 0.5f, 0.5f) == (180, 530)
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetBodySpan(
+                    200, 500, 40, 60, false, 0.5f, 0.5f) == (220, 470),
+                "Hold cap overlap ratios should map consistently to body anchors in both scroll directions.");
             Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(
                     0, 95, 40, NoteBodyRenderMode.TileFromTail, true, 0) == 0
                 && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(

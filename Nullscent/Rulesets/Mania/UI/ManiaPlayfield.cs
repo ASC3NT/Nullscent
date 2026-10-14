@@ -1017,7 +1017,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 if (stageLight != null)
                 {
                     Color lightTint = Color.White;
-                    var customLightColor = _skinManager?.GetColourLight(_totalColumnCount, _index);
+                    var customLightColor = _skinManager?.GetStageLightColour(_totalColumnCount, _index);
                     if (customLightColor.HasValue)
                     {
                         lightTint = new Color(customLightColor.Value.R, customLightColor.Value.G, customLightColor.Value.B, customLightColor.Value.A);

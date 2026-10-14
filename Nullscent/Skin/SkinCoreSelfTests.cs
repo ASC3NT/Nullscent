@@ -22,11 +22,12 @@ namespace Nullscent.Skin
             TestCompatibilityProfilesAndReceptorAnchors();
             TestStagePresentationNormalizationAndLayout();
             TestLongNoteBodyVisualRules();
+            TestLegacyColourLightIsStageOnly();
             TestLegacyHoldColourSuffixIsNotMisrepresentedAsSupported();
             TestLegacyAnimationRateSemantics();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 15 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 16 pruebas deterministas pasaron.");
         }
 
         private static void TestResolvedCollectionsAreReadOnlySnapshots()
@@ -176,6 +177,9 @@ namespace Nullscent.Skin
                 "Native skins should default to edge-to-edge hold assembly.");
             AssertNear(circles.Keymodes[4].HoldAssembly.HeadConnectionRatio, 0.5f,
                 "A native circle family should be able to overlap the body beneath the centre of its caps.");
+            Assert(bars.Keymodes[4].Lanes[0].LightColor.HasValue
+                && bars.Keymodes[4].Lanes[0].StageLightColor == null,
+                "Existing native lightColor should retain its lane-light tint semantics and remain the StageLight fallback.");
 
             string temp = Path.Combine(Path.GetTempPath(), "NullscentNativeStageTest-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
@@ -577,6 +581,28 @@ namespace Nullscent.Skin
                     "An undocumented ColourHold# field must not acquire per-column legacy behavior.");
                 Assert(definition.Keymodes[4].HoldColor == new SkinColor(10, 20, 30, 0),
                     "The documented global ColourHold value must reach the combo counter with its alpha unchanged.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyColourLightIsStageOnly()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "NullscentSkinTest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 4
+                    ColourLight1: 40,50,60
+                    """);
+                SkinConfig config = SkinConfigParser.Parse(temp);
+                ManiaSkinDefinition definition = LegacyManiaSkinAdapter.Decode(config, temp);
+                ManiaLaneDefinition lane = definition.Keymodes[4].Lanes[0];
+                Assert(lane.StageLightColor == new SkinColor(40, 50, 60),
+                    "Legacy ColourLight# should normalize into the StageLight tint.");
+                Assert(lane.LightColor == null,
+                    "Legacy ColourLight# must not tint LightingN or LightingL; it configures StageLight only.");
             }
             finally { Directory.Delete(temp, true); }
         }

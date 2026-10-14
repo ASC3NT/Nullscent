@@ -606,6 +606,7 @@ namespace Nullscent.Skin
                     GapAfter = 2f,
                     LaneColor = source?.LaneColor,
                     LightColor = source?.LightColor,
+                    StageLightColor = source?.StageLightColor,
                     HoldColor = source?.HoldColor
                 });
             }
@@ -888,6 +889,13 @@ namespace Nullscent.Skin
         {
             var lanes = Profile(keyCount).Lanes;
             return columnIndex >= 0 && columnIndex < lanes.Count ? ToTuple(lanes[columnIndex].LightColor) : null;
+        }
+        public (byte R, byte G, byte B, byte A)? GetStageLightColour(int keyCount, int columnIndex)
+        {
+            var lanes = Profile(keyCount).Lanes;
+            if (columnIndex < 0 || columnIndex >= lanes.Count) return null;
+            ManiaLaneDefinition lane = lanes[columnIndex];
+            return ToTuple(lane.StageLightColor ?? lane.LightColor);
         }
         public (byte R, byte G, byte B, byte A)? GetColourHold(int keyCount, int columnIndex)
         {

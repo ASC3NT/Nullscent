@@ -169,7 +169,10 @@ namespace Nullscent.Skin
         public string? LongBodyAsset { get; init; }
         public string? LongTailAsset { get; init; }
         public SkinColor? LaneColor { get; init; }
+        // `lightColor` is the existing native manifest tint for lane lighting.
         public SkinColor? LightColor { get; init; }
+        // Legacy ColourLight# applies to StageLight; it must not tint LightingN/L.
+        public SkinColor? StageLightColor { get; init; }
         public SkinColor? HoldColor { get; init; }
     }
 
@@ -238,7 +241,7 @@ namespace Nullscent.Skin
                         BodyMode = supportsBodyStyle && source.NoteBodyStyles.TryGetValue(i, out int columnBodyMode)
                             ? DecodeBodyMode(columnBodyMode, compatibilityMode) : null,
                         LaneColor = SkinColor.FromLegacy(Value(source.ColumnColorsMap, i)),
-                        LightColor = SkinColor.FromLegacy(Value(source.ColourLights, i))
+                        StageLightColor = SkinColor.FromLegacy(Value(source.ColourLights, i))
                     });
                 }
 

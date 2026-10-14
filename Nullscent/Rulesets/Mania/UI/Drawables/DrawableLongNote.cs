@@ -148,13 +148,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             float PieceHeight(Texture2D texture, SkinSpriteMetrics metrics, float drawWidth)
             {
                 Vector2 logicalSize = skinManager!.GetLogicalSize(texture);
-                float aspect = logicalSize.Y / logicalSize.X;
-                return metrics.HeightMode switch
-                {
-                    SpriteHeightMode.ReferenceWidthAspect when metrics.ReferenceWidth > 0f => metrics.ReferenceWidth * layoutScale * aspect,
-                    SpriteHeightMode.LaneWidthFraction => columnWidth * metrics.HeightValue,
-                    _ => drawWidth * aspect
-                } * noteHeightScale;
+                return LongNoteRenderRules.GetPieceHeight(metrics, logicalSize.X, logicalSize.Y,
+                    drawWidth, columnWidth, layoutScale, noteHeightScale);
             }
 
             int headHeight = HEAD_HEIGHT;
@@ -193,6 +188,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             (int bodyTopY, int bodyBottomY) = LongNoteRenderRules.GetBodySpan(
                 headY, tailY, headHeight, tailHeight, downScroll,
                 assembly.HeadConnectionRatio, assembly.TailConnectionRatio);
+            int bodyOffsetY = (int)MathF.Round(bodyMetrics.OffsetY * layoutScale);
+            (bodyTopY, bodyBottomY) = LongNoteRenderRules.OffsetBodySpan(bodyTopY, bodyBottomY, bodyOffsetY);
 
             // Capping: prevent the body from extending past the receptor in the direction of scroll
             if (downScroll)
@@ -238,11 +235,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             ?? NoteBodyRenderMode.TileFromTail;
                         bool flipBody = skinManager!.FlipNote(keyCount, columnIndex, "L", downScroll);
 
-                        Vector2 bodySize = skinManager!.GetLogicalSize(bodyTexture);
                         // The texture may have been reduced for GPU upload. Its source
                         // coordinates are physical; its display height is still based on
                         // the original legacy image dimensions.
-                        int blockH = (int)MathF.Round(bodySize.Y * (bodyWidth / bodySize.X) * noteHeightScale);
+                        int blockH = (int)MathF.Round(PieceHeight(bodyTexture, bodyMetrics, bodyWidth));
                         if (blockH <= 0) blockH = 1;
                         Color holdColor = Color.White;
 

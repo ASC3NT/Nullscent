@@ -9,6 +9,23 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     /// <summary>Pure geometry and clock rules shared by the long-note renderer and tests.</summary>
     internal static class LongNoteRenderRules
     {
+        public static float GetPieceHeight(SkinSpriteMetrics metrics, float logicalWidth, float logicalHeight,
+            float drawWidth, float columnWidth, float layoutScale, float noteHeightScale)
+        {
+            float aspect = logicalHeight / logicalWidth;
+            float height = metrics.HeightMode switch
+            {
+                SpriteHeightMode.ReferenceWidthAspect when metrics.ReferenceWidth > 0f =>
+                    metrics.ReferenceWidth * layoutScale * aspect,
+                SpriteHeightMode.LaneWidthFraction => columnWidth * metrics.HeightValue,
+                _ => drawWidth * aspect
+            };
+            return height * noteHeightScale;
+        }
+
+        public static (int TopY, int BottomY) OffsetBodySpan(int topY, int bottomY, int offsetY) =>
+            (topY + offsetY, bottomY + offsetY);
+
         public static (int TopY, int BottomY) GetBodySpan(int headY, int tailY, int headHeight, int tailHeight,
             bool downScroll, float headConnectionRatio, float tailConnectionRatio)
         {

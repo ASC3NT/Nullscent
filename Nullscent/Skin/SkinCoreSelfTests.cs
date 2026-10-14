@@ -724,6 +724,20 @@ namespace Nullscent.Skin
 
         private static void TestLongNoteBodyVisualRules()
         {
+            AssertNear(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetPieceHeight(
+                    new SkinSpriteMetrics(1f, SpriteHeightMode.TextureAspect, 0f, 0f, 0f, 0f, null),
+                    20f, 80f, 10f, 100f, 2f, 1.5f), 60f,
+                "Texture-aspect LN dimensions should preserve the existing scale.");
+            AssertNear(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetPieceHeight(
+                    new SkinSpriteMetrics(1f, SpriteHeightMode.ReferenceWidthAspect, 0f, 25f, 0f, 0f, null),
+                    20f, 80f, 10f, 100f, 2f, 1.5f), 300f,
+                "Tiled LN bodies should use their configured reference-width tile height.");
+            AssertNear(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetPieceHeight(
+                    new SkinSpriteMetrics(1f, SpriteHeightMode.LaneWidthFraction, 0.2f, 0f, 0f, 0f, null),
+                    20f, 80f, 10f, 100f, 2f, 1.5f), 30f,
+                "Tiled LN bodies should use their configured lane-relative tile height.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.OffsetBodySpan(10, 20, -6) == (4, 14),
+                "An LN body sprite offset should translate both body boundaries together.");
             Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromTail, true)
                 && !Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromHead, true),
                 "In downscroll the tail is physically above the head, so tail-anchored and head-anchored tiling must start at opposite ends.");

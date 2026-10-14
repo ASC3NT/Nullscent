@@ -221,8 +221,11 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             if (bodyHeight > 0)
             {
                 ResolvedSkinAnimation? bodyAnimation = resolvedLane?.LongBody;
+                double animationEndTime = LongNoteRenderRules.ResolveAnimationEndTime(
+                    _longNote.State, _longNote.HeadHitTime, _longNote.TailReleaseTime,
+                    _longNote.EndTime, _longNote.HeadJudged && _longNote.HeadResult != HitResult.Miss);
                 double animationTime = LongNoteRenderRules.BodyAnimationElapsedMs(_longNote.State, currentTime,
-                    _longNote.HeadHitTime, _longNote.TailReleaseTime, _longNote.HeadResult != HitResult.Miss,
+                    _longNote.HeadHitTime, animationEndTime, _longNote.HeadJudged && _longNote.HeadResult != HitResult.Miss,
                     resolvedMode?.Definition.BodyAnimationReleaseMode ?? HoldBodyAnimationReleaseMode.FreezeAtRelease);
                 Texture2D? bodyTexture = bodyAnimation?.FrameAt(animationTime);
                 if (bodyTexture != null)

@@ -40,6 +40,18 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             return 0;
         }
 
+        public static double ResolveAnimationEndTime(LongNoteState state, double headHitTime,
+            double tailReleaseTime, double noteEndTime, bool headWasHit)
+        {
+            // An auto-judged held tail reaches Finished without a physical key-release timestamp.
+            // Keep its body animation at the charted tail instead of resetting it to frame zero.
+            if (state == LongNoteState.Finished && headWasHit
+                && tailReleaseTime < headHitTime && double.IsFinite(noteEndTime))
+                return noteEndTime;
+
+            return tailReleaseTime;
+        }
+
         public static bool TileFromTop(NoteBodyRenderMode mode, bool downScroll) => mode switch
         {
             // In downscroll, a hold starts at the lower head and ends at the upper tail.

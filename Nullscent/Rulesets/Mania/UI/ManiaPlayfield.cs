@@ -599,7 +599,7 @@ namespace Nullscent.Rulesets.Mania.UI
         private bool _isHolding;
         private double _lightingEndTime;
         private double _stageLightEndTime;
-        private double _holdLightingEndTime;
+        private readonly HoldLightingTimeline _holdLightingTimeline = new();
         private int _totalColumnCount;
         private readonly HitSoundPlayer? _hitSoundPlayer;
 
@@ -786,6 +786,8 @@ namespace Nullscent.Rulesets.Mania.UI
                 }
             }
 
+            _holdLightingTimeline.ObserveHoldState(currentTime, _isHolding);
+
             // Actualizar ciclo de vida de explosiones visuales sin usar .ToList() para evitar recolector de basura (GC)
             for (int i = 0; i < _explosions.Count; i++)
             {
@@ -821,7 +823,7 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             _isPressed = true;
             _stageLightEndTime = 0;
-            _holdLightingEndTime = 0;
+            _holdLightingTimeline.ClearReleaseFade();
             bool hitSuccess = false;
 
             // Encontrar la primera nota pendiente (o candidata válida para LN)
@@ -872,6 +874,7 @@ namespace Nullscent.Rulesets.Mania.UI
 
                         if (ln.HeadJudged && ln.HeadResult != HitResult.Miss)
                         {
+                            _holdLightingTimeline.RecordHoldStart(currentTime);
                             _lightingEndTime = currentTime + 150;
                             PlayNoteHitsound(ln);
                             hitSuccess = true;
@@ -923,9 +926,9 @@ namespace Nullscent.Rulesets.Mania.UI
 
         public void OnKeyRelease(double currentTime, ManiaScoreProcessor scoreProcessor)
         {
+            _holdLightingTimeline.RecordKeyRelease(currentTime, HasActiveLongNoteHold());
             _isPressed = false;
             _stageLightEndTime = currentTime + 250;
-            _holdLightingEndTime = currentTime + 120;
 
             // Evaluar los resultados de soltar el teclado para las colas de las LN
             for (int i = 0; i < _drawableHitObjects.Count; i++)
@@ -948,6 +951,19 @@ namespace Nullscent.Rulesets.Mania.UI
                     }
                 }
             }
+        }
+
+        private bool HasActiveLongNoteHold()
+        {
+            foreach (DrawableManiaHitObject drawable in _drawableHitObjects)
+            {
+                if (drawable is DrawableLongNote longNote
+                    && longNote.HitObject is LongNote note
+                    && note.State == LongNoteState.Holding)
+                    return true;
+            }
+
+            return false;
         }
 
         private void OnHitObjectJudged(DrawableManiaHitObject drawable, double currentTime, ManiaScoreProcessor scoreProcessor)
@@ -1165,17 +1181,17 @@ namespace Nullscent.Rulesets.Mania.UI
 
         private void DrawHoldLighting(SpriteBatch spriteBatch, double currentTime, int receptorY, bool downScroll)
         {
-            if (!_isHolding && currentTime >= _holdLightingEndTime) return;
+            if (!_holdLightingTimeline.ShouldDraw(currentTime, _isHolding)) return;
 
             ResolvedManiaKeymode? resolvedMode = _skinManager?.GetResolvedKeymode(_totalColumnCount);
             ResolvedManiaLane? lane = resolvedMode != null && _index >= 0 && _index < resolvedMode.Lanes.Count
                 ? resolvedMode.Lanes[_index] : null;
             ResolvedSkinAnimation? lightingAnimation = lane?.HoldLighting;
-            Texture2D? lightingTexture = lightingAnimation?.FrameAt(currentTime);
+            Texture2D? lightingTexture = lightingAnimation?.FrameAt(_holdLightingTimeline.GetAnimationElapsedMs(currentTime));
             bool isLightingEnabled = _skinManager?.IsLightingEnabled(_totalColumnCount) ?? true;
             if (lightingTexture == null || !isLightingEnabled) return;
 
-            float alpha = _isHolding ? 0.4f : Math.Clamp((float)((_holdLightingEndTime - currentTime) / 120d) * 0.4f, 0f, 0.4f);
+            float alpha = _holdLightingTimeline.GetAlpha(currentTime, _isHolding);
             Vector2 logicalSize = _skinManager!.GetLogicalSize(lightingTexture);
             float targetWidth = logicalSize.X * LayoutScale;
             float[]? configuredWidths = _skinManager.GetLightingLWidths(_totalColumnCount);

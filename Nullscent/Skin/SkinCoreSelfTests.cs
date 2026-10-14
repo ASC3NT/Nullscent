@@ -29,9 +29,10 @@ namespace Nullscent.Skin
             TestLegacyHoldColourSuffixIsNotMisrepresentedAsSupported();
             TestLegacyAnimationRateSemantics();
             TestAnimationTimingResolution();
+            TestHoldLightingAnimationLifecycle();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 19 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 20 pruebas deterministas pasaron.");
         }
 
         private static void TestResolvedCollectionsAreReadOnlySnapshots()
@@ -750,6 +751,51 @@ namespace Nullscent.Skin
             AnimationTimingDefinition lazerBody = AnimationTimingDefinition.FixedFrameDuration(30d);
             AssertNear((float)lazerBody.ResolveFrameDurationMs(20), 30f,
                 "The legacy Lazer LN body should keep its explicit 30 ms frame length for any frame count.");
+        }
+
+        private static void TestHoldLightingAnimationLifecycle()
+        {
+            var timeline = new Nullscent.Rulesets.Mania.UI.Drawables.HoldLightingTimeline();
+            timeline.RecordKeyRelease(510, hadActiveHold: false);
+            Assert(!timeline.ShouldDraw(511, isHolding: false),
+                "Releasing a key after a tap must not display the hold-light animation.");
+
+            timeline.RecordHoldStart(1000);
+            Assert(timeline.ShouldDraw(1000, isHolding: true)
+                && timeline.GetAnimationElapsedMs(1000) == 0
+                && timeline.GetAnimationElapsedMs(1025) == 25,
+                "LightingL must start at frame zero and advance from the successful LN head time.");
+
+            timeline.RecordKeyRelease(1300, hadActiveHold: true);
+            Assert(timeline.ShouldDraw(1350, isHolding: false)
+                && timeline.GetAnimationElapsedMs(1350) == 350,
+                "LightingL should continue from its hold clock through the release fade.");
+            AssertNear(timeline.GetAlpha(1350, isHolding: false), 0.4f * (70f / 120f),
+                "The hold-light fade should use time remaining after a real hold release.");
+            Assert(!timeline.ShouldDraw(1420, isHolding: false),
+                "LightingL should stop after the release fade has elapsed.");
+
+            var automaticallyEnded = new Nullscent.Rulesets.Mania.UI.Drawables.HoldLightingTimeline();
+            automaticallyEnded.RecordHoldStart(2000);
+            automaticallyEnded.ObserveHoldState(2000, isHolding: true);
+            automaticallyEnded.ObserveHoldState(2300, isHolding: false);
+            Assert(automaticallyEnded.ShouldDraw(2350, isHolding: false),
+                "LightingL should fade when an LN hold ends through automatic tail judgment without a key-release event.");
+            AssertNear(automaticallyEnded.GetAlpha(2350, isHolding: false), 0.4f * (70f / 120f),
+                "An automatically completed hold should receive the same 120 ms release fade.");
+
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ResolveAnimationEndTime(
+                    Nullscent.Rulesets.Mania.Objects.LongNoteState.Finished, 1000, 0, 2800, headWasHit: true) == 2800
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ResolveAnimationEndTime(
+                    Nullscent.Rulesets.Mania.Objects.LongNoteState.Finished, 1000, 1700, 2800, headWasHit: true) == 1700
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ResolveAnimationEndTime(
+                    Nullscent.Rulesets.Mania.Objects.LongNoteState.Finished, 0, 0, 2800, headWasHit: false) == 0,
+                "A successfully auto-completed LN body should freeze at its tail; explicit releases keep their actual time and a missed head has no hold animation.");
+
+            var animation = new ResolvedSkinAnimation(new Texture2D[] { null!, null!, null!, null! }, 100);
+            Assert(animation.FrameIndexAt(timeline.GetAnimationElapsedMs(1000)) == 0
+                && animation.FrameIndexAt(timeline.GetAnimationElapsedMs(1100)) == 2,
+                "Hold lighting frame selection should restart per hold instead of using global song time.");
         }
 
         private static void TestProviderScopedAssetCascade()

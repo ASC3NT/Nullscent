@@ -132,6 +132,71 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     }
 
     /// <summary>
+    /// Tracks the animation clock and release fade for a lane's hold lighting.
+    /// The animation clock starts at the successful long-note head, not at song zero.
+    /// </summary>
+    internal sealed class HoldLightingTimeline
+    {
+        private const double ReleaseFadeDurationMs = 120;
+
+        private double? _holdStartTime;
+        private double _releaseFadeEndTime;
+        private bool _isHoldActive;
+
+        public void RecordHoldStart(double currentTime)
+        {
+            _holdStartTime = double.IsFinite(currentTime) ? currentTime : null;
+            _releaseFadeEndTime = 0;
+            _isHoldActive = true;
+        }
+
+        public void RecordKeyRelease(double currentTime, bool hadActiveHold)
+        {
+            if (hadActiveHold)
+                RecordHoldEnd(currentTime);
+            else
+                _releaseFadeEndTime = 0;
+        }
+
+        public void ObserveHoldState(double currentTime, bool isHolding)
+        {
+            if (isHolding)
+            {
+                if (!_isHoldActive && _holdStartTime == null && double.IsFinite(currentTime))
+                    _holdStartTime = currentTime;
+                _isHoldActive = true;
+            }
+            else if (_isHoldActive)
+                RecordHoldEnd(currentTime);
+        }
+
+        private void RecordHoldEnd(double currentTime)
+        {
+            _releaseFadeEndTime = double.IsFinite(currentTime)
+                ? currentTime + ReleaseFadeDurationMs
+                : 0;
+            _isHoldActive = false;
+        }
+
+        public void ClearReleaseFade() => _releaseFadeEndTime = 0;
+
+        public bool ShouldDraw(double currentTime, bool isHolding) =>
+            isHolding || (double.IsFinite(currentTime) && currentTime < _releaseFadeEndTime);
+
+        public double GetAnimationElapsedMs(double currentTime) =>
+            _holdStartTime is double startTime && double.IsFinite(currentTime)
+                ? Math.Max(0, currentTime - startTime)
+                : 0;
+
+        public float GetAlpha(double currentTime, bool isHolding)
+        {
+            if (isHolding) return 0.4f;
+            if (!double.IsFinite(currentTime)) return 0;
+            return Math.Clamp((float)((_releaseFadeEndTime - currentTime) / ReleaseFadeDurationMs) * 0.4f, 0f, 0.4f);
+        }
+    }
+
+    /// <summary>
     /// Displays judgement text (Perfect, Great, etc) above the hit location.
     /// </summary>
     public class DrawableJudgement

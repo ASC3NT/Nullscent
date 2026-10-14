@@ -58,8 +58,11 @@ internal sealed class SkinVisualSmokeGame : Game
     private int timelineStage;
     private double timelineCurrentTime = 1040;
     private LongNote? timelineLongNote;
+    private LongNote? timelineAutoCompleteNote;
     private LongNote? timelineEarlyReleaseNote;
     private double timelineLongNoteEndTime;
+    private const double TIMELINE_AUTO_COMPLETE_START = 3000;
+    private const double TIMELINE_AUTO_COMPLETE_END = 3500;
     private int timelineLongColumn;
 
     public SkinVisualSmokeGame(string skinPath, int keyCount, string outputPath, bool downScroll,
@@ -178,6 +181,12 @@ internal sealed class SkinVisualSmokeGame : Game
         {
             timelineLongNote = new LongNote(timelineLongNoteStart, timelineLongNoteStart + 1100, timelineLongColumn);
             smokeObjects.Add(timelineLongNote);
+        }
+        if (timelineOutputDirectory != null)
+        {
+            timelineAutoCompleteNote = new LongNote(
+                TIMELINE_AUTO_COMPLETE_START, TIMELINE_AUTO_COMPLETE_END, timelineLongColumn);
+            smokeObjects.Add(timelineAutoCompleteNote);
         }
         timelineLongNoteEndTime = timelineLongNoteStart + 1100;
         foreach (ManiaHitObject smokeObject in smokeObjects.OrderBy(hitObject => hitObject.StartTime))
@@ -344,7 +353,10 @@ internal sealed class SkinVisualSmokeGame : Game
             "04-long-hold-start.png",
             "05-long-hold-progress.png",
             "06-tail-approach.png",
-            "07-after-tail-release.png"
+            "07-after-tail-release.png",
+            "08-auto-complete-hold.png",
+            "09-auto-complete-tail.png",
+            "10-auto-complete-fade.png"
         };
 
         string framePath = Path.Combine(timelineOutputDirectory!, frameNames[timelineStage]);
@@ -399,6 +411,25 @@ internal sealed class SkinVisualSmokeGame : Game
                 UpdateAt(timelineLongNoteEndTime + 5);
                 if (timelineLongNote is not { State: LongNoteState.Finished } || timelineLongNote.TailResult == HitResult.Miss)
                     throw new InvalidOperationException("La liberación de tail temporal no completó la LN larga.");
+                break;
+            case 7:
+                UpdateAt(TIMELINE_AUTO_COMPLETE_START - 25);
+                playfield!.HandleKeyPress(timelineLongColumn, TIMELINE_AUTO_COMPLETE_START, score!);
+                UpdateAt(TIMELINE_AUTO_COMPLETE_START + 40);
+                if (timelineAutoCompleteNote is not { State: LongNoteState.Holding }
+                    || timelineAutoCompleteNote.HeadResult == HitResult.Miss)
+                    throw new InvalidOperationException("La LN de auto-completado no entró en sostén.");
+                break;
+            case 8:
+                UpdateAt(TIMELINE_AUTO_COMPLETE_END + 500);
+                if (timelineAutoCompleteNote is not { State: LongNoteState.Finished, TailResult: HitResult.Perfect })
+                    throw new InvalidOperationException("El sostén automático no completó la LN.");
+                break;
+            case 9:
+                UpdateAt(TIMELINE_AUTO_COMPLETE_END + 560);
+                break;
+            case 10:
+                Exit();
                 break;
             default:
                 Exit();

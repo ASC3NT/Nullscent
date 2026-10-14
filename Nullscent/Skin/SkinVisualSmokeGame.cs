@@ -2,6 +2,7 @@
 #if DEBUG
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Nullscent.Audio;
 using Nullscent.Config;
 using Nullscent.Core;
 using Nullscent.Rulesets.Mania.Objects;
@@ -13,6 +14,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Color = Microsoft.Xna.Framework.Color;
 
@@ -38,10 +40,14 @@ internal sealed class SkinVisualSmokeGame : Game
     private readonly string? compatibilityOutputPath;
     private SpriteBatch? batch;
     private SkinManager? skin;
+    private SkinCatalog? skinCatalog;
+    private GameSettings? smokeSettings;
+    private HitSoundPlayer? hitSoundPlayer;
     private ManiaPlayfield? playfield;
     private ManiaScoreProcessor? score;
     private int captureStage;
     private bool resizeApplied;
+    private int persistenceCount;
 
     public SkinVisualSmokeGame(string skinPath, int keyCount, string outputPath, bool downScroll,
         string? switchSkinPath = null, string? switchOutputPath = null, int viewportWidth = 1280, int viewportHeight = 720,
@@ -86,8 +92,20 @@ internal sealed class SkinVisualSmokeGame : Game
     protected override void LoadContent()
     {
         batch = new SpriteBatch(GraphicsDevice);
-        SettingsService.Instance.Initialize(new GameSettings { LegacySkinCompatibilityMode = legacyCompatibilityMode });
+        string builtInSkinsRoot = Path.Combine(AppContext.BaseDirectory, "Skins");
+        string userSkinsRoot = skinPath.Equals("internal", StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(AppContext.BaseDirectory, "Skin")
+            : Path.GetDirectoryName(Path.GetFullPath(skinPath))!;
+        smokeSettings = new GameSettings
+        {
+            LegacySkinCompatibilityMode = legacyCompatibilityMode,
+            SkinsRootDirectory = userSkinsRoot
+        };
+        SettingsService.Instance.Initialize(smokeSettings);
+        skinCatalog = new SkinCatalog(userSkinsRoot, builtInSkinsRoot, legacyCompatibilityMode);
+        skinCatalog.Refresh();
         skin = new SkinManager(GraphicsDevice);
+        hitSoundPlayer = new HitSoundPlayer();
         if (!ActivateSkin(skinPath)) throw new InvalidDataException($"No se pudo activar skin inicial: {skin.CurrentValidation?.Summary ?? skinPath}");
         ReportResolvedHighResolutionAssets();
 
@@ -145,9 +163,14 @@ internal sealed class SkinVisualSmokeGame : Game
             else
             {
                 long previousVersion = skin!.Version;
+                int previousPersistenceCount = persistenceCount;
                 if (!ActivateSkin(switchSkinPath!)) throw new InvalidDataException($"No se pudo activar skin destino: {skin.CurrentValidation?.Summary ?? switchSkinPath}");
                 ReportResolvedHighResolutionAssets();
                 if (skin.Version != previousVersion + 1) throw new InvalidOperationException("La versión de skin no avanzó exactamente una vez.");
+                if (persistenceCount != previousPersistenceCount + 1
+                    || !string.Equals(hitSoundPlayer!.SkinDirectory, skin.CurrentSkinDirectory, StringComparison.OrdinalIgnoreCase)
+                    || !PersistedSelectionMatchesActiveSkin())
+                    throw new InvalidOperationException("El flujo común de selección no persistió el destino o no actualizó los hitsounds.");
                 playfield!.Update(1040, score!, 8, null, downScroll);
                 Console.WriteLine($"[SkinVisualSmoke] cambio runtime aplicado: v{previousVersion} -> v{skin.Version}; {switchOutputPath}");
             }
@@ -192,14 +215,41 @@ internal sealed class SkinVisualSmokeGame : Game
 
     private bool ActivateSkin(string path)
     {
-        if (path.Equals("internal", StringComparison.OrdinalIgnoreCase))
-            return skin!.TryActivateInternal();
+        string? selectedPath = path.Equals("internal", StringComparison.OrdinalIgnoreCase) ? null : path;
+        bool selected = SkinSelectionWorkflow.TrySelect(
+            skin!,
+            skinCatalog!,
+            smokeSettings!,
+            selectedPath,
+            () =>
+            {
+                persistenceCount++;
+                return true;
+            },
+            directory =>
+            {
+                hitSoundPlayer!.SkinDirectory = directory;
+                hitSoundPlayer.ClearCache();
+            },
+            message => Console.WriteLine($"[SkinVisualSmoke] {message}"));
+        if (skin!.CurrentValidation is { } validation)
+            Console.WriteLine($"[SkinVisualSmoke] validation: {validation.Status}; {validation.Summary}");
+        return selected;
+    }
 
-        string fullPath = Path.GetFullPath(path);
-        var validation = new SkinCatalog(Path.GetDirectoryName(fullPath)!,
-            compatibilityMode: skin!.LegacyCompatibilityMode).Validate(fullPath, skin.LegacyCompatibilityMode);
-        Console.WriteLine($"[SkinVisualSmoke] validation: {validation.Status}; {validation.Summary}");
-        return skin!.TryActivate(validation);
+    private bool PersistedSelectionMatchesActiveSkin()
+    {
+        if (smokeSettings == null || skinCatalog == null || skin == null) return false;
+        string? selection = smokeSettings.SelectedSkinDirectory;
+        if (selection == null) return string.IsNullOrEmpty(skin.CurrentSkinDirectory);
+        if (selection.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase))
+        {
+            string key = selection["builtin:".Length..];
+            selection = skinCatalog.Entries.FirstOrDefault(entry => entry.IsNative
+                && string.Equals(Path.GetFileName(entry.Directory), key, StringComparison.OrdinalIgnoreCase))?.Directory;
+        }
+        return selection != null
+            && string.Equals(Path.GetFullPath(selection), Path.GetFullPath(skin.CurrentSkinDirectory), StringComparison.OrdinalIgnoreCase);
     }
 
     private void ReportResolvedHighResolutionAssets()

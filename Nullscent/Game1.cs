@@ -105,49 +105,19 @@ namespace Nullscent
         public bool SelectSkin(string? path)
         {
             if (_skinManager == null || _skinCatalog == null || _settings == null) return false;
-            SkinValidation? validation = path == null ? null : _skinCatalog.Validate(path);
-            if (validation?.Status == SkinValidity.Invalid)
-            {
-                ShowSkinNotice(validation.Summary);
-                return false;
-            }
-            bool PersistSelection()
-            {
-                string? oldRoot = _settings.SkinsRootDirectory;
-                string? oldSelection = _settings.SelectedSkinDirectory;
-                _settings.SkinsRootDirectory = _skinCatalog.Root;
-                _settings.SelectedSkinDirectory = path == null ? null : GetBuiltInSkinKey(path) ?? path;
-                if (_settings.TrySave()) return true;
-                _settings.SkinsRootDirectory = oldRoot;
-                _settings.SelectedSkinDirectory = oldSelection;
-                return false;
-            }
-            bool activated = validation == null
-                ? _skinManager.TryActivateInternal(PersistSelection)
-                : _skinManager.TryActivate(validation, PersistSelection);
-            if (!activated)
-            {
-                ShowSkinNotice(validation?.Errors.LastOrDefault() ?? "No se pudo activar la skin interna; se conservó la skin anterior.");
-                return false;
-            }
-            if (_hitSoundPlayer != null)
-            {
-                _hitSoundPlayer.SkinDirectory = _skinManager.CurrentSkinDirectory;
-                _hitSoundPlayer.ClearCache();
-            }
-            if (validation?.Status == SkinValidity.Partial) ShowSkinNotice(validation.Summary);
-            else ShowSkinNotice(path == null ? "Skin interna de Nullscent activa." : "Skin activada.");
-            return true;
-        }
-
-        private string? GetBuiltInSkinKey(string directory)
-        {
-            if (_skinCatalog?.BuiltInRoot == null) return null;
-            string full = Path.GetFullPath(directory);
-            SkinValidation? entry = _skinCatalog.Entries.FirstOrDefault(candidate => candidate.IsNative
-                && string.Equals(candidate.Directory, full, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(Path.GetDirectoryName(full), _skinCatalog.BuiltInRoot, StringComparison.OrdinalIgnoreCase));
-            return entry == null ? null : $"builtin:{Path.GetFileName(full)}";
+            return SkinSelectionWorkflow.TrySelect(
+                _skinManager,
+                _skinCatalog,
+                _settings,
+                path,
+                _settings.TrySave,
+                directory =>
+                {
+                    if (_hitSoundPlayer == null) return;
+                    _hitSoundPlayer.SkinDirectory = directory;
+                    _hitSoundPlayer.ClearCache();
+                },
+                ShowSkinNotice);
         }
 
         private void ShowSkinNotice(string message)

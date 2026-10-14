@@ -1023,9 +1023,8 @@ namespace Nullscent.Rulesets.Mania.UI
                         lightTint = new Color(customLightColor.Value.R, customLightColor.Value.G, customLightColor.Value.B, customLightColor.Value.A);
                     }
 
-                    float logicalLightPosition = resolvedMode?.Definition.LightPosition
-                        ?? (downScroll ? ManiaLayoutEngine.DesignHeight : 0f);
-                    if (!downScroll) logicalLightPosition = ManiaLayoutEngine.DesignHeight - logicalLightPosition;
+                    float logicalLightPosition = ManiaLayoutEngine.ResolveStageLightAnchorY(
+                        resolvedMode?.Definition.LightPosition, downScroll);
                     int lightPos = (int)MathF.Round(layoutOffsetY + logicalLightPosition * layoutScale);
                     Vector2 lightSize = _skinManager!.GetLogicalSize(stageLight);
                     float aspect = lightSize.Y / lightSize.X;

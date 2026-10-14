@@ -15,6 +15,7 @@ namespace Nullscent.Skin
             TestResolvedCollectionsAreReadOnlySnapshots();
             TestSkinWithoutIniHasConventionalKeymodes();
             TestResponsiveLayoutAndScrollMirror();
+            TestStageLightPositionMirroring();
             TestNativeLeftPlacement();
             TestNativeManifests();
             TestUserOverridePrecedence();
@@ -28,7 +29,7 @@ namespace Nullscent.Skin
             TestAnimationTimingResolution();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 17 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 18 pruebas deterministas pasaron.");
         }
 
         private static void TestResolvedCollectionsAreReadOnlySnapshots()
@@ -78,6 +79,7 @@ namespace Nullscent.Skin
                     ColumnWidth: 50,40
                     ColumnSpacing: 4
                     HitPosition: 400
+                    LightPosition: 413
                     UpsideDown: 1
                     NoteFlipWhenUpsideDown: 0
                     NoteFlipWhenUpsideDown1H: 1
@@ -95,6 +97,8 @@ namespace Nullscent.Skin
                 AssertNear(mode.Lanes[2].Width, 48f, "Missing legacy lane values should use the format default.");
                 AssertNear(mode.ColumnStart!.Value, 537.6f, "ColumnStart should be normalized into stable design units.");
                 AssertNear(mode.HitPosition!.Value, 640f, "HitPosition should be normalized into stable design units.");
+                AssertNear(mode.LightPosition!.Value, 660.8f,
+                    "Legacy LightPosition should convert to the equivalent top-origin logical coordinate.");
                 Assert(mode.BodyMode == NoteBodyRenderMode.Stretch, "The textual stretch alias should parse.");
                 Assert(skin.AnimationFramerate == 24 && mode.NoteStyle.FramesPerSecond == 60,
                     "General animation speed should normalize without overriding mania note animation speed.");
@@ -154,6 +158,20 @@ namespace Nullscent.Skin
             };
             Assert(circles.Lanes[0].NoteWidthRatio < 1f && circles.Lanes[0].Width > circles.Lanes[0].Width * circles.Lanes[0].NoteWidthRatio,
                 "Visual note width must be independently configurable from lane width.");
+        }
+
+        private static void TestStageLightPositionMirroring()
+        {
+            AssertNear(ManiaLayoutEngine.ResolveStageLightAnchorY(null, downScroll: true), ManiaLayoutEngine.DesignHeight,
+                "An unspecified native StageLight should anchor at the downscroll edge.");
+            AssertNear(ManiaLayoutEngine.ResolveStageLightAnchorY(null, downScroll: false), 0f,
+                "An unspecified native StageLight should mirror to the upscroll edge.");
+            float legacyLightPosition = 413f * LegacyManiaSkinAdapter.StableScale;
+            AssertNear(ManiaLayoutEngine.ResolveStageLightAnchorY(legacyLightPosition, downScroll: true), legacyLightPosition,
+                "A configured legacy LightPosition should keep its downscroll anchor.");
+            AssertNear(ManiaLayoutEngine.ResolveStageLightAnchorY(legacyLightPosition, downScroll: false),
+                ManiaLayoutEngine.DesignHeight - legacyLightPosition,
+                "A configured legacy LightPosition should mirror around the logical stage for upscroll.");
         }
 
         private static void TestNativeManifests()

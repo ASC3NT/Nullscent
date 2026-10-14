@@ -44,6 +44,12 @@ namespace Nullscent.Skin
         public const float DesignAspectRatio = 16f / 9f;
         public const float DesignWidth = DesignHeight * DesignAspectRatio;
 
+        public static float ResolveStageLightAnchorY(float? configuredLogicalPosition, bool downScroll)
+        {
+            float logicalPosition = configuredLogicalPosition ?? DesignHeight;
+            return downScroll ? logicalPosition : DesignHeight - logicalPosition;
+        }
+
         public static ManiaLayoutResult Calculate(ManiaKeymodeDefinition? profile, int keyCount,
             int viewportWidth, int viewportHeight, bool downScroll, ManiaLayoutOverrides overrides = default)
         {

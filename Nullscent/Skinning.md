@@ -50,6 +50,8 @@ skin.ini legacy coordinate (480-high reference)
 
 `ColumnStart`, `ColumnWidth`, spacing, hit/light/score/combo positions, and line widths are converted at the adapter boundary. Lane geometry comes only from normalized configuration; texture width never sets lane width.
 
+`LightPosition` is defined only for `StageLight`. The legacy decoder stores `(480 - value) * 1.6` as a bottom inset; Nullscent's equivalent top-origin logical anchor is `768 - inset`, or `value * 1.6`. Upscroll mirrors a configured anchor around the 768-unit design height. A native skin without a configured anchor defaults to the active scroll edge (bottom for downscroll, top for upscroll).
+
 `ColumnRight` is **adapted**, not claimed to reproduce Stable exactly. The current layout engine treats it as an inward inset from the design canvas's right edge and constrains the playfield's right edge without changing lane widths. The wiki only describes it as the point up to which columns may be drawn, and the local osu!Lazer checkout has no equivalent mania renderer consumer. This responsive interpretation is explicit and covered by the shared layout path.
 
 Native `placement` accepts `center`, `left`, `right`, or `legacy`. Legacy skins use their configured start and right constraint; native skins can choose an anchor. `ManiaLayoutResult` separately carries lane rectangles, playfield bounds, viewport transform, note-height scale, receptor-height scale, and hit position.

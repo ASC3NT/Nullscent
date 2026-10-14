@@ -645,6 +645,18 @@ namespace Nullscent.Skin
 
         private static void TestAnimationTimingResolution()
         {
+            var stableJudgement = new ResolvedSkinAnimation(
+                new Texture2D[] { null!, null! }, 60);
+            var lazerJudgement = new ResolvedSkinAnimation(
+                new Texture2D[] { null!, null! }, 20);
+            AssertNear((float)stableJudgement.FrameDurationMilliseconds, 1000f / 60f,
+                "Stable mania judgement frames should resolve to the wiki's fixed 60 FPS interval.");
+            AssertNear((float)lazerJudgement.FrameDurationMilliseconds, 50f,
+                "Lazer mania judgement frames should resolve to the transformer's fixed 20 FPS interval.");
+            Assert(stableJudgement.FrameIndexAt(stableJudgement.FrameDurationMilliseconds) == 1
+                && lazerJudgement.FrameIndexAt(50d) == 1,
+                "Resolved fixed-rate judgement animations should advance exactly at their configured frame boundary.");
+
             AnimationTimingDefinition lazerLighting = AnimationTimingDefinition.SpreadOverDuration(170d, 60d);
             AssertNear((float)lazerLighting.ResolveFrameDurationMs(4), 42.5f,
                 "Lazer legacy lighting should spread four frames over 170 ms when below the 60 FPS cap.");
@@ -659,6 +671,13 @@ namespace Nullscent.Skin
                 "The resolved lighting snapshot should retain the duration computed from its own frame count.");
             Assert(resolved.FrameIndexAt(42d) == 0 && resolved.FrameIndexAt(42.5d) == 1,
                 "Resolved animation playback should use the exact frame duration instead of an integer FPS approximation.");
+
+            var stableLighting = new ResolvedSkinAnimation(
+                new Texture2D[] { null!, null! }, 60);
+            var lazerTwoFrameLighting = new ResolvedSkinAnimation(
+                new Texture2D[] { null!, null! }, 60, lazerLighting);
+            Assert(stableLighting.FrameIndexAt(20d) == 1 && lazerTwoFrameLighting.FrameIndexAt(20d) == 0,
+                "The Lazer lighting duration policy should remain distinct from Stable's fixed-rate animation at runtime.");
 
             AnimationTimingDefinition lazerBody = AnimationTimingDefinition.FixedFrameDuration(30d);
             AssertNear((float)lazerBody.ResolveFrameDurationMs(20), 30f,

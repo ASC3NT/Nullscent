@@ -238,8 +238,7 @@ namespace Nullscent.Skin
                         BodyMode = supportsBodyStyle && source.NoteBodyStyles.TryGetValue(i, out int columnBodyMode)
                             ? DecodeBodyMode(columnBodyMode, compatibilityMode) : null,
                         LaneColor = SkinColor.FromLegacy(Value(source.ColumnColorsMap, i)),
-                        LightColor = SkinColor.FromLegacy(Value(source.ColourLights, i)),
-                        HoldColor = SkinColor.FromLegacy(Value(source.ColourHolds, i))
+                        LightColor = SkinColor.FromLegacy(Value(source.ColourLights, i))
                     });
                 }
 
@@ -272,9 +271,13 @@ namespace Nullscent.Skin
                     KeyFlipWhenUpsideDown = supportsFlipOverrides ? source.KeyFlipWhenUpsideDown : null,
                     DrawColumnEdgesBothSides = config.IsVersionAtLeast(2.4),
                     LightFramesPerSecond = source.LightFramePerSecond,
-                    // Mania hit bursts have a fixed 60 FPS animation independent of
-                    // the general skin AnimationFramerate setting.
-                    JudgementFramesPerSecond = 60,
+                    // Stable's wiki contract specifies a fixed looping 60 FPS for
+                    // mania-hit assets. The current Lazer legacy transformer instead
+                    // requests a 50 ms frame length (20 FPS); keep both as normalized
+                    // profile data instead of branching in the judgement renderer.
+                    // https://osu.ppy.sh/wiki/en/Skinning/osu!mania#hit-bursts
+                    // https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/ManiaLegacySkinTransformer.cs
+                    JudgementFramesPerSecond = compatibilityMode == LegacySkinCompatibilityMode.Lazer ? 20 : 60,
                     ColumnLineWidths = Expand(source.ColumnLineWidths, keys + 1, 2f).Select(v => v * StableScale).ToArray(),
                     ColumnLines = Expand(source.ColumnLines, keys + 1, true),
                     LightingNoteWidths = config.IsVersionAtLeast(2.5) ? source.LightingNWidths?.Select(v => v * StableScale).ToArray() ?? Array.Empty<float>() : Array.Empty<float>(),

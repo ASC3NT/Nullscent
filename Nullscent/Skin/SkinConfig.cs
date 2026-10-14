@@ -82,10 +82,9 @@ namespace Nullscent.Skin
         public Dictionary<string, bool> NoteFlips { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, bool> KeyFlips { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-        // Colores ColourX, ColourLightX, ColourHoldX (0-indexed para ColumnIndex)
+        // Colores por columna: ColourX y ColourLightX (0-indexed para ColumnIndex)
         public Dictionary<int, (byte R, byte G, byte B, byte A)> ColumnColorsMap { get; set; } = new();
         public Dictionary<int, (byte R, byte G, byte B, byte A)> ColourLights { get; set; } = new();
-        public Dictionary<int, (byte R, byte G, byte B, byte A)> ColourHolds { get; set; } = new();
 
         public (byte R, byte G, byte B, byte A)? ColourBarline { get; set; }
         public (byte R, byte G, byte B, byte A)? ColourJudgementLine { get; set; }
@@ -468,24 +467,11 @@ namespace Nullscent.Skin
                     }
                 }
             }
-            else if (key.StartsWith("ColourHold", StringComparison.OrdinalIgnoreCase))
+            else if (key.Equals("ColourHold", StringComparison.OrdinalIgnoreCase))
             {
-                string idxStr = key["ColourHold".Length..];
-                if (int.TryParse(idxStr, out int idx))
-                {
-                    if (idx >= 1)
-                    {
-                        var col = ParseColor(value);
-                        if (col.HasValue)
-                            maniaConfig.ColourHolds[idx - 1] = col.Value;
-                    }
-                }
-                else if (string.IsNullOrEmpty(idxStr))
-                {
-                    var col = ParseColor(value);
-                    if (col.HasValue)
-                        maniaConfig.ColourHold = col.Value;
-                }
+                var col = ParseColor(value);
+                if (col.HasValue)
+                    maniaConfig.ColourHold = col.Value;
             }
             else if (key.StartsWith("Colour", StringComparison.OrdinalIgnoreCase))
             {

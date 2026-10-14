@@ -127,7 +127,8 @@ Mania judgement sprites (`mania-hit0`, `mania-hit50`, `mania-hit100`, `mania-hit
 | `NoteBodyStyle`, `NoteBodyStyle#` | ADAPTED | Stable `0` stretches, `1` tiles from tail to head, `2` from head to tail; recognized textual aliases normalize to the same enum. Applied for version 2.5+. The experimental Lazer profile collapses non-stretch styles to the tail-side repeat. |
 | `NoteFlipWhenUpsideDown[#][H/L/T]`, `KeyFlipWhenUpsideDown[#][D]` | SUPPORTED | Global, column, note-piece, and pressed-key rules normalize to profile maps; only active for version 2.5+. |
 | `UpsideDown` | ADAPTED | A skin orientation preference; it controls scroll only while the user has enabled “Use Skin Scroll Direction”. Explicit user choice wins. |
-| `Colour#`, `ColourLight#`, `ColourHold#`, `ColourHold`, `ColourBreak`, `ColourJudgementLine`, `ColourColumnLine` | SUPPORTED | Alpha is preserved; hold/light/lane colors feed their intended consumers. |
+| `Colour#`, `ColourLight#`, `ColourHold`, `ColourBreak`, `ColourJudgementLine`, `ColourColumnLine` | SUPPORTED | Alpha is preserved; `ColourHold` tints the combo counter while holding, `ColourBreak` tints its break display, and lane/light colors feed their corresponding visuals. |
+| `ColourHold#` | UNSUPPORTED | The legacy contract documents only the global `ColourHold`; numbered variants are reported instead of being treated as per-column osu! behavior. Native manifests can still define per-lane hold-counter tint. |
 | `StageLeft`, `StageRight`, `StageBottom`, `StageHint`, `StageLight`, `LightingN`, `LightingL`, `LightFramePerSecond`, `LightingNWidth`, `LightingLWidth` | SUPPORTED | Stage geometry is normalized separately from lanes and assets; `LightFramePerSecond` controls `StageLight`. Legacy side pieces fit the stage height, `StageBottom` uses the legacy 1.6 scale and scroll-edge anchor, and `StageHint` spans the stage and centers on the judgement line. |
 | `SpecialStyle` | IGNORED BY DESIGN | Parser retains it for reporting; Nullscent does not implement split-stage/special-column layout. |
 | `BarlineHeight`, `ColourBarline` | IGNORED BY DESIGN | Parser retains them for reporting; no barline renderer exists yet. |
@@ -162,7 +163,7 @@ The resolver discovers numbered frames during keymode preparation and stores the
 * `AnimationFramerate` is normalized from `[General]`. A positive value is preserved; `-1` resolves to the frame count, meaning the complete animation spans one second.
 * Mania note, LN head/body/tail, and note/hold lighting use explicit Mania rates and do not inherit the general rate.
 * `LightFramePerSecond` controls the `StageLight` animation only.
-* Receptors and non-light stage parts use the general rate. Legacy `mania-hit#` judgement assets use their documented fixed 60 FPS looping rate, independent of `AnimationFramerate`; native keymodes may set `judgementFramesPerSecond` (default 60).
+* Receptors and non-light stage parts use the general rate. Stable legacy `mania-hit#` assets use the wiki's fixed 60 FPS looping rate, independent of `AnimationFramerate`; the experimental Lazer profile follows the current legacy transformer’s explicit 50 ms frame length (20 FPS). Native keymodes may set `judgementFramesPerSecond` (default 60).
 
 The local lazer source uses an effect-lifetime based frame length for hit lighting and a fixed 30 FPS for legacy body animations. Nullscent currently uses its own cached fixed-rate animation model for note/hold lighting; the timing of very short multi-frame lighting effects remains an approximation for manual review.
 

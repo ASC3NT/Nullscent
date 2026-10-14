@@ -22,7 +22,7 @@ namespace Nullscent.Skin
             TestCompatibilityProfilesAndReceptorAnchors();
             TestStagePresentationNormalizationAndLayout();
             TestLongNoteBodyVisualRules();
-            TestCatalogReflectsAppliedColumnHoldColour();
+            TestLegacyHoldColourSuffixIsNotMisrepresentedAsSupported();
             TestLegacyAnimationRateSemantics();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
@@ -361,6 +361,9 @@ namespace Nullscent.Skin
                 Assert(stableMode.BodyAnimationReleaseMode == HoldBodyAnimationReleaseMode.FreezeAtRelease
                     && lazer.Keymodes[4].BodyAnimationReleaseMode == HoldBodyAnimationReleaseMode.ResetToInitialFrame,
                     "The selected legacy profile should normalize its body-animation release behavior without changing providers.");
+                Assert(stableMode.JudgementFramesPerSecond == 60
+                    && lazer.Keymodes[4].JudgementFramesPerSecond == 20,
+                    "Stable hit bursts should use the wiki's fixed 60 FPS while the experimental Lazer profile follows its explicit 50 ms frame length.");
                 Assert(lazer.Provider == SkinProviderKind.OsuLegacy,
                     "Selecting Lazer compatibility must not change an osu! legacy source into another provider.");
 
@@ -553,7 +556,7 @@ namespace Nullscent.Skin
                 "The Lazer legacy profile should reset its body animation after release, matching LegacyBodyPiece.");
         }
 
-        private static void TestCatalogReflectsAppliedColumnHoldColour()
+        private static void TestLegacyHoldColourSuffixIsNotMisrepresentedAsSupported()
         {
             string temp = Path.Combine(Path.GetTempPath(), "NullscentSkinTest-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
@@ -563,10 +566,17 @@ namespace Nullscent.Skin
                     [Mania]
                     Keys: 4
                     ColourHold1: 255,128,32
+                    ColourHold: 10,20,30,0
                     """);
                 SkinValidation validation = new SkinCatalog(Path.GetTempPath()).Validate(temp);
-                Assert(!validation.Unsupported.Contains("ColourHold1"),
-                    "The catalogue should not label per-column hold colours unsupported when the adapter applies them.");
+                Assert(validation.Config != null, "A legacy skin config should be available for normalization.");
+                ManiaSkinDefinition definition = LegacyManiaSkinAdapter.Decode(validation.Config!, temp);
+                Assert(validation.Unsupported.Contains("ColourHold1"),
+                    "The catalog must report ColourHold# as unsupported because the osu! legacy contract defines only global ColourHold.");
+                Assert(definition.Keymodes[4].Lanes[0].HoldColor == null,
+                    "An undocumented ColourHold# field must not acquire per-column legacy behavior.");
+                Assert(definition.Keymodes[4].HoldColor == new SkinColor(10, 20, 30, 0),
+                    "The documented global ColourHold value must reach the combo counter with its alpha unchanged.");
             }
             finally { Directory.Delete(temp, true); }
         }

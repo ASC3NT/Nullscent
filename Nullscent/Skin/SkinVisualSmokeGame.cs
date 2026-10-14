@@ -350,13 +350,15 @@ internal sealed class SkinVisualSmokeGame : Game
             "01-holding-1040ms.png",
             "02-holding-1090ms.png",
             "03-early-release-1160ms.png",
-            "04-long-hold-start.png",
-            "05-long-hold-progress.png",
-            "06-tail-approach.png",
-            "07-after-tail-release.png",
-            "08-auto-complete-hold.png",
-            "09-auto-complete-tail.png",
-            "10-auto-complete-fade.png"
+            "04-stage-light-half-fade-1275ms.png",
+            "05-stage-light-faded-1410ms.png",
+            "06-long-hold-start.png",
+            "07-long-hold-progress.png",
+            "08-tail-approach.png",
+            "09-after-tail-release.png",
+            "10-auto-complete-hold.png",
+            "11-auto-complete-tail.png",
+            "12-auto-complete-fade.png"
         };
 
         string framePath = Path.Combine(timelineOutputDirectory!, frameNames[timelineStage]);
@@ -389,6 +391,13 @@ internal sealed class SkinVisualSmokeGame : Game
                     throw new InvalidOperationException("La fase de early release no produjo una LN rota verificable.");
                 break;
             case 3:
+                // A released StageLight fades for 250ms while keeping its draw rectangle fixed.
+                UpdateAt(1275);
+                break;
+            case 4:
+                UpdateAt(1410);
+                break;
+            case 5:
                 double longNoteStart = timelineLongNoteEndTime - 1100;
                 UpdateAt(longNoteStart - 25);
                 playfield!.HandleKeyPress(timelineLongColumn, longNoteStart, score!);
@@ -396,23 +405,23 @@ internal sealed class SkinVisualSmokeGame : Game
                 if (timelineLongNote is not { State: LongNoteState.Holding } || timelineLongNote.HeadResult == HitResult.Miss)
                     throw new InvalidOperationException("La LN larga temporal no entró en sostén tras pulsar su head.");
                 break;
-            case 4:
+            case 6:
                 UpdateAt(timelineLongNoteEndTime - 875);
                 break;
-            case 5:
+            case 7:
                 UpdateAt(timelineLongNoteEndTime - 25);
                 ResolvedSkinAnimation? bodyAnimation = skin!.GetResolvedKeymode(keyCount).Lanes[timelineLongColumn].LongBody;
                 if (bodyAnimation is { Frames.Count: > 1 }
                     && ReferenceEquals(bodyAnimation.FrameAt(40), bodyAnimation.FrameAt(225)))
                     throw new InvalidOperationException("La animación del body LN no avanzó entre dos instantes del sostén.");
                 break;
-            case 6:
+            case 8:
                 playfield!.HandleKeyRelease(timelineLongColumn, timelineLongNoteEndTime, score!);
                 UpdateAt(timelineLongNoteEndTime + 5);
                 if (timelineLongNote is not { State: LongNoteState.Finished } || timelineLongNote.TailResult == HitResult.Miss)
                     throw new InvalidOperationException("La liberación de tail temporal no completó la LN larga.");
                 break;
-            case 7:
+            case 9:
                 UpdateAt(TIMELINE_AUTO_COMPLETE_START - 25);
                 playfield!.HandleKeyPress(timelineLongColumn, TIMELINE_AUTO_COMPLETE_START, score!);
                 UpdateAt(TIMELINE_AUTO_COMPLETE_START + 40);
@@ -420,15 +429,15 @@ internal sealed class SkinVisualSmokeGame : Game
                     || timelineAutoCompleteNote.HeadResult == HitResult.Miss)
                     throw new InvalidOperationException("La LN de auto-completado no entró en sostén.");
                 break;
-            case 8:
+            case 10:
                 UpdateAt(TIMELINE_AUTO_COMPLETE_END + 500);
                 if (timelineAutoCompleteNote is not { State: LongNoteState.Finished, TailResult: HitResult.Perfect })
                     throw new InvalidOperationException("El sostén automático no completó la LN.");
                 break;
-            case 9:
+            case 11:
                 UpdateAt(TIMELINE_AUTO_COMPLETE_END + 560);
                 break;
-            case 10:
+            case 12:
                 Exit();
                 break;
             default:

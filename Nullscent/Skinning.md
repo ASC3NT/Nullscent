@@ -201,7 +201,7 @@ Hitsound source selection remains independent from visual asset resolution. `Use
 
 A folder without `skin.ini` but with recognized conventional Mania assets has a defined latest-rules path and remains usable; the catalog labels it partial because it has no explicit keymode configuration and may need defaults/fallbacks.
 
-The current catalog marks properties by actual adapter/consumer status, not by parser recognition alone. `ColourHold#` is applied per lane and is classified as supported. `SpecialStyle`, `BarlineHeight`, and `ColourBarline` are deliberately reported as ignored until their renderers exist.
+The current catalog marks properties by actual adapter/consumer status, not by parser recognition alone. `ColourHold#` is reported as unsupported: the legacy adapter applies only the documented global `ColourHold`; per-lane `holdColor` remains a Nullscent Native feature. `SpecialStyle`, `BarlineHeight`, and `ColourBarline` are deliberately reported as ignored until their renderers exist.
 
 ## Regression fixture and screenshots
 

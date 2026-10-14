@@ -41,6 +41,8 @@ internal sealed class SkinVisualSmokeGame : Game
     private readonly string? timelineOutputDirectory;
     private readonly string[]? switchSequence;
     private readonly string? switchSequenceOutputDirectory;
+    private readonly LegacySkinCompatibilityMode[]? compatibilitySequence;
+    private readonly string? compatibilitySequenceOutputDirectory;
     private SpriteBatch? batch;
     private SkinManager? skin;
     private SkinCatalog? skinCatalog;
@@ -52,6 +54,7 @@ internal sealed class SkinVisualSmokeGame : Game
     private bool resizeApplied;
     private int persistenceCount;
     private int switchSequenceIndex;
+    private int compatibilitySequenceIndex;
     private int timelineStage;
     private double timelineCurrentTime = 1040;
     private LongNote? timelineLongNote;
@@ -65,7 +68,9 @@ internal sealed class SkinVisualSmokeGame : Game
         LegacySkinCompatibilityMode legacyCompatibilityMode = LegacySkinCompatibilityMode.Stable,
         LegacySkinCompatibilityMode? switchCompatibilityMode = null, string? compatibilityOutputPath = null,
         string? timelineOutputDirectory = null, IReadOnlyList<string>? switchSequence = null,
-        string? switchSequenceOutputDirectory = null)
+        string? switchSequenceOutputDirectory = null,
+        IReadOnlyList<LegacySkinCompatibilityMode>? compatibilitySequence = null,
+        string? compatibilitySequenceOutputDirectory = null)
     {
         if (keyCount < 1 || keyCount > 18) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (viewportWidth < 640 || viewportHeight < 480) throw new ArgumentOutOfRangeException(nameof(viewportWidth), "La resolución de smoke debe ser de al menos 640x480.");
@@ -84,6 +89,13 @@ internal sealed class SkinVisualSmokeGame : Game
             || switchSequence is { Count: 0 }
             || (switchSequence != null && (switchSkinPath != null || resizeOutputPath != null || switchCompatibilityMode != null || timelineOutputDirectory != null)))
             throw new ArgumentException("El smoke de secuencia requiere destinos y una carpeta de capturas, y se ejecuta de forma independiente.");
+        if ((compatibilitySequence == null) != (compatibilitySequenceOutputDirectory == null)
+            || compatibilitySequence is { Count: 0 }
+            || (compatibilitySequence != null && (switchSkinPath != null || resizeOutputPath != null
+                || switchCompatibilityMode != null || timelineOutputDirectory != null || switchSequence != null)))
+            throw new ArgumentException("El ciclo de perfil requiere destinos y una carpeta de capturas, y se ejecuta de forma independiente.");
+        if (compatibilitySequence != null && compatibilitySequence.Any(mode => !Enum.IsDefined(mode)))
+            throw new ArgumentOutOfRangeException(nameof(compatibilitySequence));
         this.skinPath = skinPath;
         this.keyCount = keyCount;
         this.outputPath = Path.GetFullPath(outputPath);
@@ -102,6 +114,9 @@ internal sealed class SkinVisualSmokeGame : Game
         this.switchSequence = switchSequence?.Select(path =>
             path.Equals("internal", StringComparison.OrdinalIgnoreCase) ? "internal" : Path.GetFullPath(path)).ToArray();
         this.switchSequenceOutputDirectory = switchSequenceOutputDirectory == null ? null : Path.GetFullPath(switchSequenceOutputDirectory);
+        this.compatibilitySequence = compatibilitySequence?.ToArray();
+        this.compatibilitySequenceOutputDirectory = compatibilitySequenceOutputDirectory == null
+            ? null : Path.GetFullPath(compatibilitySequenceOutputDirectory);
         graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth = viewportWidth,
@@ -198,13 +213,17 @@ internal sealed class SkinVisualSmokeGame : Game
             SaveBackbuffer(outputPath);
             Console.WriteLine($"[SkinVisualSmoke] {keyCount}K initial: {outputPath}");
             captureStage = 1;
-            if (switchSkinPath == null && switchCompatibilityMode == null && switchSequence == null)
+            if (switchSkinPath == null && switchCompatibilityMode == null && switchSequence == null && compatibilitySequence == null)
             {
                 if (resizeOutputPath == null) Exit();
             }
             else if (switchSequence != null)
             {
                 ApplySwitchSequenceEntry(switchSequenceIndex++);
+            }
+            else if (compatibilitySequence != null)
+            {
+                ApplyCompatibilitySequenceEntry(compatibilitySequenceIndex++);
             }
             else if (switchCompatibilityMode != null)
             {
@@ -291,6 +310,18 @@ internal sealed class SkinVisualSmokeGame : Game
                 Exit();
             else
                 ApplySwitchSequenceEntry(switchSequenceIndex++);
+        }
+        else if (captureStage == 1 && compatibilitySequence != null)
+        {
+            string profileName = skin!.CurrentDefinition.CompatibilityProfile.ToString();
+            string sequenceOutput = Path.Combine(compatibilitySequenceOutputDirectory!,
+                $"{compatibilitySequenceIndex:00}-{profileName}.png");
+            SaveBackbuffer(sequenceOutput);
+            Console.WriteLine($"[SkinVisualSmoke] profile sequence capture {compatibilitySequenceIndex}/{compatibilitySequence.Length}: {sequenceOutput}; provider={skin.CurrentDefinition.Provider}; profile={profileName}");
+            if (compatibilitySequenceIndex >= compatibilitySequence.Length)
+                Exit();
+            else
+                ApplyCompatibilitySequenceEntry(compatibilitySequenceIndex++);
         }
         else if (captureStage == 1 && resizeOutputPath != null && resizeApplied)
         {
@@ -420,6 +451,61 @@ internal sealed class SkinVisualSmokeGame : Game
         AssertHudGlyphsPrepared();
         ReportResolvedHighResolutionAssets();
         playfield!.Update(1040, score!, 8, null, downScroll);
+    }
+
+    private void ApplyCompatibilitySequenceEntry(int index)
+    {
+        LegacySkinCompatibilityMode targetMode = compatibilitySequence![index];
+        if (skin!.CurrentDefinition.Provider != SkinProviderKind.OsuLegacy)
+            throw new InvalidOperationException("El ciclo de perfil requiere una skin osu! legacy activa.");
+
+        long previousVersion = skin.Version;
+        LegacySkinCompatibilityMode previousMode = skin.LegacyCompatibilityMode;
+        ManiaSkinDefinition previousDefinition = skin.CurrentDefinition;
+        ResolvedManiaKeymode previousResolvedMode = skin.GetResolvedKeymode(keyCount);
+        object? previousHudPrefixState = skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix);
+        string previousDirectory = skin.CurrentSkinDirectory;
+        string? previousSelection = smokeSettings!.SelectedSkinDirectory;
+        string? previousHitsoundDirectory = hitSoundPlayer!.SkinDirectory;
+
+        if (targetMode == previousMode)
+            throw new InvalidOperationException("Cada paso del ciclo de perfil debe cambiar la interpretación activa.");
+
+        if (skin.TrySetLegacyCompatibilityMode(targetMode, () => false)
+            || skin.Version != previousVersion
+            || skin.LegacyCompatibilityMode != previousMode
+            || !ReferenceEquals(skin.CurrentDefinition, previousDefinition)
+            || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+            || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState))
+            throw new InvalidOperationException("El rollback por persistencia fallida alteró el perfil legacy activo.");
+
+        if (!skin.TrySetLegacyCompatibilityMode(targetMode, () =>
+            {
+                smokeSettings.LegacySkinCompatibilityMode = targetMode;
+                return true;
+            }))
+            throw new InvalidDataException("No se pudo reconstruir la skin con el perfil legacy destino.");
+
+        skinCatalog!.SetCompatibilityMode(targetMode);
+        ManiaSkinCompatibilityProfile expectedProfile = targetMode == LegacySkinCompatibilityMode.Stable
+            ? ManiaSkinCompatibilityProfile.StableLegacy : ManiaSkinCompatibilityProfile.LazerLegacy;
+        if (skin.Version != previousVersion + 1
+            || skin.LegacyCompatibilityMode != targetMode
+            || skin.CurrentDefinition.Provider != SkinProviderKind.OsuLegacy
+            || skin.CurrentDefinition.CompatibilityProfile != expectedProfile
+            || ReferenceEquals(skin.CurrentDefinition, previousDefinition)
+            || ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+            || ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudPrefixState)
+            || !string.Equals(skin.CurrentSkinDirectory, previousDirectory, StringComparison.OrdinalIgnoreCase)
+            || smokeSettings.LegacySkinCompatibilityMode != targetMode
+            || !string.Equals(smokeSettings.SelectedSkinDirectory, previousSelection, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(hitSoundPlayer.SkinDirectory, previousHitsoundDirectory, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("El cambio de perfil dejó provider, selección, caches o hitsounds inconsistentes.");
+
+        AssertResolvedKeymodesPrepared();
+        AssertHudGlyphsPrepared();
+        playfield!.Update(1040, score!, 8, null, downScroll);
+        Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {previousMode} -> {targetMode}; provider={skin.CurrentDefinition.Provider}; version={skin.Version}");
     }
 
     protected override void Update(GameTime gameTime)

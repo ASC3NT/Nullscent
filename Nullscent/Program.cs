@@ -93,6 +93,33 @@ namespace Nullscent
                     profileSmoke.Run();
                     return;
                 }
+                if (args.Length > 0 && args[0] == "--skin-visual-profile-cycle-smoke")
+                {
+                    if (args.Length < 6)
+                        throw new ArgumentException("Uso: --skin-visual-profile-cycle-smoke <skinPath> <keyCount> <initialMode> <outputDir> <targetMode...>");
+                    if (!int.TryParse(args[2], out int profileCycleKeyCount) || profileCycleKeyCount < 1 || profileCycleKeyCount > 18)
+                        throw new ArgumentException($"Keycount inválido para el ciclo de perfil: {args[2]}");
+                    if (!TryParseLegacySkinMode(args[3], out Skin.LegacySkinCompatibilityMode initialProfileMode))
+                        throw new ArgumentException($"Perfil legacy inicial inválido: {args[3]}");
+
+                    var profileSequence = new Skin.LegacySkinCompatibilityMode[args.Length - 5];
+                    for (int i = 5; i < args.Length; i++)
+                    {
+                        if (!TryParseLegacySkinMode(args[i], out profileSequence[i - 5]))
+                            throw new ArgumentException($"Perfil legacy inválido en el paso {i - 4}: {args[i]}");
+                    }
+
+                    string profileCycleOutputDirectory = Path.GetFullPath(args[4]);
+                    Directory.CreateDirectory(profileCycleOutputDirectory);
+                    using var profileCycleSmoke = new Skin.SkinVisualSmokeGame(
+                        args[1], profileCycleKeyCount, Path.Combine(profileCycleOutputDirectory, "00-initial.png"), true,
+                        viewportWidth: 1920, viewportHeight: 1080,
+                        legacyCompatibilityMode: initialProfileMode,
+                        compatibilitySequence: profileSequence,
+                        compatibilitySequenceOutputDirectory: profileCycleOutputDirectory);
+                    profileCycleSmoke.Run();
+                    return;
+                }
                 if (args.Length is >= 4 and <= 7 && args[0] == "--skin-visual-timeline-smoke"
                     && int.TryParse(args[2], out int timelineKeyCount))
                 {
@@ -128,7 +155,8 @@ namespace Nullscent
 #if DEBUG
                 if (args.Length > 0 && (args[0] == "--skin-tests" || args[0] == "--skin-visual-smoke" || args[0] == "--skin-visual-switch-smoke"
                     || args[0] == "--skin-visual-profile-smoke" || args[0] == "--skin-visual-resize-smoke"
-                    || args[0] == "--skin-visual-timeline-smoke" || args[0] == "--skin-visual-cycle-smoke")) Environment.ExitCode = 1;
+                    || args[0] == "--skin-visual-timeline-smoke" || args[0] == "--skin-visual-cycle-smoke"
+                    || args[0] == "--skin-visual-profile-cycle-smoke")) Environment.ExitCode = 1;
 #endif
             }
             finally

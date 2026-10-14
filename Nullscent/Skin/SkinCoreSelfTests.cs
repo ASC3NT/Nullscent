@@ -22,6 +22,8 @@ namespace Nullscent.Skin
             TestUserOverridePrecedence();
             TestSkinScrollPreferenceAndLegacyFlips();
             TestCompatibilityProfilesAndReceptorAnchors();
+            TestLegacyVersionFlipDefaults();
+            TestFlipPropertyClassificationByProfile();
             TestLegacyCompatibilitySettingRollback();
             TestStagePresentationNormalizationAndLayout();
             TestLongNoteBodyVisualRules();
@@ -32,7 +34,7 @@ namespace Nullscent.Skin
             TestHoldLightingAnimationLifecycle();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 20 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 22 pruebas deterministas pasaron.");
         }
 
         private static void TestResolvedCollectionsAreReadOnlySnapshots()
@@ -129,6 +131,14 @@ namespace Nullscent.Skin
                 Assert(skin.LegacyVersion == null, "A skin without skin.ini should use latest rules.");
                 Assert(skin.Keymodes.ContainsKey(4) && skin.Keymodes.ContainsKey(7), "Conventional skins should resolve without a skin.ini keymode section.");
                 Assert(skin.Keymodes[7].Lanes.Count == 7, "A keymode profile should be created for the requested count.");
+                Assert(ManiaSkinRules.FlipNote(skin.Keymodes[4], 0, "", downScroll: false),
+                    "A legacy skin without skin.ini should use the latest note auto-flip rules.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), "[Mania]\nKeys: 4\n");
+                ManiaSkinDefinition iniWithoutVersion = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp));
+                Assert(iniWithoutVersion.LegacyVersion == 1.0
+                    && !ManiaSkinRules.FlipNote(iniWithoutVersion.Keymodes[4], 0, "", downScroll: false),
+                    "A present skin.ini without Version should use v1.0 and not receive v2.5 note flips.");
             }
             finally { Directory.Delete(temp, true); }
         }
@@ -443,6 +453,121 @@ namespace Nullscent.Skin
                 ManiaLayoutResult nativeLayout = ManiaLayoutEngine.Calculate(native, 4, 1920, 1080, true);
                 AssertNear(nativeLayout.ReceptorSpriteY, nativeLayout.ReceptorY,
                     "Native skins should keep the receptor attached to their normalized receptor line.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyVersionFlipDefaults()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "NullscentSkinTest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.4
+                    [Mania]
+                    Keys: 4
+                    NoteFlipWhenUpsideDown: 1
+                    """);
+                ManiaSkinDefinition pre25 = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp));
+                ManiaKeymodeDefinition pre25Mode = pre25.Keymodes[4];
+                Assert(!ManiaSkinRules.FlipNote(pre25Mode, 0, "", downScroll: false)
+                    && !ManiaSkinRules.FlipNote(pre25Mode, 0, "H", downScroll: false)
+                    && !ManiaSkinRules.FlipNote(pre25Mode, 0, "T", downScroll: true),
+                    "Stable legacy skins below v2.5 must not vertically flip note sprites, even when the option is present.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.5
+                    [Mania]
+                    Keys: 4
+                    """);
+                ManiaKeymodeDefinition v25Mode = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp)).Keymodes[4];
+                Assert(ManiaSkinRules.FlipNote(v25Mode, 0, "", downScroll: false)
+                    && ManiaSkinRules.FlipNote(v25Mode, 0, "T", downScroll: true),
+                    "Stable legacy v2.5+ note sprites should use the documented default upscroll/tail flipping.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.5
+                    [Mania]
+                    Keys: 4
+                    NoteFlipWhenUpsideDown: 0
+                    KeyFlipWhenUpsideDown: 0
+                    """);
+                ManiaKeymodeDefinition stableOverrideMode = LegacyManiaSkinAdapter.Decode(
+                    SkinConfigParser.Parse(temp), compatibilityMode: LegacySkinCompatibilityMode.Stable).Keymodes[4];
+                ManiaKeymodeDefinition lazerOverrideMode = LegacyManiaSkinAdapter.Decode(
+                    SkinConfigParser.Parse(temp), compatibilityMode: LegacySkinCompatibilityMode.Lazer).Keymodes[4];
+                Assert(!ManiaSkinRules.FlipNote(stableOverrideMode, 0, "", downScroll: false)
+                    && !ManiaSkinRules.FlipKey(stableOverrideMode, 0, pressed: false, downScroll: false),
+                    "Stable v2.5 flip overrides should control note and key orientation.");
+                Assert(!lazerOverrideMode.SupportsFlipOverrides
+                    && ManiaSkinRules.FlipNote(lazerOverrideMode, 0, "", downScroll: false)
+                    && ManiaSkinRules.FlipKey(lazerOverrideMode, 0, pressed: false, downScroll: false),
+                    "Current Lazer legacy drawables orient sprites from scroll direction and do not consume skin flip overrides.");
+
+                var nativeMode = new ManiaKeymodeDefinition();
+                Assert(ManiaSkinRules.FlipNote(nativeMode, 0, "", downScroll: false),
+                    "The version-gated legacy flip rule must not change native skin defaults.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestFlipPropertyClassificationByProfile()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "NullscentSkinTest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllBytes(Path.Combine(temp, "mania-note1.png"), Array.Empty<byte>());
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.4
+                    [Mania]
+                    Keys: 4
+                    NoteFlipWhenUpsideDown: 1
+                    NoteFlipWhenUpsideDown0H: 1
+                    KeyFlipWhenUpsideDown: 1
+                    KeyFlipWhenUpsideDown1D: 1
+                    """);
+
+                SkinValidation stablePre25 = new SkinCatalog(temp, compatibilityMode: LegacySkinCompatibilityMode.Stable)
+                    .Validate(temp);
+                Assert(stablePre25.ParsedButNotApplied.Contains("NoteFlipWhenUpsideDown")
+                    && stablePre25.ParsedButNotApplied.Contains("NoteFlipWhenUpsideDown0H")
+                    && stablePre25.ParsedButNotApplied.Contains("KeyFlipWhenUpsideDown")
+                    && stablePre25.ParsedButNotApplied.Contains("KeyFlipWhenUpsideDown1D"),
+                    "Flip properties requiring v2.5 should be reported as not applied for older Stable skins.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.5
+                    [Mania]
+                    Keys: 4
+                    NoteFlipWhenUpsideDown: 1
+                    NoteFlipWhenUpsideDown0H: 1
+                    KeyFlipWhenUpsideDown: 1
+                    KeyFlipWhenUpsideDown1D: 1
+                    """);
+                SkinValidation stable25 = new SkinCatalog(temp, compatibilityMode: LegacySkinCompatibilityMode.Stable)
+                    .Validate(temp);
+                SkinValidation lazer25 = new SkinCatalog(temp, compatibilityMode: LegacySkinCompatibilityMode.Lazer)
+                    .Validate(temp);
+                Assert(!stable25.ParsedButNotApplied.Contains("NoteFlipWhenUpsideDown")
+                    && !stable25.ParsedButNotApplied.Contains("NoteFlipWhenUpsideDown0H")
+                    && !stable25.ParsedButNotApplied.Contains("KeyFlipWhenUpsideDown")
+                    && !stable25.ParsedButNotApplied.Contains("KeyFlipWhenUpsideDown1D")
+                    && !stable25.Unsupported.Contains("NoteFlipWhenUpsideDown")
+                    && !stable25.Unsupported.Contains("NoteFlipWhenUpsideDown0H")
+                    && !stable25.Unsupported.Contains("KeyFlipWhenUpsideDown"),
+                    "Stable v2.5 flip properties should be reported as applied.");
+                Assert(lazer25.ParsedButNotApplied.Contains("NoteFlipWhenUpsideDown")
+                    && lazer25.ParsedButNotApplied.Contains("NoteFlipWhenUpsideDown0H")
+                    && lazer25.ParsedButNotApplied.Contains("KeyFlipWhenUpsideDown")
+                    && lazer25.ParsedButNotApplied.Contains("KeyFlipWhenUpsideDown1D"),
+                    "The experimental Lazer profile should report parsed flip properties as not applied.");
             }
             finally { Directory.Delete(temp, true); }
         }

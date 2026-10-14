@@ -101,7 +101,7 @@ The adapter uses the `skin.ini` version contract:
 * A skin with no `skin.ini` uses latest legacy conventions and conventional asset names.
 * A present `skin.ini` with no `Version` uses legacy version 1.0.
 * Version 2.4 enables the documented two-sided column edge behavior and uses the post-2.4 HUD scale.
-* Version 2.5 enables `NoteBodyStyle`, per-column lighting widths, and detailed note/key flip overrides.
+* Version 2.5 enables `NoteBodyStyle`, per-column lighting widths, and Stable's detailed note/key flip overrides. Stable does not direction-flip mania note sprites before v2.5. The experimental LazerLegacy profile follows current lazer's directional sprite flipping and does not apply the parsed legacy note/key flip settings.
 
 Each `[Mania]` section is keyed by `Keys`. Extra list entries are ignored and missing entries use format defaults. The adapter emits profiles for the keycounts supported by conventional names even if the folder has no explicit `Keys` section.
 
@@ -117,6 +117,8 @@ Mania judgement sprites (`mania-hit0`, `mania-hit50`, `mania-hit100`, `mania-hit
 
 `SUPPORTED` means the property reaches an active renderer/layout consumer. `ADAPTED` means it is applied using a documented Nullscent policy where exact Stable semantics are not established. `IGNORED BY DESIGN` means it is parsed for useful diagnostics but the corresponding feature is not part of this renderer. `UNSUPPORTED` means no usable normalized behavior exists.
 
+Legacy property diagnostics use the selected compatibility profile and the skin's effective version. Flip commands that require v2.5 are reported as parsed but unapplied on older Stable skins; the same parsed commands are reported as unapplied under the current experimental LazerLegacy profile.
+
 | Properties | Status | Current behavior |
 | --- | --- | --- |
 | `Keys`, `ColumnWidth`, `ColumnSpacing`, `ColumnLine`, `ColumnLineWidth` | SUPPORTED | Per-keymode lanes and line geometry; missing values use defaults. |
@@ -128,7 +130,7 @@ Mania judgement sprites (`mania-hit0`, `mania-hit50`, `mania-hit100`, `mania-hit
 | `mania-hit#` judgement animations | ADAPTED | StableLegacy uses the wiki's fixed 60 FPS loop. LazerLegacy follows `ManiaLegacySkinTransformer` at fixed 20 FPS. |
 | `NoteImage#`, `NoteImage#H/#L/#T`, `KeyImage#`, `KeyImage#D` | SUPPORTED | Resolve per-column assets; absent LN tail may reuse the head. Missing active-skin assets fall back to built-in assets. |
 | `NoteBodyStyle`, `NoteBodyStyle#` | ADAPTED | Stable `0` stretches, `1` tiles from tail to head, `2` from head to tail; recognized textual aliases normalize to the same enum. Applied for version 2.5+. The experimental Lazer profile collapses non-stretch styles to the tail-side repeat. |
-| `NoteFlipWhenUpsideDown[#][H/L/T]`, `KeyFlipWhenUpsideDown[#][D]` | SUPPORTED | Global, column, note-piece, and pressed-key rules normalize to profile maps; only active for version 2.5+. |
+| `NoteFlipWhenUpsideDown[#][H/L/T]`, `KeyFlipWhenUpsideDown[#][D]` | SUPPORTED in StableLegacy v2.5+; ignored by LazerLegacy | Stable applies global, column, note-piece, and pressed-key overrides from v2.5. Stable note auto-flip is disabled before v2.5. Current LazerLegacy auto-flips sprites by scroll direction and does not consume these configuration keys; that profile remains experimental. |
 | `UpsideDown` | ADAPTED | A skin orientation preference; it controls scroll only while the user has enabled “Use Skin Scroll Direction”. Explicit user choice wins. |
 | `Colour#`, `ColourHold`, `ColourBreak`, `ColourJudgementLine`, `ColourColumnLine` | SUPPORTED | Alpha is preserved; `ColourHold` tints the combo counter while holding, `ColourBreak` tints its break display, and lane colors feed their corresponding visuals. |
 | `ColourLight#` | SUPPORTED | Tints that lane's `StageLight` only. `LightingN` and `LightingL` remain untinted for legacy skins; native manifests retain their existing `lightColor` tint and may specify `stageLightColor` independently. |

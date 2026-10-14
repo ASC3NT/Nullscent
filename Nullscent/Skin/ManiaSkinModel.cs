@@ -143,6 +143,7 @@ namespace Nullscent.Skin
         public bool FlipLightingHorizontallyWhenUpsideDown { get; init; }
         public bool? UpsideDown { get; init; }
         public bool SupportsFlipOverrides { get; init; }
+        public bool DefaultNoteFlipWhenUpsideDown { get; init; } = true;
         public bool? NoteFlipWhenUpsideDown { get; init; }
         public bool? KeyFlipWhenUpsideDown { get; init; }
         public bool DrawColumnEdgesBothSides { get; init; } = true;
@@ -262,7 +263,8 @@ namespace Nullscent.Skin
         {
             var modes = new Dictionary<int, ManiaKeymodeDefinition>();
             bool supportsBodyStyle = config.IsVersionAtLeast(2.5);
-            bool supportsFlipOverrides = config.IsVersionAtLeast(2.5);
+            bool supportsFlipOverrides = compatibilityMode == LegacySkinCompatibilityMode.Stable
+                                         && config.IsVersionAtLeast(2.5);
             AnimationTimingDefinition? lazerLightingTiming = compatibilityMode == LegacySkinCompatibilityMode.Lazer
                 ? AnimationTimingDefinition.SpreadOverDuration(170d, 60d)
                 : null;
@@ -325,6 +327,10 @@ namespace Nullscent.Skin
                     FlipLightingHorizontallyWhenUpsideDown = compatibilityMode == LegacySkinCompatibilityMode.Stable,
                     UpsideDown = source.UpsideDown,
                     SupportsFlipOverrides = supportsFlipOverrides,
+                    // Stable reference does not direction-flip mania note sprites before v2.5.
+                    // Current Lazer legacy drawables auto-flip by scroll direction regardless of skin version.
+                    DefaultNoteFlipWhenUpsideDown = compatibilityMode == LegacySkinCompatibilityMode.Lazer
+                                                    || config.IsVersionAtLeast(2.5),
                     NoteFlipWhenUpsideDown = supportsFlipOverrides ? source.NoteFlipWhenUpsideDown : null,
                     KeyFlipWhenUpsideDown = supportsFlipOverrides ? source.KeyFlipWhenUpsideDown : null,
                     DrawColumnEdgesBothSides = config.IsVersionAtLeast(2.4),

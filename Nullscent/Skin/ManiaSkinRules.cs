@@ -13,13 +13,13 @@ namespace Nullscent.Skin
 
         public static bool FlipNote(ManiaKeymodeDefinition profile, int columnIndex, string part, bool downScroll)
         {
-            bool flip = true;
+            bool flip = profile.DefaultNoteFlipWhenUpsideDown;
             if (profile.SupportsFlipOverrides)
             {
                 string normalizedPart = part.ToUpperInvariant();
                 flip = profile.NoteFlips.TryGetValue($"{columnIndex}{normalizedPart}", out bool partFlip) ? partFlip
                     : profile.NoteFlips.TryGetValue(columnIndex.ToString(CultureInfo.InvariantCulture), out bool columnFlip) ? columnFlip
-                    : profile.NoteFlipWhenUpsideDown ?? true;
+                    : profile.NoteFlipWhenUpsideDown ?? profile.DefaultNoteFlipWhenUpsideDown;
             }
 
             return part.Equals("T", StringComparison.OrdinalIgnoreCase) ? downScroll && flip : !downScroll && flip;

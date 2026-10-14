@@ -141,12 +141,13 @@ namespace Nullscent.Skin
                         result.Errors.Add(result.Config.ParseError!);
                         return result;
                     }
+                    LegacySkinCompatibilityMode selectedCompatibilityMode = compatibilityMode ?? CompatibilityMode;
                     result.Definition = LegacyManiaSkinAdapter.Decode(result.Config, result.Directory,
-                        compatibilityMode ?? CompatibilityMode);
+                        selectedCompatibilityMode);
 
                     if (result.HasSkinIni)
                     {
-                        ReadLegacyClassification(iniPath, result);
+                        ReadLegacyClassification(iniPath, result, result.Config, selectedCompatibilityMode);
                         if (result.ManiaKeyModes.Count == 0)
                             result.ManiaKeyModes.AddRange(result.Config.ManiaConfigs.Keys.OrderBy(k => k));
                         if (result.ManiaKeyModes.Count == 0)
@@ -190,7 +191,8 @@ namespace Nullscent.Skin
             return result;
         }
 
-        private static void ReadLegacyClassification(string iniPath, SkinValidation result)
+        private static void ReadLegacyClassification(string iniPath, SkinValidation result,
+            SkinConfig config, LegacySkinCompatibilityMode compatibilityMode)
         {
             string section = string.Empty;
             foreach (string raw in File.ReadAllLines(iniPath))
@@ -214,6 +216,9 @@ namespace Nullscent.Skin
                     }
                     else result.Warnings.Add($"Keys inválido: {value}");
                 }
+                else if (IsFlipProperty(key)
+                    && (compatibilityMode != LegacySkinCompatibilityMode.Stable || !config.IsVersionAtLeast(2.5)))
+                    result.ParsedButNotApplied.Add(key);
                 else if (parsedButNotAppliedMania.Contains(key))
                     result.ParsedButNotApplied.Add(key);
                 else if (!IsApplied(key)) result.Unsupported.Add(key);
@@ -221,15 +226,18 @@ namespace Nullscent.Skin
         }
 
         private static bool Matches(string key, string pattern) => Regex.IsMatch(key, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static bool IsFlipProperty(string key) => key.Equals("NoteFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("KeyFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase)
+            || Matches(key, @"^(?:NoteFlipWhenUpsideDown\d+[HLT]?|KeyFlipWhenUpsideDown\d+D?)$");
         private static bool IsApplied(string key) => supportedMania.Contains(key)
             || Matches(key, @"^NoteImage\d+[HLT]?$")
             || Matches(key, @"^KeyImage\d+D?$")
             || Matches(key, @"^Hit(?:0|50|100|200|300|300g)$")
             || Matches(key, @"^Colour(?:\d+|Light\d+)$")
             || Matches(key, @"^NoteBodyStyle\d+$")
-            || Matches(key, @"^(?:Note|Key)FlipWhenUpsideDown(?:\d+[HLT]?|\d+D)?$")
-            || key.Equals("NoteFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase)
-            || key.Equals("KeyFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase);
+            || (key.Equals("NoteFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("KeyFlipWhenUpsideDown", StringComparison.OrdinalIgnoreCase)
+                || Matches(key, @"^(?:NoteFlipWhenUpsideDown\d+[HLT]?|KeyFlipWhenUpsideDown\d+D?)$"));
 
         private static bool IsRecognized(string name)
         {

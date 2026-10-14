@@ -25,9 +25,52 @@ namespace Nullscent.Skin
         private readonly Dictionary<Texture2D, ResolvedSkinAsset> _assetInfo = new();
         private readonly Dictionary<string, List<Texture2D>?> _animationCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, ResolvedManiaKeymode> _resolvedKeymodes = new();
+        private readonly Dictionary<string, ResolvedNumberSet> _resolvedNumberSets = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _reportedDiagnostics = new(StringComparer.OrdinalIgnoreCase);
         private Texture2D? _blankTexture;
         private LegacySkinCompatibilityMode _legacyCompatibilityMode;
+
+        private const string HudNumberCharacters = "0123456789%.,x";
+
+        private sealed class ResolvedNumberSet
+        {
+            public IReadOnlyDictionary<char, Texture2D?> Glyphs { get; }
+            public float MaxLogicalHeight { get; }
+
+            public ResolvedNumberSet(IDictionary<char, Texture2D?> glyphs, float maxLogicalHeight)
+            {
+                Glyphs = new Dictionary<char, Texture2D?>(glyphs);
+                MaxLogicalHeight = maxLogicalHeight;
+            }
+        }
+
+        private sealed class SkinRuntimeState
+        {
+            public SkinAssetResolver Assets { get; }
+            public ManiaSkinDefinition Definition { get; }
+            public string Directory { get; }
+            public SkinValidation? Validation { get; }
+            public LegacySkinCompatibilityMode CompatibilityMode { get; }
+            public Dictionary<Texture2D, ResolvedSkinAsset> AssetInfo { get; }
+            public Dictionary<string, List<Texture2D>?> AnimationCache { get; }
+            public Dictionary<int, ResolvedManiaKeymode> ResolvedKeymodes { get; }
+            public Dictionary<string, ResolvedNumberSet> ResolvedNumberSets { get; }
+            public HashSet<string> ReportedDiagnostics { get; }
+
+            public SkinRuntimeState(SkinManager manager)
+            {
+                Assets = manager._assets;
+                Definition = manager._currentDefinition;
+                Directory = manager.CurrentSkinDirectory;
+                Validation = manager.CurrentValidation;
+                CompatibilityMode = manager._legacyCompatibilityMode;
+                AssetInfo = new Dictionary<Texture2D, ResolvedSkinAsset>(manager._assetInfo);
+                AnimationCache = new Dictionary<string, List<Texture2D>?>(manager._animationCache, StringComparer.OrdinalIgnoreCase);
+                ResolvedKeymodes = new Dictionary<int, ResolvedManiaKeymode>(manager._resolvedKeymodes);
+                ResolvedNumberSets = new Dictionary<string, ResolvedNumberSet>(manager._resolvedNumberSets, StringComparer.OrdinalIgnoreCase);
+                ReportedDiagnostics = new HashSet<string>(manager._reportedDiagnostics, StringComparer.OrdinalIgnoreCase);
+            }
+        }
 
         public ManiaSkinDefinition CurrentDefinition => _currentDefinition;
         public LegacySkinCompatibilityMode LegacyCompatibilityMode => _legacyCompatibilityMode;
@@ -35,6 +78,13 @@ namespace Nullscent.Skin
         public long Version { get; private set; }
         public event Action<long>? SkinChanged;
         public SkinValidation? CurrentValidation { get; private set; }
+
+#if DEBUG
+        internal bool HasResolvedKeymode(int keyCount) => _resolvedKeymodes.ContainsKey(keyCount);
+        internal bool HasPreparedNumberPrefix(string prefix) => _resolvedNumberSets.ContainsKey(prefix);
+        internal object? GetPreparedNumberPrefixState(string prefix) =>
+            _resolvedNumberSets.TryGetValue(prefix, out ResolvedNumberSet? state) ? state : null;
+#endif
 
         public SkinManager(GraphicsDevice graphicsDevice)
         {
@@ -86,46 +136,10 @@ namespace Nullscent.Skin
                 { "cursor", "mania-note1", "mania-note2", "mania-key1", "mania-key2" };
                 foreach (string name in names)
                     candidate.Resolve(name);
-                if (candidate.Warnings.Count > 0)
-                {
-                    validation.Warnings.AddRange(candidate.Warnings);
-                    validation.Status = SkinValidity.Partial;
-                }
-                var previous = _assets;
-                var previousDefinition = _currentDefinition;
-                var previousDirectory = CurrentSkinDirectory;
-                var previousValidation = CurrentValidation;
-                var previousCompatibilityMode = _legacyCompatibilityMode;
-                _assets = candidate;
+                SkinAssetResolver preparedAssets = candidate;
                 candidate = null;
-                _currentDefinition = definition;
-                if (definition.Provider == SkinProviderKind.OsuLegacy)
-                    _legacyCompatibilityMode = candidateCompatibilityMode;
-                CurrentSkinDirectory = validation.Directory;
-                CurrentValidation = validation;
-                bool persisted;
-                try { persisted = persistSelection?.Invoke() ?? true; }
-                catch (Exception ex) { validation.Errors.Add(ex.Message); persisted = false; }
-                if (!persisted)
-                {
-                    _assets.Dispose();
-                    _assets = previous;
-                    _currentDefinition = previousDefinition;
-                    CurrentSkinDirectory = previousDirectory;
-                    CurrentValidation = previousValidation;
-                    _legacyCompatibilityMode = previousCompatibilityMode;
-                    validation.Errors.Add("No se pudo guardar la selección; se conservó la skin anterior.");
-                    return false;
-                }
-                _assetInfo.Clear();
-                _animationCache.Clear();
-                _resolvedKeymodes.Clear();
-                _reportedDiagnostics.Clear();
-                Version++;
-                NotifySkinChanged();
-                try { previous.Dispose(); }
-                catch (Exception ex) { Console.WriteLine($"[SkinManager] Previous skin cleanup failed: {ex.Message}"); }
-                return true;
+                return TryCommitActivation(preparedAssets, definition, validation.Directory, validation,
+                    candidateCompatibilityMode, persistSelection);
             }
             catch (Exception ex)
             {
@@ -170,37 +184,106 @@ namespace Nullscent.Skin
 
         public bool TryActivateInternal(Func<bool>? persistSelection = null)
         {
-            var previous = _assets;
-            var previousDefinition = _currentDefinition;
-            var previousDirectory = CurrentSkinDirectory;
-            var previousValidation = CurrentValidation;
             string? root = System.IO.Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null;
             var candidate = new SkinAssetResolver(_graphicsDevice, root, Core.SettingsService.Instance.HighResolutionSkins);
+            return TryCommitActivation(candidate, _internalDefinition, string.Empty, null,
+                _legacyCompatibilityMode, persistSelection);
+        }
+
+        private bool TryCommitActivation(SkinAssetResolver candidate, ManiaSkinDefinition definition,
+            string directory, SkinValidation? validation, LegacySkinCompatibilityMode compatibilityMode,
+            Func<bool>? persistSelection)
+        {
+            var previous = new SkinRuntimeState(this);
             _assets = candidate;
-            _currentDefinition = _internalDefinition;
-            CurrentSkinDirectory = string.Empty;
-            CurrentValidation = null;
-            bool persisted;
-            try { persisted = persistSelection?.Invoke() ?? true; }
-            catch (Exception ex) { Console.WriteLine($"[SkinManager] Could not persist internal skin: {ex.Message}"); persisted = false; }
-            if (!persisted)
+            _currentDefinition = definition;
+            if (definition.Provider == SkinProviderKind.OsuLegacy)
+                _legacyCompatibilityMode = compatibilityMode;
+            CurrentSkinDirectory = directory;
+            CurrentValidation = validation;
+
+            try
             {
-                candidate.Dispose();
-                _assets = previous;
-                _currentDefinition = previousDefinition;
-                CurrentSkinDirectory = previousDirectory;
-                CurrentValidation = previousValidation;
+                ClearResolvedState();
+                // ManiaPlayfield and its drawables must never discover skin files or
+                // construct textures during Draw. Prepare every supported keymode in
+                // the same activation transaction, including modes which will use the
+                // internal fallback provider.
+                for (int keyCount = 1; keyCount <= 18; keyCount++)
+                    GetResolvedKeymode(keyCount);
+                PrepareHudAssets();
+
+                if (validation != null && candidate.Warnings.Count > 0)
+                {
+                    foreach (string warning in candidate.Warnings)
+                        if (!validation.Warnings.Contains(warning, StringComparer.OrdinalIgnoreCase))
+                            validation.Warnings.Add(warning);
+                    validation.Status = SkinValidity.Partial;
+                }
+
+                bool persisted;
+                try { persisted = persistSelection?.Invoke() ?? true; }
+                catch (Exception ex)
+                {
+                    validation?.Errors.Add(ex.Message);
+                    persisted = false;
+                }
+
+                if (!persisted)
+                {
+                    validation?.Errors.Add("No se pudo guardar la selección; se conservó la skin anterior.");
+                    RestoreRuntimeState(previous, candidate);
+                    return false;
+                }
+
+                Version++;
+                NotifySkinChanged();
+                try { previous.Assets.Dispose(); }
+                catch (Exception ex) { Console.WriteLine($"[SkinManager] Previous skin cleanup failed: {ex.Message}"); }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                validation?.Errors.Add($"No se pudo resolver la skin: {ex.Message}");
+                Console.WriteLine($"[SkinManager] Candidate skin resolution failed: {ex.Message}");
+                RestoreRuntimeState(previous, candidate);
                 return false;
             }
+        }
+
+        private void ClearResolvedState()
+        {
             _assetInfo.Clear();
             _animationCache.Clear();
             _resolvedKeymodes.Clear();
+            _resolvedNumberSets.Clear();
             _reportedDiagnostics.Clear();
-            Version++;
-            NotifySkinChanged();
-            try { previous.Dispose(); }
-            catch (Exception ex) { Console.WriteLine($"[SkinManager] Previous skin cleanup failed: {ex.Message}"); }
-            return true;
+        }
+
+        private void RestoreRuntimeState(SkinRuntimeState state, SkinAssetResolver failedAssets)
+        {
+            _assets = state.Assets;
+            _currentDefinition = state.Definition;
+            CurrentSkinDirectory = state.Directory;
+            CurrentValidation = state.Validation;
+            _legacyCompatibilityMode = state.CompatibilityMode;
+
+            _assetInfo.Clear();
+            foreach (var pair in state.AssetInfo) _assetInfo.Add(pair.Key, pair.Value);
+            _animationCache.Clear();
+            foreach (var pair in state.AnimationCache) _animationCache.Add(pair.Key, pair.Value);
+            _resolvedKeymodes.Clear();
+            foreach (var pair in state.ResolvedKeymodes) _resolvedKeymodes.Add(pair.Key, pair.Value);
+            _resolvedNumberSets.Clear();
+            foreach (var pair in state.ResolvedNumberSets) _resolvedNumberSets.Add(pair.Key, pair.Value);
+            _reportedDiagnostics.Clear();
+            foreach (string diagnostic in state.ReportedDiagnostics) _reportedDiagnostics.Add(diagnostic);
+
+            if (!ReferenceEquals(failedAssets, state.Assets))
+            {
+                try { failedAssets.Dispose(); }
+                catch (Exception ex) { Console.WriteLine($"[SkinManager] Candidate cleanup failed: {ex.Message}"); }
+            }
         }
 
         private void NotifySkinChanged()
@@ -211,6 +294,41 @@ namespace Nullscent.Skin
                 try { handler(Version); }
                 catch (Exception ex) { Console.WriteLine($"[SkinManager] SkinChanged subscriber failed: {ex.Message}"); }
             }
+        }
+
+        private void PrepareHudAssets()
+        {
+            foreach (string asset in new[] { "scorebar-bg", "scorebar-colour", "cursor", "hitlighting" })
+                ResolveAsset(asset);
+
+            foreach (string prefix in new[] { "score", "default", _currentDefinition.ComboPrefix })
+            {
+                if (string.IsNullOrWhiteSpace(prefix)) continue;
+                var glyphs = new Dictionary<char, Texture2D?>();
+                float maxHeight = 0f;
+                foreach (char character in HudNumberCharacters)
+                {
+                    Texture2D? texture = ResolveAsset(NumberGlyphAssetName(prefix, character)).Texture;
+                    if (texture == null && prefix.Equals("default", StringComparison.OrdinalIgnoreCase))
+                        texture = ResolveAsset(NumberGlyphAssetName("score", character)).Texture;
+                    glyphs[character] = texture;
+                    if (texture != null)
+                        maxHeight = Math.Max(maxHeight, GetLogicalSize(texture).Y);
+                }
+                _resolvedNumberSets[prefix] = new ResolvedNumberSet(glyphs, maxHeight);
+            }
+        }
+
+        private static string NumberGlyphAssetName(string prefix, char character)
+        {
+            string suffix = character switch
+            {
+                '%' => "percent",
+                '.' => "dot",
+                ',' => "comma",
+                _ => character.ToString()
+            };
+            return $"{prefix}-{suffix}";
         }
 
         public ResolvedSkinAsset ResolveAsset(string fileName)
@@ -304,6 +422,11 @@ namespace Nullscent.Skin
             return CreateFallbackMode(keyCount);
         }
 
+        /// <summary>
+        /// Returns the immutable per-keymode animation and asset snapshot. Activation
+        /// materializes every supported keycount before publishing SkinChanged, so
+        /// gameplay draw calls normally only read this cache.
+        /// </summary>
         public ResolvedManiaKeymode GetResolvedKeymode(int keyCount)
         {
             if (_resolvedKeymodes.TryGetValue(keyCount, out var cached)) return cached;
@@ -807,82 +930,42 @@ namespace Nullscent.Skin
         public bool DrawNumber(SpriteBatch spriteBatch, string text, Vector2 position, string prefix, float scale, float alpha,
             bool centered = true, float spacing = -2f, Color? tint = null)
         {
-            var textures = new List<Texture2D?>();
-            float maxOriginalHeight = 0;
-
-            for (int i = 0; i < text.Length; i++)
-            {
-                char c = text[i];
-                string textureName;
-                if (c == '%') textureName = $"{prefix}-percent";
-                else if (c == '.') textureName = $"{prefix}-dot";
-                else if (c == ',') textureName = $"{prefix}-comma";
-                else textureName = $"{prefix}-{c}";
-
-                var tex = GetTexture(textureName) ?? GetTexture(textureName + ".png");
-                if (tex == null && prefix == "default")
-                {
-                    textureName = c == '%' ? "score-percent" : (c == '.' ? "score-dot" : $"score-{c}");
-                    tex = GetTexture(textureName) ?? GetTexture(textureName + ".png");
-                }
-
-                textures.Add(tex);
-                if (tex != null)
-                {
-                    float height = GetLogicalSize(tex).Y;
-                    if (height > maxOriginalHeight)
-                    {
-                        maxOriginalHeight = height;
-                    }
-                }
-            }
-
-            bool hasValidTexture = false;
-            foreach (var t in textures)
-            {
-                if (t != null)
-                {
-                    hasValidTexture = true;
-                    break;
-                }
-            }
-            if (!hasValidTexture)
+            if (!_resolvedNumberSets.TryGetValue(prefix, out ResolvedNumberSet? numberSet)
+                || numberSet.MaxLogicalHeight <= 0f || text.Length == 0)
                 return false;
 
-            float totalWidth = 0;
-            var widths = new List<float>();
-            foreach (var tex in textures)
+            float totalWidth = 0f;
+            for (int i = 0; i < text.Length; i++)
             {
-                if (tex != null)
+                Texture2D? texture = numberSet.Glyphs.TryGetValue(text[i], out Texture2D? found) ? found : null;
+                if (texture != null)
                 {
-                    Vector2 logicalSize = GetLogicalSize(tex);
-                    float logicalWidth = logicalSize.X;
-                    float logicalHeight = logicalSize.Y;
-                    float w = logicalWidth * (maxOriginalHeight / logicalHeight) * scale;
-                    widths.Add(w);
-                    totalWidth += w + spacing;
+                    Vector2 logicalSize = GetLogicalSize(texture);
+                    totalWidth += logicalSize.X * (numberSet.MaxLogicalHeight / logicalSize.Y) * scale + spacing;
                 }
                 else
                 {
-                    float w = (maxOriginalHeight > 0 ? maxOriginalHeight : 40f) * 0.6f * scale;
-                    widths.Add(w);
-                    totalWidth += w + spacing;
+                    totalWidth += numberSet.MaxLogicalHeight * 0.6f * scale + spacing;
                 }
             }
             totalWidth -= spacing;
 
             float currentX = centered ? position.X - totalWidth / 2f : position.X;
-            float uniformH = maxOriginalHeight * scale;
+            float uniformH = numberSet.MaxLogicalHeight * scale;
 
-            for (int i = 0; i < textures.Count; i++)
+            for (int i = 0; i < text.Length; i++)
             {
-                var tex = textures[i];
-                float w = widths[i];
-                if (tex != null)
+                Texture2D? texture = numberSet.Glyphs.TryGetValue(text[i], out Texture2D? found) ? found : null;
+                float width;
+                if (texture != null)
                 {
-                    spriteBatch.Draw(tex, new Rectangle((int)currentX, (int)(position.Y - uniformH / 2f), (int)w, (int)uniformH), (tint ?? Color.White) * alpha);
+                    Vector2 logicalSize = GetLogicalSize(texture);
+                    width = logicalSize.X * (numberSet.MaxLogicalHeight / logicalSize.Y) * scale;
+                    spriteBatch.Draw(texture, new Rectangle((int)currentX, (int)(position.Y - uniformH / 2f), (int)width, (int)uniformH), (tint ?? Color.White) * alpha);
                 }
-                currentX += w + spacing;
+                else
+                    width = numberSet.MaxLogicalHeight * 0.6f * scale;
+                currentX += width + spacing;
             }
 
             return true;

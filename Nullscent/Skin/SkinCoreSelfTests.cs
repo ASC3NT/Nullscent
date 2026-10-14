@@ -200,8 +200,56 @@ namespace Nullscent.Skin
                 try { _ = NativeSkinAdapter.Load(temp); }
                 catch (InvalidDataException) { invalidHoldAnchorRejected = true; }
                 Assert(invalidHoldAnchorRejected, "Native hold connection anchors outside 0..0.5 must be rejected during validation.");
+
+                AssertNativeManifestRejected(temp, """
+                    {
+                      "formatVersion": 1,
+                      "keymodes": {
+                        "4": {
+                          "keyCount": 4,
+                          "noteStyle": { "laneWidthRatio": 0 },
+                          "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
+                        }
+                      }
+                    }
+                    """, "Native sprite width ratios must be positive before the skin can activate.");
+
+                AssertNativeManifestRejected(temp, """
+                    {
+                      "formatVersion": 1,
+                      "keymodes": {
+                        "4": {
+                          "keyCount": 4,
+                          "defaultHitPositionRatio": 1.25,
+                          "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
+                        }
+                      }
+                    }
+                    """, "Native hit-position ratios outside 0..1 must be rejected rather than silently clamped.");
+
+                AssertNativeManifestRejected(temp, """
+                    {
+                      "formatVersion": 1,
+                      "keymodes": {
+                        "4": {
+                          "keyCount": 4,
+                          "receptorStyle": { "framesPerSecond": 0 },
+                          "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
+                        }
+                      }
+                    }
+                    """, "Native animation frame rates must be explicitly valid or omitted.");
             }
             finally { Directory.Delete(temp, true); }
+        }
+
+        private static void AssertNativeManifestRejected(string root, string manifest, string message)
+        {
+            File.WriteAllText(Path.Combine(root, NativeSkinAdapter.ManifestFileName), manifest);
+            bool rejected = false;
+            try { _ = NativeSkinAdapter.Load(root); }
+            catch (InvalidDataException) { rejected = true; }
+            Assert(rejected, message);
         }
 
         private static void TestNativeLeftPlacement()

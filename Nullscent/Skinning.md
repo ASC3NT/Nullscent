@@ -74,6 +74,8 @@ bar-hold-tail.png
 
 `formatVersion` is currently `1`. The manifest contains `id`, `name`, `author`, and a `keymodes` object keyed by key count. Every keymode declares its `keyCount`, `placement`, optional hit position, column line settings, shared sprite styles, stage/lighting names, optional `stageStyle`, and a `lanes` array with one record per column. `stageStyle` independently controls `sideHeightScale`, `hintHeightScale`, and `bottomScale`; omitted values keep native defaults.
 
+`placement` accepts `center`, `left`, `right`, or `legacy`. Before activation, `NativeSkinAdapter` validates lane count and dimensions, positive sprite ratios, finite offsets and coordinates, hit-position ratio range, animation rates, stage scales, hold anchors, enums, and nonnegative finite line/lighting widths. An invalid manifest is rejected so it cannot replace the active skin. Position offsets remain signed so a skin can intentionally place a sprite beyond its nominal bounds.
+
 Sprite styles can set `asset`, `pressedAsset`, `laneWidthRatio`, `heightMode`, `heightValue`, offsets, and `framesPerSecond`. `heightMode` is `TextureAspect`, `ReferenceWidthAspect`, or `LaneWidthFraction`. Lane definitions independently support width, following gap, note/receptor/body width ratios, per-piece asset overrides, body mode, and lane/light/hold colors. `holdAssembly.headConnectionRatio` and `tailConnectionRatio` specify how far the body overlaps each cap, from 0 (join at the cap edge) to 0.5 (reach its centre). Bars uses edge joins; Circles overlaps its narrow connector under each circular cap. JSON enums are case-insensitive.
 
 To add a keymode, add its profile and exactly one lane definition per column. To add an animation, name the first image `name-0.png`, then consecutive frames `name-1.png`, etc.; if no numbered frame exists, the resolver treats `name.png` as a static one-frame asset. `_blank` means intentional transparency.
@@ -149,11 +151,11 @@ For a keymode missing from a selected definition, the whole internal keymode pro
 
 `@2x` changes physical source pixels, not logical display size: `LogicalSize` is source width/height divided by two, while `SourcePixelSize` and `TexturePixelSize` retain physical sizes. When the GPU limit is exceeded, the decoder downsamples on CPU with one uniform ratio before upload. Current limits are 8192 per axis for `HiDef` and 2048 for MonoGame `Reach`; logical dimensions and aspect ratio stay based on the original decoded asset.
 
-The `SkinAssetResolver` is owned by a single provider and caches decoded textures. Skin activation clears animation/keymode metadata caches, increments a version, notifies layout consumers, then disposes the previous selected-skin resolver. The internal provider persists for the manager's lifetime.
+The `SkinAssetResolver` is owned by a single provider and caches decoded textures. Activation stages the candidate provider, resolves all supported keymode snapshots (1K through 18K), and prepares score/combo glyphs and scorebar assets before persisting and publishing the new version. HUD number drawing reads those prepared glyph sets without filesystem access or temporary texture/width lists. Only after publication is the old selected-skin resolver disposed. If resolution or persistence fails, the previous definition, provider, and resolved caches are restored together. The internal provider persists for the manager's lifetime.
 
 ## Animation rules
 
-The resolver discovers numbered frames once and stores them in `ResolvedSkinAnimation`; draw calls do not enumerate the filesystem. `FrameAt()` loops through the cached frames.
+The resolver discovers numbered frames during keymode preparation and stores them in `ResolvedSkinAnimation`; Mania draw calls read the prepared snapshot and do not discover keymode assets or enumerate animation frames. The DEBUG smoke harness asserts that all supported keymode snapshots exist before the first draw and checks rollback after injected persistence failures. `FrameAt()` loops through the cached frames. Generic non-Mania assets retain the resolver's lazy, per-name cache.
 
 * `AnimationFramerate` is normalized from `[General]`. A positive value is preserved; `-1` resolves to the frame count, meaning the complete animation spans one second.
 * Mania note, LN head/body/tail, and note/hold lighting use explicit Mania rates and do not inherit the general rate.

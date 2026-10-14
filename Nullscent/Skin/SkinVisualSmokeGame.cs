@@ -107,6 +107,8 @@ internal sealed class SkinVisualSmokeGame : Game
         skin = new SkinManager(GraphicsDevice);
         hitSoundPlayer = new HitSoundPlayer();
         if (!ActivateSkin(skinPath)) throw new InvalidDataException($"No se pudo activar skin inicial: {skin.CurrentValidation?.Summary ?? skinPath}");
+        AssertResolvedKeymodesPrepared();
+        AssertHudGlyphsPrepared();
         ReportResolvedHighResolutionAssets();
 
         playfield = new ManiaPlayfield(GraphicsDevice, batch, keyCount, viewportWidth, viewportHeight, skinManager: skin);
@@ -149,14 +151,27 @@ internal sealed class SkinVisualSmokeGame : Game
                 SkinProviderKind previousProvider = skin.CurrentDefinition.Provider;
                 if (previousProvider != SkinProviderKind.OsuLegacy)
                     throw new InvalidOperationException("El smoke de perfil requiere una skin osu! legacy activa.");
+                ManiaSkinDefinition previousDefinition = skin.CurrentDefinition;
+                ResolvedManiaKeymode previousResolvedMode = skin.GetResolvedKeymode(keyCount);
+                object? previousHudPrefixState = skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix);
+                if (skin.TrySetLegacyCompatibilityMode(switchCompatibilityMode.Value, () => false)
+                    || skin.Version != previousVersion
+                    || !ReferenceEquals(skin.CurrentDefinition, previousDefinition)
+                    || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+                    || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState))
+                    throw new InvalidOperationException("Un fallo de persistencia alteró el perfil o el snapshot de skin activo.");
                 if (!skin.TrySetLegacyCompatibilityMode(switchCompatibilityMode.Value, () => true))
                     throw new InvalidDataException("No se pudo reconstruir la skin con el perfil de compatibilidad destino.");
+                if (ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudPrefixState))
+                    throw new InvalidOperationException("El cambio de perfil conservó el snapshot HUD anterior.");
                 ManiaSkinCompatibilityProfile expectedProfile = switchCompatibilityMode == LegacySkinCompatibilityMode.Stable
                     ? ManiaSkinCompatibilityProfile.StableLegacy : ManiaSkinCompatibilityProfile.LazerLegacy;
                 if (skin.Version != previousVersion + 1
                     || skin.CurrentDefinition.Provider != previousProvider
                     || skin.CurrentDefinition.CompatibilityProfile != expectedProfile)
                     throw new InvalidOperationException("El cambio de perfil no fue atÃ³mico o cambiÃ³ el proveedor de la skin.");
+                AssertResolvedKeymodesPrepared();
+                AssertHudGlyphsPrepared();
                 playfield!.Update(1040, score!, 8, null, downScroll);
                 Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {legacyCompatibilityMode} -> {switchCompatibilityMode}; proveedor={skin.CurrentDefinition.Provider}; {compatibilityOutputPath}");
             }
@@ -164,6 +179,19 @@ internal sealed class SkinVisualSmokeGame : Game
             {
                 long previousVersion = skin!.Version;
                 int previousPersistenceCount = persistenceCount;
+                string previousDirectory = skin.CurrentSkinDirectory;
+                ManiaSkinDefinition previousDefinition = skin.CurrentDefinition;
+                ResolvedManiaKeymode previousResolvedMode = skin.GetResolvedKeymode(keyCount);
+                object? previousHudPrefixState = skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix);
+                SkinValidation rejectedCandidate = skinCatalog!.Validate(switchSkinPath!);
+                if (rejectedCandidate.Status != SkinValidity.Invalid
+                    && (skin.TryActivate(rejectedCandidate, () => false)
+                        || skin.Version != previousVersion
+                        || !string.Equals(skin.CurrentSkinDirectory, previousDirectory, StringComparison.OrdinalIgnoreCase)
+                        || !ReferenceEquals(skin.CurrentDefinition, previousDefinition)
+                        || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+                        || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState)))
+                    throw new InvalidOperationException("Un fallo de persistencia alteró la skin o su snapshot activo.");
                 if (!ActivateSkin(switchSkinPath!)) throw new InvalidDataException($"No se pudo activar skin destino: {skin.CurrentValidation?.Summary ?? switchSkinPath}");
                 ReportResolvedHighResolutionAssets();
                 if (skin.Version != previousVersion + 1) throw new InvalidOperationException("La versión de skin no avanzó exactamente una vez.");
@@ -171,6 +199,10 @@ internal sealed class SkinVisualSmokeGame : Game
                     || !string.Equals(hitSoundPlayer!.SkinDirectory, skin.CurrentSkinDirectory, StringComparison.OrdinalIgnoreCase)
                     || !PersistedSelectionMatchesActiveSkin())
                     throw new InvalidOperationException("El flujo común de selección no persistió el destino o no actualizó los hitsounds.");
+                if (ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudPrefixState))
+                    throw new InvalidOperationException("El cambio de skin conservó el snapshot HUD de la skin anterior.");
+                AssertResolvedKeymodesPrepared();
+                AssertHudGlyphsPrepared();
                 playfield!.Update(1040, score!, 8, null, downScroll);
                 Console.WriteLine($"[SkinVisualSmoke] cambio runtime aplicado: v{previousVersion} -> v{skin.Version}; {switchOutputPath}");
             }
@@ -235,6 +267,20 @@ internal sealed class SkinVisualSmokeGame : Game
         if (skin!.CurrentValidation is { } validation)
             Console.WriteLine($"[SkinVisualSmoke] validation: {validation.Status}; {validation.Summary}");
         return selected;
+    }
+
+    private void AssertResolvedKeymodesPrepared()
+    {
+        for (int count = 1; count <= 18; count++)
+            if (!skin!.HasResolvedKeymode(count))
+                throw new InvalidOperationException($"El keymode {count}K no estaba resuelto antes del primer Draw.");
+    }
+
+    private void AssertHudGlyphsPrepared()
+    {
+        foreach (string prefix in new[] { "score", "default", skin!.CurrentDefinition.ComboPrefix })
+            if (!skin.HasPreparedNumberPrefix(prefix))
+                throw new InvalidOperationException($"El prefijo HUD '{prefix}' no estaba preparado antes del primer Draw.");
     }
 
     private bool PersistedSelectionMatchesActiveSkin()

@@ -467,26 +467,28 @@ internal sealed class SkinVisualSmokeGame : Game
         string previousDirectory = skin.CurrentSkinDirectory;
         string? previousSelection = smokeSettings!.SelectedSkinDirectory;
         string? previousHitsoundDirectory = hitSoundPlayer!.SkinDirectory;
+        int saveAttempts = 0;
 
         if (targetMode == previousMode)
             throw new InvalidOperationException("Cada paso del ciclo de perfil debe cambiar la interpretación activa.");
 
-        if (skin.TrySetLegacyCompatibilityMode(targetMode, () => false)
+        if (LegacySkinCompatibilityWorkflow.TrySet(skin, skinCatalog!, smokeSettings, targetMode,
+                mode => SettingsService.Instance.LegacySkinCompatibilityMode = mode,
+                () => { saveAttempts++; return false; })
             || skin.Version != previousVersion
             || skin.LegacyCompatibilityMode != previousMode
+            || smokeSettings.LegacySkinCompatibilityMode != previousMode
+            || skinCatalog!.CompatibilityMode != previousMode
             || !ReferenceEquals(skin.CurrentDefinition, previousDefinition)
             || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
             || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState))
             throw new InvalidOperationException("El rollback por persistencia fallida alteró el perfil legacy activo.");
 
-        if (!skin.TrySetLegacyCompatibilityMode(targetMode, () =>
-            {
-                smokeSettings.LegacySkinCompatibilityMode = targetMode;
-                return true;
-            }))
+        if (!LegacySkinCompatibilityWorkflow.TrySet(skin, skinCatalog!, smokeSettings, targetMode,
+                mode => SettingsService.Instance.LegacySkinCompatibilityMode = mode,
+                () => { saveAttempts++; return true; }))
             throw new InvalidDataException("No se pudo reconstruir la skin con el perfil legacy destino.");
 
-        skinCatalog!.SetCompatibilityMode(targetMode);
         ManiaSkinCompatibilityProfile expectedProfile = targetMode == LegacySkinCompatibilityMode.Stable
             ? ManiaSkinCompatibilityProfile.StableLegacy : ManiaSkinCompatibilityProfile.LazerLegacy;
         if (skin.Version != previousVersion + 1
@@ -498,6 +500,8 @@ internal sealed class SkinVisualSmokeGame : Game
             || ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudPrefixState)
             || !string.Equals(skin.CurrentSkinDirectory, previousDirectory, StringComparison.OrdinalIgnoreCase)
             || smokeSettings.LegacySkinCompatibilityMode != targetMode
+            || skinCatalog!.CompatibilityMode != targetMode
+            || saveAttempts != 2
             || !string.Equals(smokeSettings.SelectedSkinDirectory, previousSelection, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(hitSoundPlayer.SkinDirectory, previousHitsoundDirectory, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("El cambio de perfil dejó provider, selección, caches o hitsounds inconsistentes.");

@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework.Graphics;
+using Nullscent.Config;
 
 namespace Nullscent.Skin
 {
@@ -21,6 +22,7 @@ namespace Nullscent.Skin
             TestUserOverridePrecedence();
             TestSkinScrollPreferenceAndLegacyFlips();
             TestCompatibilityProfilesAndReceptorAnchors();
+            TestLegacyCompatibilitySettingRollback();
             TestStagePresentationNormalizationAndLayout();
             TestLongNoteBodyVisualRules();
             TestLegacyColourLightIsStageOnly();
@@ -29,7 +31,7 @@ namespace Nullscent.Skin
             TestAnimationTimingResolution();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
-            Console.WriteLine("[SkinTests] 18 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 19 pruebas deterministas pasaron.");
         }
 
         private static void TestResolvedCollectionsAreReadOnlySnapshots()
@@ -442,6 +444,54 @@ namespace Nullscent.Skin
                     "Native skins should keep the receptor attached to their normalized receptor line.");
             }
             finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyCompatibilitySettingRollback()
+        {
+            var settings = new GameSettings { LegacySkinCompatibilityMode = LegacySkinCompatibilityMode.Stable };
+            LegacySkinCompatibilityMode publishedMode = LegacySkinCompatibilityMode.Stable;
+            bool saved = LegacySkinCompatibilityWorkflow.TryPersistSetting(settings, LegacySkinCompatibilityMode.Lazer,
+                mode =>
+                {
+                    publishedMode = mode;
+                    settings.LegacySkinCompatibilityMode = mode;
+                }, () => false);
+
+            Assert(!saved, "A failed settings save must reject the compatibility-profile transaction.");
+            Assert(settings.LegacySkinCompatibilityMode == LegacySkinCompatibilityMode.Stable
+                && publishedMode == LegacySkinCompatibilityMode.Stable,
+                "A failed settings save must restore both the persisted setting and its published value.");
+
+            saved = LegacySkinCompatibilityWorkflow.TryPersistSetting(settings, LegacySkinCompatibilityMode.Lazer,
+                mode =>
+                {
+                    publishedMode = mode;
+                    settings.LegacySkinCompatibilityMode = mode;
+                }, () => true);
+            Assert(saved && settings.LegacySkinCompatibilityMode == LegacySkinCompatibilityMode.Lazer
+                && publishedMode == LegacySkinCompatibilityMode.Lazer,
+                "A successful settings save must publish the target profile exactly once as active settings.");
+
+            settings.LegacySkinCompatibilityMode = LegacySkinCompatibilityMode.Stable;
+            publishedMode = LegacySkinCompatibilityMode.Stable;
+            bool saveExceptionObserved = false;
+            try
+            {
+                LegacySkinCompatibilityWorkflow.TryPersistSetting(settings, LegacySkinCompatibilityMode.Lazer,
+                    mode =>
+                    {
+                        publishedMode = mode;
+                        settings.LegacySkinCompatibilityMode = mode;
+                    }, () => throw new InvalidOperationException("simulated save failure"));
+            }
+            catch (InvalidOperationException)
+            {
+                saveExceptionObserved = true;
+            }
+
+            Assert(saveExceptionObserved && settings.LegacySkinCompatibilityMode == LegacySkinCompatibilityMode.Stable
+                && publishedMode == LegacySkinCompatibilityMode.Stable,
+                "A thrown settings save must restore both settings values before propagating the failure.");
         }
 
         private static void TestStagePresentationNormalizationAndLayout()

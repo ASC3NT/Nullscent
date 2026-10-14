@@ -78,24 +78,18 @@ namespace Nullscent
         {
             if (_skinManager == null || _skinCatalog == null || _settings == null
                 || !Enum.IsDefined(compatibilityMode)) return false;
-            if (_settings.LegacySkinCompatibilityMode == compatibilityMode) return true;
-
-            LegacySkinCompatibilityMode previousMode = _settings.LegacySkinCompatibilityMode;
-            bool PersistMode()
-            {
-                SettingsService.Instance.LegacySkinCompatibilityMode = compatibilityMode;
-                if (_settings.TrySave()) return true;
-                SettingsService.Instance.LegacySkinCompatibilityMode = previousMode;
-                return false;
-            }
-
-            if (!_skinManager.TrySetLegacyCompatibilityMode(compatibilityMode, PersistMode))
+            if (!LegacySkinCompatibilityWorkflow.TrySet(
+                _skinManager,
+                _skinCatalog,
+                _settings,
+                compatibilityMode,
+                mode => SettingsService.Instance.LegacySkinCompatibilityMode = mode,
+                _settings.TrySave))
             {
                 ShowSkinNotice("No se pudo cambiar el perfil de skin legacy; se conservó el anterior.");
                 return false;
             }
 
-            _skinCatalog.SetCompatibilityMode(compatibilityMode);
             ShowSkinNotice(compatibilityMode == LegacySkinCompatibilityMode.Stable
                 ? "Perfil de skins legacy Stable activo."
                 : "Perfil de skins legacy Lazer experimental activo.");

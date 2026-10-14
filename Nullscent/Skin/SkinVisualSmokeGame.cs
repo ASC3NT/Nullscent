@@ -540,12 +540,15 @@ internal sealed class SkinVisualSmokeGame : Game
     private void ApplyCompatibilitySequenceEntry(int index)
     {
         LegacySkinCompatibilityMode targetMode = compatibilitySequence![index];
-        if (skin!.CurrentDefinition.Provider != SkinProviderKind.OsuLegacy)
-            throw new InvalidOperationException("El ciclo de perfil requiere una skin osu! legacy activa.");
+        SkinProviderKind previousProvider = skin!.CurrentDefinition.Provider;
+        bool isLegacyProvider = previousProvider == SkinProviderKind.OsuLegacy;
+        if (!isLegacyProvider && previousProvider != SkinProviderKind.NullscentNative)
+            throw new InvalidOperationException("El ciclo de perfil requiere una skin Native o osu! legacy activa.");
 
         long previousVersion = skin.Version;
         LegacySkinCompatibilityMode previousMode = skin.LegacyCompatibilityMode;
         ManiaSkinDefinition previousDefinition = skin.CurrentDefinition;
+        ManiaSkinCompatibilityProfile previousProfile = previousDefinition.CompatibilityProfile;
         ResolvedManiaKeymode previousResolvedMode = skin.GetResolvedKeymode(keyCount);
         object? previousHudPrefixState = skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix);
         string previousDirectory = skin.CurrentSkinDirectory;
@@ -563,25 +566,36 @@ internal sealed class SkinVisualSmokeGame : Game
             || skin.LegacyCompatibilityMode != previousMode
             || smokeSettings.LegacySkinCompatibilityMode != previousMode
             || skinCatalog!.CompatibilityMode != previousMode
+            || skin.CurrentDefinition.Provider != previousProvider
             || !ReferenceEquals(skin.CurrentDefinition, previousDefinition)
             || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
-            || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState))
-            throw new InvalidOperationException("El rollback por persistencia fallida alteró el perfil legacy activo.");
+            || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState)
+            || !string.Equals(skin.CurrentSkinDirectory, previousDirectory, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(smokeSettings.SelectedSkinDirectory, previousSelection, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(hitSoundPlayer!.SkinDirectory, previousHitsoundDirectory, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("El rollback por persistencia fallida alteró la skin o su estado resuelto.");
 
         if (!LegacySkinCompatibilityWorkflow.TrySet(skin, skinCatalog!, smokeSettings, targetMode,
                 mode => SettingsService.Instance.LegacySkinCompatibilityMode = mode,
                 () => { saveAttempts++; return true; }))
             throw new InvalidDataException("No se pudo reconstruir la skin con el perfil legacy destino.");
 
-        ManiaSkinCompatibilityProfile expectedProfile = targetMode == LegacySkinCompatibilityMode.Stable
-            ? ManiaSkinCompatibilityProfile.StableLegacy : ManiaSkinCompatibilityProfile.LazerLegacy;
-        if (skin.Version != previousVersion + 1
+        bool invalidProfileTransition = isLegacyProvider
+            ? skin.Version != previousVersion + 1
+                || skin.CurrentDefinition.Provider != SkinProviderKind.OsuLegacy
+                || skin.CurrentDefinition.CompatibilityProfile != (targetMode == LegacySkinCompatibilityMode.Stable
+                    ? ManiaSkinCompatibilityProfile.StableLegacy : ManiaSkinCompatibilityProfile.LazerLegacy)
+                || ReferenceEquals(skin.CurrentDefinition, previousDefinition)
+                || ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+                || ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudPrefixState)
+            : skin.Version != previousVersion
+                || skin.CurrentDefinition.Provider != previousProvider
+                || skin.CurrentDefinition.CompatibilityProfile != previousProfile
+                || !ReferenceEquals(skin.CurrentDefinition, previousDefinition)
+                || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+                || !ReferenceEquals(skin.GetPreparedNumberPrefixState(previousDefinition.ComboPrefix), previousHudPrefixState);
+        if (invalidProfileTransition
             || skin.LegacyCompatibilityMode != targetMode
-            || skin.CurrentDefinition.Provider != SkinProviderKind.OsuLegacy
-            || skin.CurrentDefinition.CompatibilityProfile != expectedProfile
-            || ReferenceEquals(skin.CurrentDefinition, previousDefinition)
-            || ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
-            || ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudPrefixState)
             || !string.Equals(skin.CurrentSkinDirectory, previousDirectory, StringComparison.OrdinalIgnoreCase)
             || smokeSettings.LegacySkinCompatibilityMode != targetMode
             || skinCatalog!.CompatibilityMode != targetMode
@@ -590,11 +604,14 @@ internal sealed class SkinVisualSmokeGame : Game
             || !string.Equals(hitSoundPlayer.SkinDirectory, previousHitsoundDirectory, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("El cambio de perfil dejó provider, selección, caches o hitsounds inconsistentes.");
 
-        AssertResolvedKeymodesPrepared();
-        AssertHudGlyphsPrepared();
-        ReportResolvedHighResolutionAssets();
+        if (isLegacyProvider)
+        {
+            AssertResolvedKeymodesPrepared();
+            AssertHudGlyphsPrepared();
+            ReportResolvedHighResolutionAssets();
+        }
         playfield!.Update(1040, score!, 8, null, downScroll);
-        Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {previousMode} -> {targetMode}; provider={skin.CurrentDefinition.Provider}; version={skin.Version}");
+        Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {previousMode} -> {targetMode}; provider={skin.CurrentDefinition.Provider}; profile={skin.CurrentDefinition.CompatibilityProfile}; version={skin.Version}");
     }
 
     private void ApplyHighResolutionSequenceEntry(int index)

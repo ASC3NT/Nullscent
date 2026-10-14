@@ -214,6 +214,8 @@ The DEBUG-only harness is `SkinVisualSmokeGame`, invoked by `--skin-visual-smoke
 
 The timeline captures checkpoints at 1275ms (halfway through the 250ms `StageLight` fade after the 1150ms key release) and 1410ms (after it completes). Notes continue scrolling between those screenshots, so they do not isolate the light by pixel comparison. The renderer keeps the light rectangle fixed from the lane and texture aspect ratio while the fade changes tint alpha.
 
+Append `--stage-only` to `--skin-visual-profile-cycle-smoke` to run the same profile activation cycle without notes, key presses, or judgements. This isolates stage composition for Stable/Lazer comparison while still using the normal skin resolver and layout.
+
 ## Adding a fourth skin
 
 1. Create `Nullscent/Skins/<id>/NullscentSkin.json` with a new `id`, metadata, and one profile per desired keycount.

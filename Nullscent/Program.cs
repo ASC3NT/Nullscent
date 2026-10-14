@@ -102,10 +102,12 @@ namespace Nullscent
                     if (!TryParseLegacySkinMode(args[3], out Skin.LegacySkinCompatibilityMode initialProfileMode))
                         throw new ArgumentException($"Perfil legacy inicial inválido: {args[3]}");
 
-                    var profileSequence = new Skin.LegacySkinCompatibilityMode[args.Length - 5];
-                    for (int i = 5; i < args.Length; i++)
+                    bool stageOnly = args.Skip(5).Any(argument => argument.Equals("--stage-only", StringComparison.OrdinalIgnoreCase));
+                    var profileSequence = new Skin.LegacySkinCompatibilityMode[args.Length - 5 - (stageOnly ? 1 : 0)];
+                    for (int i = 5, targetIndex = 0; i < args.Length; i++)
                     {
-                        if (!TryParseLegacySkinMode(args[i], out profileSequence[i - 5]))
+                        if (args[i].Equals("--stage-only", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!TryParseLegacySkinMode(args[i], out profileSequence[targetIndex++]))
                             throw new ArgumentException($"Perfil legacy inválido en el paso {i - 4}: {args[i]}");
                     }
 
@@ -116,7 +118,8 @@ namespace Nullscent
                         viewportWidth: 1920, viewportHeight: 1080,
                         legacyCompatibilityMode: initialProfileMode,
                         compatibilitySequence: profileSequence,
-                        compatibilitySequenceOutputDirectory: profileCycleOutputDirectory);
+                        compatibilitySequenceOutputDirectory: profileCycleOutputDirectory,
+                        stageOnly: stageOnly);
                     profileCycleSmoke.Run();
                     return;
                 }

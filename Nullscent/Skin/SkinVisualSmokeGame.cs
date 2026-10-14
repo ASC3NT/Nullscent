@@ -43,6 +43,7 @@ internal sealed class SkinVisualSmokeGame : Game
     private readonly string? switchSequenceOutputDirectory;
     private readonly LegacySkinCompatibilityMode[]? compatibilitySequence;
     private readonly string? compatibilitySequenceOutputDirectory;
+    private readonly bool stageOnly;
     private SpriteBatch? batch;
     private SkinManager? skin;
     private SkinCatalog? skinCatalog;
@@ -73,7 +74,8 @@ internal sealed class SkinVisualSmokeGame : Game
         string? timelineOutputDirectory = null, IReadOnlyList<string>? switchSequence = null,
         string? switchSequenceOutputDirectory = null,
         IReadOnlyList<LegacySkinCompatibilityMode>? compatibilitySequence = null,
-        string? compatibilitySequenceOutputDirectory = null)
+        string? compatibilitySequenceOutputDirectory = null,
+        bool stageOnly = false)
     {
         if (keyCount < 1 || keyCount > 18) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (viewportWidth < 640 || viewportHeight < 480) throw new ArgumentOutOfRangeException(nameof(viewportWidth), "La resolución de smoke debe ser de al menos 640x480.");
@@ -120,6 +122,7 @@ internal sealed class SkinVisualSmokeGame : Game
         this.compatibilitySequence = compatibilitySequence?.ToArray();
         this.compatibilitySequenceOutputDirectory = compatibilitySequenceOutputDirectory == null
             ? null : Path.GetFullPath(compatibilitySequenceOutputDirectory);
+        this.stageOnly = stageOnly;
         graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth = viewportWidth,
@@ -189,20 +192,27 @@ internal sealed class SkinVisualSmokeGame : Game
             smokeObjects.Add(timelineAutoCompleteNote);
         }
         timelineLongNoteEndTime = timelineLongNoteStart + 1100;
-        foreach (ManiaHitObject smokeObject in smokeObjects.OrderBy(hitObject => hitObject.StartTime))
-            playfield.AddHitObject(smokeObject);
-
-        if (timelineOutputDirectory == null)
+        if (!stageOnly)
         {
-            if (keyCount > 1) playfield.HandleKeyPress(keyCount - 1, 1000, score);
-            playfield.HandleKeyPress(0, 1000, score);
-            playfield.JudgementDisplayManager?.EnqueueJudgement(HitResult.Perfect, 0, 0, 12, 1000);
-            playfield.Update(1040, score, 8, null, downScroll);
+            foreach (ManiaHitObject smokeObject in smokeObjects.OrderBy(hitObject => hitObject.StartTime))
+                playfield.AddHitObject(smokeObject);
+
+            if (timelineOutputDirectory == null)
+            {
+                if (keyCount > 1) playfield.HandleKeyPress(keyCount - 1, 1000, score);
+                playfield.HandleKeyPress(0, 1000, score);
+                playfield.JudgementDisplayManager?.EnqueueJudgement(HitResult.Perfect, 0, 0, 12, 1000);
+                playfield.Update(1040, score, 8, null, downScroll);
+            }
+            else
+            {
+                timelineCurrentTime = 700;
+                playfield.Update(timelineCurrentTime, score, 8, null, downScroll);
+            }
         }
         else
         {
-            timelineCurrentTime = 700;
-            playfield.Update(timelineCurrentTime, score, 8, null, downScroll);
+            playfield.Update(1040, score, 8, null, downScroll);
         }
     }
 
@@ -261,6 +271,7 @@ internal sealed class SkinVisualSmokeGame : Game
                     throw new InvalidOperationException("El cambio de perfil no fue atÃ³mico o cambiÃ³ el proveedor de la skin.");
                 AssertResolvedKeymodesPrepared();
                 AssertHudGlyphsPrepared();
+                ReportResolvedHighResolutionAssets();
                 playfield!.Update(1040, score!, 8, null, downScroll);
                 Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {legacyCompatibilityMode} -> {switchCompatibilityMode}; proveedor={skin.CurrentDefinition.Provider}; {compatibilityOutputPath}");
             }
@@ -548,6 +559,7 @@ internal sealed class SkinVisualSmokeGame : Game
 
         AssertResolvedKeymodesPrepared();
         AssertHudGlyphsPrepared();
+        ReportResolvedHighResolutionAssets();
         playfield!.Update(1040, score!, 8, null, downScroll);
         Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {previousMode} -> {targetMode}; provider={skin.CurrentDefinition.Provider}; version={skin.Version}");
     }
@@ -624,22 +636,23 @@ internal sealed class SkinVisualSmokeGame : Game
         if (skin == null) return;
 
         ManiaKeymodeDefinition profile = skin.GetManiaProfile(keyCount);
-        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        string comboAsset = $"{skin.GetComboPrefix()}-1";
+        if (skin.HasTextureFile(comboAsset))
         {
-            $"{skin.GetComboPrefix()}-1",
-            "mania-stage-bottom"
-        };
-        if (profile.StageAssets.TryGetValue("hint", out string? stageHint)
-            && !string.IsNullOrWhiteSpace(stageHint) && !stageHint.Equals("_blank", StringComparison.OrdinalIgnoreCase))
-            candidates.Add(stageHint);
-        else
-            candidates.Add("mania-stage-hint");
+            ResolvedSkinAsset combo = skin.ResolveAsset(comboAsset);
+            Console.WriteLine($"[SkinVisualSmoke] asset {comboAsset}: {combo.Origin}, @2x={combo.IsHighResolution}, logical={combo.LogicalSize.X}x{combo.LogicalSize.Y}");
+        }
 
-        foreach (string name in candidates)
+        foreach (string part in new[] { "left", "right", "bottom", "hint", "light" })
         {
-            if (!skin.HasTextureFile(name)) continue;
-            ResolvedSkinAsset resolved = skin.ResolveAsset(name);
-            Console.WriteLine($"[SkinVisualSmoke] asset {name}: {resolved.Origin}, @2x={resolved.IsHighResolution}, logical={resolved.LogicalSize.X}x{resolved.LogicalSize.Y}");
+            string? configured = profile.StageAssets.TryGetValue(part, out string? value) ? value : null;
+            string name = string.IsNullOrWhiteSpace(configured) ? $"mania-stage-{part}" : configured;
+            IReadOnlyList<Texture2D>? frames = skin.GetStageAnimation(keyCount, part);
+            string resolvedName = skin.HasTextureFile($"{name}-0") ? $"{name}-0" : name;
+            ResolvedSkinAsset resolved = skin.ResolveAsset(resolvedName);
+            Texture2D? firstFrame = frames is { Count: > 0 } ? frames[0] : null;
+            Vector2 logicalSize = firstFrame == null ? Vector2.Zero : skin.GetLogicalSize(firstFrame);
+            Console.WriteLine($"[SkinVisualSmoke] stage {part}: requested={name}, activeBase={skin.HasTextureFile(name)}, activeFrame0={skin.HasTextureFile($"{name}-0")}, frames={frames?.Count ?? 0}, origin={resolved.Origin}, logical={logicalSize.X}x{logicalSize.Y}");
         }
     }
 

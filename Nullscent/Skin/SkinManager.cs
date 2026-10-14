@@ -20,8 +20,9 @@ namespace Nullscent.Skin
         private ManiaSkinDefinition _currentDefinition = null!;
         private ManiaSkinDefinition _internalDefinition = null!;
         private readonly string _internalSkinDirectory;
-        private readonly SkinAssetResolver _internalAssets;
+        private SkinAssetResolver _internalAssets;
         private SkinAssetResolver _assets;
+        private bool _highResolutionSkinAssets;
         private readonly Dictionary<Texture2D, ResolvedSkinAsset> _assetInfo = new();
         private readonly Dictionary<string, IReadOnlyList<Texture2D>?> _animationCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, ResolvedManiaKeymode> _resolvedKeymodes = new();
@@ -47,10 +48,12 @@ namespace Nullscent.Skin
         private sealed class SkinRuntimeState
         {
             public SkinAssetResolver Assets { get; }
+            public SkinAssetResolver InternalAssets { get; }
             public ManiaSkinDefinition Definition { get; }
             public string Directory { get; }
             public SkinValidation? Validation { get; }
             public LegacySkinCompatibilityMode CompatibilityMode { get; }
+            public bool HighResolutionSkinAssets { get; }
             public Dictionary<Texture2D, ResolvedSkinAsset> AssetInfo { get; }
             public Dictionary<string, IReadOnlyList<Texture2D>?> AnimationCache { get; }
             public Dictionary<int, ResolvedManiaKeymode> ResolvedKeymodes { get; }
@@ -60,10 +63,12 @@ namespace Nullscent.Skin
             public SkinRuntimeState(SkinManager manager)
             {
                 Assets = manager._assets;
+                InternalAssets = manager._internalAssets;
                 Definition = manager._currentDefinition;
                 Directory = manager.CurrentSkinDirectory;
                 Validation = manager.CurrentValidation;
                 CompatibilityMode = manager._legacyCompatibilityMode;
+                HighResolutionSkinAssets = manager._highResolutionSkinAssets;
                 AssetInfo = new Dictionary<Texture2D, ResolvedSkinAsset>(manager._assetInfo);
                 AnimationCache = new Dictionary<string, IReadOnlyList<Texture2D>?>(manager._animationCache, StringComparer.OrdinalIgnoreCase);
                 ResolvedKeymodes = new Dictionary<int, ResolvedManiaKeymode>(manager._resolvedKeymodes);
@@ -74,6 +79,7 @@ namespace Nullscent.Skin
 
         public ManiaSkinDefinition CurrentDefinition => _currentDefinition;
         public LegacySkinCompatibilityMode LegacyCompatibilityMode => _legacyCompatibilityMode;
+        public bool HighResolutionSkinAssets => _highResolutionSkinAssets;
         public string CurrentSkinDirectory { get; private set; } = string.Empty;
         public long Version { get; private set; }
         public event Action<long>? SkinChanged;
@@ -90,6 +96,7 @@ namespace Nullscent.Skin
         {
             _graphicsDevice = graphicsDevice;
             _legacyCompatibilityMode = Core.SettingsService.Instance.LegacySkinCompatibilityMode;
+            _highResolutionSkinAssets = Core.SettingsService.Instance.HighResolutionSkins;
             _internalSkinDirectory = Path.Combine(AppContext.BaseDirectory, "Skins", "Bars");
             try { _internalDefinition = NativeSkinAdapter.Load(_internalSkinDirectory); }
             catch (Exception ex)
@@ -100,8 +107,8 @@ namespace Nullscent.Skin
             _currentDefinition = _internalDefinition;
             _internalAssets = new SkinAssetResolver(graphicsDevice,
                 System.IO.Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null,
-                Core.SettingsService.Instance.HighResolutionSkins);
-            _assets = new SkinAssetResolver(graphicsDevice, null, Core.SettingsService.Instance.HighResolutionSkins);
+                _highResolutionSkinAssets);
+            _assets = new SkinAssetResolver(graphicsDevice, null, _highResolutionSkinAssets);
             _blankTexture = new Texture2D(graphicsDevice, 1, 1);
             _blankTexture.SetData(new[] { Color.Transparent });
             TryActivateInternal();
@@ -131,7 +138,7 @@ namespace Nullscent.Skin
                 else
                     definition = SkinSourceDecoder.Load(validation.Directory, out _, candidateCompatibilityMode);
 
-                candidate = new SkinAssetResolver(_graphicsDevice, validation.Directory, Core.SettingsService.Instance.HighResolutionSkins);
+                candidate = new SkinAssetResolver(_graphicsDevice, validation.Directory, _highResolutionSkinAssets);
                 var names = new HashSet<string>(SkinCatalog.ReferencedImages(definition), StringComparer.OrdinalIgnoreCase)
                 { "cursor", "mania-note1", "mania-note2", "mania-key1", "mania-key2" };
                 foreach (string name in names)
@@ -175,6 +182,69 @@ namespace Nullscent.Skin
         }
 
         /// <summary>
+        /// Rebuilds both the selected skin provider and the internal fallback provider
+        /// with the requested @2x preference, then publishes the preference through the
+        /// activation transaction.
+        /// </summary>
+        public bool TrySetHighResolutionSkinAssets(bool preferHighResolution, Func<bool>? persistPreference = null)
+        {
+            if (preferHighResolution == _highResolutionSkinAssets)
+            {
+                try { return persistPreference?.Invoke() ?? true; }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[SkinManager] Could not persist high-resolution skin setting: {ex.Message}");
+                    return false;
+                }
+            }
+
+            SkinAssetResolver? candidateAssets = null;
+            SkinAssetResolver? candidateInternalAssets = null;
+            try
+            {
+                string? selectedRoot = string.IsNullOrWhiteSpace(CurrentSkinDirectory)
+                    ? (Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null)
+                    : CurrentSkinDirectory;
+                candidateAssets = new SkinAssetResolver(_graphicsDevice, selectedRoot, preferHighResolution);
+                candidateInternalAssets = new SkinAssetResolver(_graphicsDevice,
+                    Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null, preferHighResolution);
+
+                var names = new HashSet<string>(SkinCatalog.ReferencedImages(_currentDefinition), StringComparer.OrdinalIgnoreCase)
+                { "cursor", "mania-note1", "mania-note2", "mania-key1", "mania-key2" };
+                foreach (string name in names)
+                    candidateAssets.Resolve(name);
+
+                SkinAssetResolver preparedAssets = candidateAssets;
+                SkinAssetResolver preparedInternalAssets = candidateInternalAssets;
+                candidateAssets = null;
+                candidateInternalAssets = null;
+                SkinValidation? validation = CurrentValidation;
+                string[] previousWarnings = validation?.Warnings.ToArray() ?? Array.Empty<string>();
+                string[] previousErrors = validation?.Errors.ToArray() ?? Array.Empty<string>();
+                SkinValidity? previousValidationStatus = validation?.Status;
+                bool committed = TryCommitActivation(preparedAssets, _currentDefinition, CurrentSkinDirectory, validation,
+                    _legacyCompatibilityMode, persistPreference, preparedInternalAssets, preferHighResolution);
+                if (!committed && validation != null)
+                {
+                    validation.Warnings.Clear();
+                    validation.Warnings.AddRange(previousWarnings);
+                    validation.Errors.Clear();
+                    validation.Errors.AddRange(previousErrors);
+                    if (previousValidationStatus.HasValue)
+                        validation.Status = previousValidationStatus.Value;
+                }
+                return committed;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SkinManager] Could not prepare high-resolution skin assets: {ex.Message}");
+                candidateAssets?.Dispose();
+                candidateInternalAssets?.Dispose();
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Descarga la skin actual y libera recursos.
         /// </summary>
         public void UnloadSkin()
@@ -185,17 +255,22 @@ namespace Nullscent.Skin
         public bool TryActivateInternal(Func<bool>? persistSelection = null)
         {
             string? root = System.IO.Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null;
-            var candidate = new SkinAssetResolver(_graphicsDevice, root, Core.SettingsService.Instance.HighResolutionSkins);
+            var candidate = new SkinAssetResolver(_graphicsDevice, root, _highResolutionSkinAssets);
             return TryCommitActivation(candidate, _internalDefinition, string.Empty, null,
                 _legacyCompatibilityMode, persistSelection);
         }
 
         private bool TryCommitActivation(SkinAssetResolver candidate, ManiaSkinDefinition definition,
             string directory, SkinValidation? validation, LegacySkinCompatibilityMode compatibilityMode,
-            Func<bool>? persistSelection)
+            Func<bool>? persistSelection, SkinAssetResolver? candidateInternalAssets = null,
+            bool? highResolutionSkinAssets = null)
         {
             var previous = new SkinRuntimeState(this);
             _assets = candidate;
+            if (candidateInternalAssets != null)
+                _internalAssets = candidateInternalAssets;
+            if (highResolutionSkinAssets.HasValue)
+                _highResolutionSkinAssets = highResolutionSkinAssets.Value;
             _currentDefinition = definition;
             if (definition.Provider == SkinProviderKind.OsuLegacy)
                 _legacyCompatibilityMode = compatibilityMode;
@@ -232,21 +307,25 @@ namespace Nullscent.Skin
                 if (!persisted)
                 {
                     validation?.Errors.Add("No se pudo guardar la selección; se conservó la skin anterior.");
-                    RestoreRuntimeState(previous, candidate);
+                    RestoreRuntimeState(previous, candidate, candidateInternalAssets);
                     return false;
                 }
 
                 Version++;
                 NotifySkinChanged();
-                try { previous.Assets.Dispose(); }
-                catch (Exception ex) { Console.WriteLine($"[SkinManager] Previous skin cleanup failed: {ex.Message}"); }
+                var replacedResolvers = new HashSet<SkinAssetResolver>();
+                if (!ReferenceEquals(previous.Assets, _assets) && replacedResolvers.Add(previous.Assets))
+                    DisposeResolver(previous.Assets, "Previous skin");
+                if (!ReferenceEquals(previous.InternalAssets, _internalAssets)
+                    && replacedResolvers.Add(previous.InternalAssets))
+                    DisposeResolver(previous.InternalAssets, "Previous internal fallback");
                 return true;
             }
             catch (Exception ex)
             {
                 validation?.Errors.Add($"No se pudo resolver la skin: {ex.Message}");
                 Console.WriteLine($"[SkinManager] Candidate skin resolution failed: {ex.Message}");
-                RestoreRuntimeState(previous, candidate);
+                RestoreRuntimeState(previous, candidate, candidateInternalAssets);
                 return false;
             }
         }
@@ -260,13 +339,16 @@ namespace Nullscent.Skin
             _reportedDiagnostics.Clear();
         }
 
-        private void RestoreRuntimeState(SkinRuntimeState state, SkinAssetResolver failedAssets)
+        private void RestoreRuntimeState(SkinRuntimeState state, SkinAssetResolver failedAssets,
+            SkinAssetResolver? failedInternalAssets)
         {
             _assets = state.Assets;
+            _internalAssets = state.InternalAssets;
             _currentDefinition = state.Definition;
             CurrentSkinDirectory = state.Directory;
             CurrentValidation = state.Validation;
             _legacyCompatibilityMode = state.CompatibilityMode;
+            _highResolutionSkinAssets = state.HighResolutionSkinAssets;
 
             _assetInfo.Clear();
             foreach (var pair in state.AssetInfo) _assetInfo.Add(pair.Key, pair.Value);
@@ -279,11 +361,21 @@ namespace Nullscent.Skin
             _reportedDiagnostics.Clear();
             foreach (string diagnostic in state.ReportedDiagnostics) _reportedDiagnostics.Add(diagnostic);
 
-            if (!ReferenceEquals(failedAssets, state.Assets))
+            var disposed = new HashSet<SkinAssetResolver>();
+            if (!ReferenceEquals(failedAssets, state.Assets) && !ReferenceEquals(failedAssets, state.InternalAssets)
+                && disposed.Add(failedAssets))
             {
-                try { failedAssets.Dispose(); }
-                catch (Exception ex) { Console.WriteLine($"[SkinManager] Candidate cleanup failed: {ex.Message}"); }
+                DisposeResolver(failedAssets, "Candidate skin");
             }
+            if (failedInternalAssets != null && !ReferenceEquals(failedInternalAssets, state.Assets)
+                && !ReferenceEquals(failedInternalAssets, state.InternalAssets) && disposed.Add(failedInternalAssets))
+                DisposeResolver(failedInternalAssets, "Candidate internal fallback");
+        }
+
+        private static void DisposeResolver(SkinAssetResolver resolver, string description)
+        {
+            try { resolver.Dispose(); }
+            catch (Exception ex) { Console.WriteLine($"[SkinManager] {description} cleanup failed: {ex.Message}"); }
         }
 
         private void NotifySkinChanged()

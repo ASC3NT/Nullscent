@@ -43,6 +43,8 @@ internal sealed class SkinVisualSmokeGame : Game
     private readonly string? switchSequenceOutputDirectory;
     private readonly LegacySkinCompatibilityMode[]? compatibilitySequence;
     private readonly string? compatibilitySequenceOutputDirectory;
+    private readonly bool[]? highResolutionSequence;
+    private readonly string? highResolutionSequenceOutputDirectory;
     private readonly bool stageOnly;
     private SpriteBatch? batch;
     private SkinManager? skin;
@@ -56,6 +58,8 @@ internal sealed class SkinVisualSmokeGame : Game
     private int persistenceCount;
     private int switchSequenceIndex;
     private int compatibilitySequenceIndex;
+    private int highResolutionSequenceIndex;
+    private Vector2? highResolutionReferenceLogicalSize;
     private int timelineStage;
     private double timelineCurrentTime = 1040;
     private LongNote? timelineLongNote;
@@ -75,7 +79,9 @@ internal sealed class SkinVisualSmokeGame : Game
         string? switchSequenceOutputDirectory = null,
         IReadOnlyList<LegacySkinCompatibilityMode>? compatibilitySequence = null,
         string? compatibilitySequenceOutputDirectory = null,
-        bool stageOnly = false)
+        bool stageOnly = false,
+        IReadOnlyList<bool>? highResolutionSequence = null,
+        string? highResolutionSequenceOutputDirectory = null)
     {
         if (keyCount < 1 || keyCount > 18) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (viewportWidth < 640 || viewportHeight < 480) throw new ArgumentOutOfRangeException(nameof(viewportWidth), "La resolución de smoke debe ser de al menos 640x480.");
@@ -101,6 +107,12 @@ internal sealed class SkinVisualSmokeGame : Game
             throw new ArgumentException("El ciclo de perfil requiere destinos y una carpeta de capturas, y se ejecuta de forma independiente.");
         if (compatibilitySequence != null && compatibilitySequence.Any(mode => !Enum.IsDefined(mode)))
             throw new ArgumentOutOfRangeException(nameof(compatibilitySequence));
+        if ((highResolutionSequence == null) != (highResolutionSequenceOutputDirectory == null)
+            || highResolutionSequence is { Count: 0 }
+            || (highResolutionSequence != null && (switchSkinPath != null || resizeOutputPath != null
+                || switchCompatibilityMode != null || timelineOutputDirectory != null || switchSequence != null
+                || compatibilitySequence != null)))
+            throw new ArgumentException("El ciclo HD requiere destinos y una carpeta de capturas, y se ejecuta de forma independiente.");
         this.skinPath = skinPath;
         this.keyCount = keyCount;
         this.outputPath = Path.GetFullPath(outputPath);
@@ -122,6 +134,9 @@ internal sealed class SkinVisualSmokeGame : Game
         this.compatibilitySequence = compatibilitySequence?.ToArray();
         this.compatibilitySequenceOutputDirectory = compatibilitySequenceOutputDirectory == null
             ? null : Path.GetFullPath(compatibilitySequenceOutputDirectory);
+        this.highResolutionSequence = highResolutionSequence?.ToArray();
+        this.highResolutionSequenceOutputDirectory = highResolutionSequenceOutputDirectory == null
+            ? null : Path.GetFullPath(highResolutionSequenceOutputDirectory);
         this.stageOnly = stageOnly;
         graphics = new GraphicsDeviceManager(this)
         {
@@ -232,7 +247,8 @@ internal sealed class SkinVisualSmokeGame : Game
             SaveBackbuffer(outputPath);
             Console.WriteLine($"[SkinVisualSmoke] {keyCount}K initial: {outputPath}");
             captureStage = 1;
-            if (switchSkinPath == null && switchCompatibilityMode == null && switchSequence == null && compatibilitySequence == null)
+            if (switchSkinPath == null && switchCompatibilityMode == null && switchSequence == null
+                && compatibilitySequence == null && highResolutionSequence == null)
             {
                 if (resizeOutputPath == null) Exit();
             }
@@ -243,6 +259,10 @@ internal sealed class SkinVisualSmokeGame : Game
             else if (compatibilitySequence != null)
             {
                 ApplyCompatibilitySequenceEntry(compatibilitySequenceIndex++);
+            }
+            else if (highResolutionSequence != null)
+            {
+                ApplyHighResolutionSequenceEntry(highResolutionSequenceIndex++);
             }
             else if (switchCompatibilityMode != null)
             {
@@ -342,6 +362,19 @@ internal sealed class SkinVisualSmokeGame : Game
                 Exit();
             else
                 ApplyCompatibilitySequenceEntry(compatibilitySequenceIndex++);
+        }
+        else if (captureStage == 1 && highResolutionSequence != null)
+        {
+            bool current = skin!.HighResolutionSkinAssets;
+            string modeName = current ? "hd" : "sd";
+            string sequenceOutput = Path.Combine(highResolutionSequenceOutputDirectory!,
+                $"{highResolutionSequenceIndex:00}-{modeName}.png");
+            SaveBackbuffer(sequenceOutput);
+            Console.WriteLine($"[SkinVisualSmoke] HD sequence capture {highResolutionSequenceIndex}/{highResolutionSequence.Length}: {sequenceOutput}; active={current}");
+            if (highResolutionSequenceIndex >= highResolutionSequence.Length)
+                Exit();
+            else
+                ApplyHighResolutionSequenceEntry(highResolutionSequenceIndex++);
         }
         else if (captureStage == 1 && resizeOutputPath != null && resizeApplied)
         {
@@ -562,6 +595,238 @@ internal sealed class SkinVisualSmokeGame : Game
         ReportResolvedHighResolutionAssets();
         playfield!.Update(1040, score!, 8, null, downScroll);
         Console.WriteLine($"[SkinVisualSmoke] perfil runtime aplicado: {previousMode} -> {targetMode}; provider={skin.CurrentDefinition.Provider}; version={skin.Version}");
+    }
+
+    private void ApplyHighResolutionSequenceEntry(int index)
+    {
+        bool target = highResolutionSequence![index];
+        bool previous = skin!.HighResolutionSkinAssets;
+        if (target == previous)
+            throw new InvalidOperationException("Cada paso del ciclo HD debe cambiar la preferencia activa.");
+
+        long previousVersion = skin.Version;
+        SkinProviderKind previousProvider = skin.CurrentDefinition.Provider;
+        ManiaSkinCompatibilityProfile previousProfile = skin.CurrentDefinition.CompatibilityProfile;
+        ResolvedManiaKeymode previousResolvedMode = skin.GetResolvedKeymode(keyCount);
+        Dictionary<string, Vector2> previousLogicalSizes = CaptureLogicalSizes(previousResolvedMode);
+        int previousReceptorY = playfield!.ReceptorY;
+        int previousReceptorSpriteY = playfield.ReceptorSpriteY;
+        object? previousHudState = skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix);
+        SkinValidation? previousValidation = skin.CurrentValidation;
+        int previousWarningCount = previousValidation?.Warnings.Count ?? 0;
+        int previousErrorCount = previousValidation?.Errors.Count ?? 0;
+        SkinValidity? previousValidationStatus = previousValidation?.Status;
+        ResolvedSkinAsset previousProbeAsset = skin.ResolveAsset("bar-note");
+        bool canVerifyProbeAsset = previousProbeAsset.Texture != null
+            && previousProbeAsset.Origin != SkinAssetOrigin.IntentionalBlank;
+
+        int failedSaveAttempts = 0;
+        bool rollbackPreservedState = !HighResolutionSkinWorkflow.TrySet(skin, smokeSettings!, !previous,
+            value => SettingsService.Instance.HighResolutionSkins = value,
+            () => { failedSaveAttempts++; return false; });
+        if (!rollbackPreservedState || failedSaveAttempts != 1
+            || skin.Version != previousVersion
+            || skin.HighResolutionSkinAssets != previous
+            || smokeSettings!.HighResolutionSkins != previous
+            || !ReferenceEquals(skin.CurrentValidation, previousValidation)
+            || (previousValidation != null
+                && (previousValidation.Warnings.Count != previousWarningCount
+                    || previousValidation.Errors.Count != previousErrorCount
+                    || previousValidation.Status != previousValidationStatus))
+            || !ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+            || !ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudState)
+            || (canVerifyProbeAsset && previousProbeAsset.Texture!.IsDisposed))
+            throw new InvalidOperationException("El rollback HD por fallo de persistencia alteró el proveedor o sus caches.");
+
+        int successfulSaveAttempts = 0;
+        if (!HighResolutionSkinWorkflow.TrySet(skin, smokeSettings, target,
+                value => SettingsService.Instance.HighResolutionSkins = value,
+                () => { successfulSaveAttempts++; return true; }))
+            throw new InvalidDataException("No se pudo activar la preferencia HD destino.");
+
+        if (successfulSaveAttempts != 1
+            || skin.Version != previousVersion + 1
+            || skin.HighResolutionSkinAssets != target
+            || smokeSettings.HighResolutionSkins != target
+            || skin.CurrentDefinition.Provider != previousProvider
+            || skin.CurrentDefinition.CompatibilityProfile != previousProfile
+            || ReferenceEquals(skin.GetResolvedKeymode(keyCount), previousResolvedMode)
+            || ReferenceEquals(skin.GetPreparedNumberPrefixState(skin.CurrentDefinition.ComboPrefix), previousHudState)
+            || (canVerifyProbeAsset && !previousProbeAsset.Texture!.IsDisposed))
+            throw new InvalidOperationException("El cambio HD no reemplazó los snapshots/proveedores de forma transaccional.");
+
+        ResolvedSkinAsset currentProbeAsset = skin.ResolveAsset("bar-note");
+        if (canVerifyProbeAsset && (currentProbeAsset.Origin != previousProbeAsset.Origin
+            || currentProbeAsset.Texture == null
+            || ReferenceEquals(currentProbeAsset.Texture, previousProbeAsset.Texture)))
+            throw new InvalidOperationException("La textura probe conserva un proveedor o recurso anterior al cambio HD.");
+        if (!canVerifyProbeAsset)
+            Console.WriteLine("[SkinVisualSmoke] texture identity check skipped: bar-note resolves to an intentional blank.");
+
+        playfield.Update(1040, score!, 8, null, downScroll);
+        ResolvedManiaKeymode currentResolvedMode = skin.GetResolvedKeymode(keyCount);
+        Dictionary<string, Vector2> currentLogicalSizes = CaptureLogicalSizes(currentResolvedMode);
+        if (playfield.ReceptorY != previousReceptorY || playfield.ReceptorSpriteY != previousReceptorSpriteY)
+            throw new InvalidOperationException($"El toggle @2x movió el ancla del receptor: {previousReceptorY}/{previousReceptorSpriteY} -> {playfield.ReceptorY}/{playfield.ReceptorSpriteY}.");
+        string[] logicalSizeChanges = previousLogicalSizes
+            .Where(pair => !currentLogicalSizes.TryGetValue(pair.Key, out Vector2 size)
+                || Math.Abs(pair.Value.X - size.X) > 0.01f || Math.Abs(pair.Value.Y - size.Y) > 0.01f)
+            .Select(pair => currentLogicalSizes.TryGetValue(pair.Key, out Vector2 size)
+                ? $"{pair.Key} {pair.Value.X}x{pair.Value.Y}->{size.X}x{size.Y}"
+                : $"{pair.Key} {pair.Value.X}x{pair.Value.Y}->missing")
+            .Concat(currentLogicalSizes.Keys.Where(key => !previousLogicalSizes.ContainsKey(key))
+                .Select(key => $"{key} missing->{currentLogicalSizes[key].X}x{currentLogicalSizes[key].Y}"))
+            .ToArray();
+        if (logicalSizeChanges.Length > 0)
+            throw new InvalidOperationException("El toggle @2x cambió tamaños lógicos de assets de Mania: "
+                + string.Join("; ", logicalSizeChanges.Take(12)));
+
+        VerifyHighResolutionAssetSelection(target);
+        AssertResolvedKeymodesPrepared();
+        AssertHudGlyphsPrepared();
+        ReportResolvedHighResolutionAssets();
+        Console.WriteLine($"[SkinVisualSmoke] HD runtime aplicado: {previous} -> {target}; provider={skin.CurrentDefinition.Provider}; version={skin.Version}");
+    }
+
+    private Dictionary<string, Vector2> CaptureLogicalSizes(ResolvedManiaKeymode mode)
+    {
+        var result = new Dictionary<string, Vector2>(StringComparer.OrdinalIgnoreCase);
+        void CaptureAnimation(string name, ResolvedSkinAnimation? animation)
+        {
+            if (animation == null) return;
+            for (int frame = 0; frame < animation.Frames.Count; frame++)
+                result[$"{name}:{frame}"] = skin!.GetLogicalSize(animation.Frames[frame]);
+        }
+
+        for (int laneIndex = 0; laneIndex < mode.Lanes.Count; laneIndex++)
+        {
+            ResolvedManiaLane lane = mode.Lanes[laneIndex];
+            CaptureAnimation($"lane{laneIndex}:note({lane.Definition.NoteAsset})", lane.Note);
+            CaptureAnimation($"lane{laneIndex}:receptor({lane.Definition.ReceptorAsset})", lane.Receptor);
+            CaptureAnimation($"lane{laneIndex}:pressed({lane.Definition.PressedReceptorAsset})", lane.PressedReceptor);
+            CaptureAnimation($"lane{laneIndex}:head({lane.Definition.LongHeadAsset})", lane.LongHead);
+            CaptureAnimation($"lane{laneIndex}:body({lane.Definition.LongBodyAsset})", lane.LongBody);
+            CaptureAnimation($"lane{laneIndex}:tail({lane.Definition.LongTailAsset})", lane.LongTail);
+            CaptureAnimation($"lane{laneIndex}:lightingN", lane.NoteLighting);
+            CaptureAnimation($"lane{laneIndex}:lightingL", lane.HoldLighting);
+        }
+        foreach (var stage in mode.StageAssets)
+            CaptureAnimation($"stage:{stage.Key}", stage.Value);
+        foreach (var judgement in mode.Judgements)
+            CaptureAnimation($"judgement:{judgement.Key}", judgement.Value);
+        return result;
+    }
+
+    private void VerifyHighResolutionAssetSelection(bool preferHighResolution)
+    {
+        if (skin == null) return;
+        string? directory = skin.CurrentSkinDirectory;
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            Console.WriteLine("[SkinVisualSmoke] 1x/@2x selection check skipped: active skin has no external directory.");
+            return;
+        }
+
+        static string GetStem(string name)
+        {
+            string normalized = name.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+            string extension = Path.GetExtension(normalized);
+            if (extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized[..^extension.Length];
+            if (normalized.EndsWith("@2x", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized[..^3];
+            return normalized;
+        }
+
+        bool HasValidHighResolutionPair(string stem)
+        {
+            string pathStem = Path.Combine(directory, stem);
+            foreach (string extension in new[] { ".png", ".jpg", ".jpeg" })
+            {
+                string standardPath = pathStem + extension;
+                string highResolutionPath = pathStem + "@2x" + extension;
+                if (!File.Exists(standardPath) || !File.Exists(highResolutionPath)) continue;
+                try
+                {
+                    using var standardStream = File.OpenRead(standardPath);
+                    using var highResolutionStream = File.OpenRead(highResolutionPath);
+                    var standardInfo = StbImageSharp.ImageInfo.FromStream(standardStream);
+                    var highResolutionInfo = StbImageSharp.ImageInfo.FromStream(highResolutionStream);
+                    if (standardInfo is { Width: > 0, Height: > 0 } standardDimensions
+                        && highResolutionInfo is { Width: > 0, Height: > 0 } highResolutionDimensions
+                        && SkinAssetResolver.HasExpectedHighResolutionDimensions(
+                            new Vector2(standardDimensions.Width, standardDimensions.Height),
+                            new Vector2(highResolutionDimensions.Width, highResolutionDimensions.Height)))
+                        return true;
+                }
+                catch
+                {
+                    // An unreadable pair is not suitable for proving @2x selection.
+                }
+            }
+
+            return false;
+        }
+
+        var candidates = new List<string> { "score-1" };
+        ResolvedManiaKeymode resolvedMode = skin.GetResolvedKeymode(keyCount);
+        foreach (ResolvedManiaLane lane in resolvedMode.Lanes)
+        {
+            candidates.AddRange(new[]
+            {
+                lane.Definition.NoteAsset,
+                lane.Definition.ReceptorAsset,
+                lane.Definition.PressedReceptorAsset,
+                lane.Definition.LongHeadAsset,
+                lane.Definition.LongBodyAsset,
+                lane.Definition.LongTailAsset
+            }.Where(asset => !string.IsNullOrWhiteSpace(asset)).Select(asset => asset!));
+        }
+        ManiaKeymodeDefinition profile = skin.GetManiaProfile(keyCount);
+        if (profile.StageAssets.TryGetValue("light", out string? configuredLight)
+            && !string.IsNullOrWhiteSpace(configuredLight))
+            candidates.Add(configuredLight);
+        candidates.AddRange(SkinCatalog.ReferencedImages(skin.CurrentDefinition));
+
+        string? assetName = null;
+        foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || candidate.Equals("_blank", StringComparison.OrdinalIgnoreCase))
+                continue;
+            string stem = GetStem(candidate);
+            string pathStem = Path.Combine(directory, stem);
+            bool hasStandard = new[] { ".png", ".jpg", ".jpeg" }
+                .Any(extension => File.Exists(pathStem + extension));
+            bool hasHighResolution = new[] { ".png", ".jpg", ".jpeg" }
+                .Any(extension => File.Exists(pathStem + "@2x" + extension));
+            if (!hasStandard || !hasHighResolution || !HasValidHighResolutionPair(stem)) continue;
+            assetName = stem;
+            break;
+        }
+
+        if (assetName == null)
+        {
+            Console.WriteLine("[SkinVisualSmoke] 1x/@2x selection check skipped: no valid 2x pair in the active skin.");
+            return;
+        }
+
+        ResolvedSkinAsset asset = skin.ResolveAsset(assetName);
+        if (asset.Origin != SkinAssetOrigin.Skin || asset.IsHighResolution != preferHighResolution)
+            throw new InvalidOperationException($"El resolver no seleccionó la variante {(preferHighResolution ? "@2x" : "1x")} de {assetName}.");
+
+        if (highResolutionReferenceLogicalSize is Vector2 reference
+            && (Math.Abs(reference.X - asset.LogicalSize.X) > 0.01f
+                || Math.Abs(reference.Y - asset.LogicalSize.Y) > 0.01f))
+            throw new InvalidOperationException($"El tamaño lógico de {assetName} cambió durante el ciclo HD.");
+
+        highResolutionReferenceLogicalSize = asset.LogicalSize;
+        foreach (string warning in skin.CurrentValidation?.Warnings
+                     .Where(message => message.StartsWith("@2x variant", StringComparison.OrdinalIgnoreCase))
+                     .Take(4) ?? Array.Empty<string>())
+            Console.WriteLine($"[SkinVisualSmoke] asset diagnostic: {warning}");
+        Console.WriteLine($"[SkinVisualSmoke] 1x/@2x gameplay asset {assetName}: selected={asset.IsHighResolution}, source={asset.SourcePixelSize.X}x{asset.SourcePixelSize.Y}, logical={asset.LogicalSize.X}x{asset.LogicalSize.Y}.");
     }
 
     protected override void Update(GameTime gameTime)

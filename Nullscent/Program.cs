@@ -77,6 +77,33 @@ namespace Nullscent
                     cycleSmoke.Run();
                     return;
                 }
+                if (args.Length >= 5 && args[0] == "--skin-visual-hd-cycle-smoke"
+                    && int.TryParse(args[2], out int hdCycleKeyCount))
+                {
+                    var highResolutionSequence = new bool[args.Length - 4];
+                    for (int i = 4; i < args.Length; i++)
+                    {
+                        string value = args[i];
+                        if (value.Equals("on", StringComparison.OrdinalIgnoreCase)
+                            || value.Equals("hd", StringComparison.OrdinalIgnoreCase))
+                            highResolutionSequence[i - 4] = true;
+                        else if (value.Equals("off", StringComparison.OrdinalIgnoreCase)
+                            || value.Equals("sd", StringComparison.OrdinalIgnoreCase))
+                            highResolutionSequence[i - 4] = false;
+                        else
+                            throw new ArgumentException($"Modo HD invÃ¡lido en el paso {i - 3}: {value}; usa on/off.");
+                    }
+
+                    string hdCycleOutputDirectory = Path.GetFullPath(args[3]);
+                    Directory.CreateDirectory(hdCycleOutputDirectory);
+                    using var hdCycleSmoke = new Skin.SkinVisualSmokeGame(
+                        args[1], hdCycleKeyCount, Path.Combine(hdCycleOutputDirectory, "00-initial.png"), true,
+                        viewportWidth: 1920, viewportHeight: 1080,
+                        highResolutionSequence: highResolutionSequence,
+                        highResolutionSequenceOutputDirectory: hdCycleOutputDirectory);
+                    hdCycleSmoke.Run();
+                    return;
+                }
                 if (args.Length is >= 7 and <= 10 && args[0] == "--skin-visual-profile-smoke"
                     && int.TryParse(args[2], out int profileKeyCount)
                     && TryParseLegacySkinMode(args[3], out Skin.LegacySkinCompatibilityMode initialMode)
@@ -159,7 +186,7 @@ namespace Nullscent
                 if (args.Length > 0 && (args[0] == "--skin-tests" || args[0] == "--skin-visual-smoke" || args[0] == "--skin-visual-switch-smoke"
                     || args[0] == "--skin-visual-profile-smoke" || args[0] == "--skin-visual-resize-smoke"
                     || args[0] == "--skin-visual-timeline-smoke" || args[0] == "--skin-visual-cycle-smoke"
-                    || args[0] == "--skin-visual-profile-cycle-smoke")) Environment.ExitCode = 1;
+                    || args[0] == "--skin-visual-profile-cycle-smoke" || args[0] == "--skin-visual-hd-cycle-smoke")) Environment.ExitCode = 1;
 #endif
             }
             finally

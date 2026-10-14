@@ -60,6 +60,24 @@ namespace Nullscent.Skin
                     {
                         if (!File.Exists(candidate.Path)) continue;
                         using var stream = File.OpenRead(candidate.Path);
+                        Vector2? pairedStandardSize = null;
+                        if (candidate.Hd && TryGetStandardLogicalSize(name, out Vector2 standardSize))
+                        {
+                            var highResolutionInfo = StbImageSharp.ImageInfo.FromStream(stream);
+                            if (highResolutionInfo is { Width: > 0, Height: > 0 } dimensions)
+                            {
+                                var highResolutionSize = new Vector2(dimensions.Width, dimensions.Height);
+                                if (!HasExpectedHighResolutionDimensions(standardSize, highResolutionSize))
+                                {
+                                    Warnings.Add($"@2x variant for {name} is {highResolutionSize.X}x{highResolutionSize.Y}, while its 1x pair is {standardSize.X}x{standardSize.Y}; the malformed @2x variant was ignored.");
+                                    continue;
+                                }
+
+                                pairedStandardSize = standardSize;
+                            }
+
+                            stream.Position = 0;
+                        }
                         var image = StbImageSharp.ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
                         if (image.Width <= 0 || image.Height <= 0) throw new InvalidDataException("Dimensiones de imagen inválidas.");
                         // osu!lazer's MaxDimensionLimitedTextureLoaderStore limits each axis
@@ -87,7 +105,7 @@ namespace Nullscent.Skin
                                 result = new ResolvedSkinAsset
                                 {
                                     Texture = texture,
-                                    LogicalSize = new Vector2(image.Width / (candidate.Hd ? 2f : 1f), image.Height / (candidate.Hd ? 2f : 1f)),
+                                    LogicalSize = ResolveLogicalSize(new Vector2(image.Width, image.Height), candidate.Hd, pairedStandardSize),
                                     SourcePixelSize = new Vector2(image.Width, image.Height),
                                     TexturePixelSize = new Vector2(uploadWidth, uploadHeight),
                                     Origin = SkinAssetOrigin.Skin,
@@ -164,6 +182,40 @@ namespace Nullscent.Skin
             return output;
         }
 
+        internal static Vector2 ResolveLogicalSize(Vector2 sourcePixelSize, bool isHighResolution, Vector2? pairedStandardSize)
+        {
+            if (!isHighResolution) return sourcePixelSize;
+            return pairedStandardSize ?? sourcePixelSize / 2f;
+        }
+
+        internal static bool HasExpectedHighResolutionDimensions(Vector2 standardSize, Vector2 highResolutionSize)
+            => highResolutionSize.X == standardSize.X * 2f && highResolutionSize.Y == standardSize.Y * 2f;
+
+        private bool TryGetStandardLogicalSize(string name, out Vector2 logicalSize)
+        {
+            foreach (var candidate in CandidatePaths(name, preferHighResolution: false))
+            {
+                if (candidate.Hd || !File.Exists(candidate.Path)) continue;
+                try
+                {
+                    using var stream = File.OpenRead(candidate.Path);
+                    var info = StbImageSharp.ImageInfo.FromStream(stream);
+                    if (info is { Width: > 0, Height: > 0 } dimensions)
+                    {
+                        logicalSize = new Vector2(dimensions.Width, dimensions.Height);
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // A broken 1x companion must not prevent a valid @2x asset from loading.
+                }
+            }
+
+            logicalSize = default;
+            return false;
+        }
+
         public bool HasFile(string name)
         {
             if (name.Equals("_blank", StringComparison.OrdinalIgnoreCase)) return true;
@@ -172,7 +224,7 @@ namespace Nullscent.Skin
             return false;
         }
 
-        private IEnumerable<(string Path, bool Hd)> CandidatePaths(string name)
+        private IEnumerable<(string Path, bool Hd)> CandidatePaths(string name, bool? preferHighResolution = null)
         {
             if (root == null || string.IsNullOrWhiteSpace(name) || Path.IsPathRooted(name)) yield break;
             string normalized = name.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
@@ -183,7 +235,8 @@ namespace Nullscent.Skin
             string stem = extension.Length > 0 ? normalized[..^extension.Length] : normalized;
             if (stem.EndsWith("@2x", StringComparison.OrdinalIgnoreCase)) stem = stem[..^3];
             string[] extensions = extension.Length > 0 ? new[] { extension } : new[] { ".png", ".jpg", ".jpeg" };
-            foreach (bool hd in preferHd ? new[] { true, false } : new[] { false, true })
+            bool highResolutionFirst = preferHighResolution ?? preferHd;
+            foreach (bool hd in highResolutionFirst ? new[] { true, false } : new[] { false, true })
             foreach (string ext in extensions)
             {
                 string path = Path.GetFullPath(Path.Combine(root, stem + (hd ? "@2x" : "") + ext));

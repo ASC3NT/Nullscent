@@ -96,6 +96,24 @@ namespace Nullscent
             return true;
         }
 
+        public bool SetHighResolutionSkinAssets(bool enabled)
+        {
+            if (_skinManager == null || _settings == null) return false;
+            if (!HighResolutionSkinWorkflow.TrySet(
+                _skinManager,
+                _settings,
+                enabled,
+                value => SettingsService.Instance.HighResolutionSkins = value,
+                _settings.TrySave))
+            {
+                ShowSkinNotice("No se pudieron recargar los assets de skin; se conservaron los anteriores.");
+                return false;
+            }
+
+            ShowSkinNotice(enabled ? "Assets HD de skin activos." : "Assets SD de skin activos.");
+            return true;
+        }
+
         public bool SelectSkin(string? path)
         {
             if (_skinManager == null || _skinCatalog == null || _settings == null) return false;

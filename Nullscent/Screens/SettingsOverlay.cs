@@ -332,13 +332,7 @@ namespace Nullscent.Screens
             _settingItems.Add(OverlaySettingItem.CreateToggle(
                 "HD Skin Assets",
                 () => _settings.HighResolutionSkins ? "ON" : "OFF",
-                () => {
-                    _settings.HighResolutionSkins = !_settings.HighResolutionSkins;
-                    _settings.Save();
-                    Core.SettingsService.Instance.HighResolutionSkins = _settings.HighResolutionSkins;
-                    string current = _game.SkinManager.CurrentSkinDirectory;
-                    if (current.Length > 0) _game.SkinManager.LoadSkin(current);
-                }
+                () => _game.SetHighResolutionSkinAssets(!_settings.HighResolutionSkins)
             ));
 
             _settingItems.Add(OverlaySettingItem.CreateToggle(

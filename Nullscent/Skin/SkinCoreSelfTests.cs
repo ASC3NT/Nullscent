@@ -25,6 +25,7 @@ namespace Nullscent.Skin
             TestLegacyVersionFlipDefaults();
             TestFlipPropertyClassificationByProfile();
             TestLegacyCompatibilitySettingRollback();
+            TestHighResolutionSettingRollback();
             TestStagePresentationNormalizationAndLayout();
             TestLongNoteBodyVisualRules();
             TestLegacyColourLightIsStageOnly();
@@ -34,8 +35,32 @@ namespace Nullscent.Skin
             TestHoldLightingAnimationLifecycle();
             TestProviderScopedAssetCascade();
             TestHitSoundSourcePrecedence();
+            TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 23 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 25 pruebas deterministas pasaron.");
+        }
+
+        private static void TestPairedHighResolutionLogicalSizing()
+        {
+            Microsoft.Xna.Framework.Vector2 standard = new(75, 200);
+            Microsoft.Xna.Framework.Vector2 validHighResolution = new(150, 400);
+            Microsoft.Xna.Framework.Vector2 malformedHighResolution = new(150, 375);
+            Microsoft.Xna.Framework.Vector2 unpairedHighResolution = new(320, 800);
+
+            AssertNear(SkinAssetResolver.ResolveLogicalSize(standard, false, null).Y, 200,
+                "A standard texture should use its physical dimensions as logical dimensions.");
+            Assert(SkinAssetResolver.HasExpectedHighResolutionDimensions(standard, validHighResolution),
+                "A valid @2x pair should be exactly twice the 1x dimensions on both axes.");
+            Assert(!SkinAssetResolver.HasExpectedHighResolutionDimensions(standard, malformedHighResolution),
+                "A malformed @2x pair should be rejected instead of distorting its visible geometry.");
+            Microsoft.Xna.Framework.Vector2 validPair = SkinAssetResolver.ResolveLogicalSize(validHighResolution, true, standard);
+            AssertNear(validPair.X, standard.X, "A valid @2x pair should preserve the 1x logical width.");
+            AssertNear(validPair.Y, standard.Y, "A valid @2x pair should preserve the 1x logical height.");
+            Microsoft.Xna.Framework.Vector2 unpaired = SkinAssetResolver.ResolveLogicalSize(unpairedHighResolution, true, null);
+            AssertNear(unpaired.X, unpairedHighResolution.X / 2f,
+                "An @2x-only texture should retain the conventional half-pixel logical size.");
+            AssertNear(unpaired.Y, unpairedHighResolution.Y / 2f,
+                "An @2x-only texture should retain the conventional half-pixel logical size.");
         }
 
         private static void TestTextureDownscalePreservesStraightAlphaEdges()
@@ -637,6 +662,31 @@ namespace Nullscent.Skin
             Assert(saveExceptionObserved && settings.LegacySkinCompatibilityMode == LegacySkinCompatibilityMode.Stable
                 && publishedMode == LegacySkinCompatibilityMode.Stable,
                 "A thrown settings save must restore both settings values before propagating the failure.");
+        }
+
+        private static void TestHighResolutionSettingRollback()
+        {
+            var settings = new GameSettings { HighResolutionSkins = false };
+            bool publishedValue = false;
+            bool saved = HighResolutionSkinWorkflow.TryPersistSetting(settings, true,
+                value =>
+                {
+                    publishedValue = value;
+                    settings.HighResolutionSkins = value;
+                }, () => false);
+
+            Assert(!saved, "A failed save must reject the high-resolution asset preference change.");
+            Assert(!settings.HighResolutionSkins && !publishedValue,
+                "A failed save must restore both stored and published high-resolution settings.");
+
+            saved = HighResolutionSkinWorkflow.TryPersistSetting(settings, true,
+                value =>
+                {
+                    publishedValue = value;
+                    settings.HighResolutionSkins = value;
+                }, () => true);
+            Assert(saved && settings.HighResolutionSkins && publishedValue,
+                "A successful save must publish the high-resolution asset preference.");
         }
 
         private static void TestStagePresentationNormalizationAndLayout()

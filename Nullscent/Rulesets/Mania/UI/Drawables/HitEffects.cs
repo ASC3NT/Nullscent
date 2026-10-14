@@ -50,7 +50,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
         }
 
         public void Draw(SpriteBatch spriteBatch, Texture2D pixel, Texture2D glowTexture, int columnX, int columnWidth, int receptorY, double currentTime, ResolvedSkinAnimation? skinnedExplosion = null,
-            SkinManager? skinManager = null, float legacyScale = 1f, float? configuredWidth = null, Color? skinTint = null)
+            SkinManager? skinManager = null, float legacyScale = 1f, float? configuredWidth = null, Color? skinTint = null,
+            bool flipHorizontally = false)
         {
             if (!_isActive) return;
 
@@ -97,7 +98,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             }
             
             // Draw texture
-            spriteBatch.Draw(activeTexture, explosionRect, isSkinned ? (skinTint ?? Color.White) * alpha : explosionColor);
+            SpriteEffects effects = isSkinned && flipHorizontally ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
+            spriteBatch.Draw(activeTexture, explosionRect, null,
+                isSkinned ? (skinTint ?? Color.White) * alpha : explosionColor,
+                0f, Vector2.Zero, effects, 0f);
 
             // Draw bright core only if not using skinned texture
             if (!isSkinned && elapsed < SCALE_UP_DURATION * 2)

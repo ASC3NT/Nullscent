@@ -180,6 +180,9 @@ namespace Nullscent.Skin
             Assert(bars.Keymodes[4].Lanes[0].LightColor.HasValue
                 && bars.Keymodes[4].Lanes[0].StageLightColor == null,
                 "Existing native lightColor should retain its lane-light tint semantics and remain the StageLight fallback.");
+            Assert(!bars.Keymodes[4].FlipLightingHorizontallyWhenUpsideDown
+                && !circles.Keymodes[4].FlipLightingHorizontallyWhenUpsideDown,
+                "Native skins should keep their declared lighting orientation by default.");
 
             string temp = Path.Combine(Path.GetTempPath(), "NullscentNativeStageTest-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(temp);
@@ -192,13 +195,17 @@ namespace Nullscent.Skin
                       "keymodes": {
                         "4": {
                           "keyCount": 4,
+                          "flipLightingHorizontallyWhenUpsideDown": true,
                           "stageStyle": { "sideHeightScale": 0.8, "hintHeightScale": 1.25, "bottomScale": 1.6 },
                           "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
                         }
                       }
                     }
                     """);
-                ManiaStageStyleDefinition stageStyle = NativeSkinAdapter.Load(temp).Keymodes[4].StageStyle;
+                ManiaKeymodeDefinition nativeMode = NativeSkinAdapter.Load(temp).Keymodes[4];
+                ManiaStageStyleDefinition stageStyle = nativeMode.StageStyle;
+                Assert(nativeMode.FlipLightingHorizontallyWhenUpsideDown,
+                    "Native manifests should be able to opt in to the normalized upside-down lighting transform.");
                 AssertNear(stageStyle.SideHeightScale, 0.8f, "Native stage side scaling should deserialize as normalized data.");
                 AssertNear(stageStyle.HintHeightScale, 1.25f, "Native stage hint scaling should deserialize as normalized data.");
                 AssertNear(stageStyle.BottomScale, 1.6f, "Native StageBottom scaling should deserialize as normalized data.");
@@ -352,6 +359,13 @@ namespace Nullscent.Skin
                     "Legacy skins should default to the explicitly selected Stable compatibility profile.");
                 Assert(lazer.CompatibilityProfile == ManiaSkinCompatibilityProfile.LazerLegacy,
                     "Lazer compatibility should be an explicit interpretation profile, not a provider kind.");
+                Assert(stableMode.FlipLightingHorizontallyWhenUpsideDown
+                    && !lazer.Keymodes[4].FlipLightingHorizontallyWhenUpsideDown,
+                    "Stable legacy lighting follows the wiki's horizontal flip on an upside-down stage; current Lazer legacy keeps its source orientation.");
+                Assert(!ManiaSkinRules.ShouldFlipLightingHorizontally(stableMode, downScroll: true)
+                    && ManiaSkinRules.ShouldFlipLightingHorizontally(stableMode, downScroll: false)
+                    && !ManiaSkinRules.ShouldFlipLightingHorizontally(lazer.Keymodes[4], downScroll: false),
+                    "Only normalized profiles that request the legacy transform flip both lighting assets during upscroll.");
                 Assert(stableMode.ReceptorAnchor == ReceptorAnchorMode.StageEdge,
                     "Legacy key images should anchor to the stage edge when the user has not overridden receptor position.");
                 Assert(stableMode.BodyMode == NoteBodyRenderMode.TileFromTail

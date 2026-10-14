@@ -96,6 +96,7 @@ namespace Nullscent.Skin
         public bool KeysUnderNotes { get; init; }
         public bool JudgementLine { get; init; } = true;
         public bool ColumnLighting { get; init; } = true;
+        public bool FlipLightingHorizontallyWhenUpsideDown { get; init; }
         public bool? UpsideDown { get; init; }
         public bool SupportsFlipOverrides { get; init; }
         public bool? NoteFlipWhenUpsideDown { get; init; }
@@ -268,6 +269,9 @@ namespace Nullscent.Skin
                         : HoldBodyAnimationReleaseMode.FreezeAtRelease,
                     JudgementLine = source.JudgementLine,
                     ColumnLighting = source.ColumnLighting,
+                    // The Stable wiki contract flips both mania lighting assets horizontally
+                    // when the stage is upside down. Current Lazer legacy drawables do not.
+                    FlipLightingHorizontallyWhenUpsideDown = compatibilityMode == LegacySkinCompatibilityMode.Stable,
                     UpsideDown = source.UpsideDown,
                     SupportsFlipOverrides = supportsFlipOverrides,
                     NoteFlipWhenUpsideDown = supportsFlipOverrides ? source.NoteFlipWhenUpsideDown : null,

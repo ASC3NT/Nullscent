@@ -35,5 +35,8 @@ namespace Nullscent.Skin
                 : profile.KeyFlips.TryGetValue(column, out bool columnFlip) ? columnFlip
                 : profile.KeyFlipWhenUpsideDown ?? true;
         }
+
+        public static bool ShouldFlipLightingHorizontally(ManiaKeymodeDefinition profile, bool downScroll) =>
+            profile.FlipLightingHorizontallyWhenUpsideDown && !downScroll;
     }
 }

@@ -339,7 +339,7 @@ namespace Nullscent.Rulesets.Mania.UI
             // osu! places column hit explosions and active LN lighting in the
             // top-level container after the judgement layer.
             foreach (var column in _columns)
-                column.DrawForeground(_spriteBatch, _radialGlow, currentTime, ReceptorY);
+                column.DrawForeground(_spriteBatch, _radialGlow, currentTime, ReceptorY, downScroll);
 
             _spriteBatch.End();
         }
@@ -1130,12 +1130,16 @@ namespace Nullscent.Rulesets.Mania.UI
             }
         }
 
-        public void DrawForeground(SpriteBatch spriteBatch, Texture2D radialGlow, double currentTime, int receptorY)
+        public void DrawForeground(SpriteBatch spriteBatch, Texture2D radialGlow, double currentTime, int receptorY, bool downScroll)
         {
-            DrawHoldLighting(spriteBatch, currentTime, receptorY);
+            DrawHoldLighting(spriteBatch, currentTime, receptorY, downScroll);
 
-            ResolvedManiaLane? resolvedLane = _skinManager?.GetResolvedKeymode(_totalColumnCount).Lanes[_index];
+            ResolvedManiaKeymode? resolvedMode = _skinManager?.GetResolvedKeymode(_totalColumnCount);
+            ResolvedManiaLane? resolvedLane = resolvedMode != null && _index >= 0 && _index < resolvedMode.Lanes.Count
+                ? resolvedMode.Lanes[_index] : null;
             ResolvedSkinAnimation? skinnedExplosion = resolvedLane?.NoteLighting;
+            bool flipLightingHorizontally = resolvedMode != null
+                && ManiaSkinRules.ShouldFlipLightingHorizontally(resolvedMode.Definition, downScroll);
             int explosionCount = _explosions.Count;
             bool additiveExplosions = skinnedExplosion != null && explosionCount > 0;
             if (additiveExplosions)
@@ -1151,7 +1155,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 var lightColour = _skinManager?.GetColourLight(_totalColumnCount, _index);
                 Color? lightTint = lightColour is { } c ? new Color(c.R, c.G, c.B, c.A) : null;
                 _explosions[i].Draw(spriteBatch, _pixel, radialGlow, _x, _width, receptorY, currentTime,
-                    skinnedExplosion, _skinManager, LayoutScale, normalLightingWidth, lightTint);
+                    skinnedExplosion, _skinManager, LayoutScale, normalLightingWidth, lightTint, flipLightingHorizontally);
             }
             if (additiveExplosions)
             {
@@ -1160,11 +1164,13 @@ namespace Nullscent.Rulesets.Mania.UI
             }
         }
 
-        private void DrawHoldLighting(SpriteBatch spriteBatch, double currentTime, int receptorY)
+        private void DrawHoldLighting(SpriteBatch spriteBatch, double currentTime, int receptorY, bool downScroll)
         {
             if (!_isHolding && currentTime >= _holdLightingEndTime) return;
 
-            ResolvedManiaLane? lane = _skinManager?.GetResolvedKeymode(_totalColumnCount).Lanes[_index];
+            ResolvedManiaKeymode? resolvedMode = _skinManager?.GetResolvedKeymode(_totalColumnCount);
+            ResolvedManiaLane? lane = resolvedMode != null && _index >= 0 && _index < resolvedMode.Lanes.Count
+                ? resolvedMode.Lanes[_index] : null;
             ResolvedSkinAnimation? lightingAnimation = lane?.HoldLighting;
             Texture2D? lightingTexture = lightingAnimation?.FrameAt(currentTime);
             bool isLightingEnabled = _skinManager?.IsLightingEnabled(_totalColumnCount) ?? true;
@@ -1187,7 +1193,10 @@ namespace Nullscent.Rulesets.Mania.UI
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive);
             var configuredTint = _skinManager.GetColourLight(_totalColumnCount, _index);
             Color tint = configuredTint is { } c ? new Color(c.R, c.G, c.B, c.A) : Color.White;
-            spriteBatch.Draw(lightingTexture, lightRect, null, tint * alpha);
+            SpriteEffects effects = resolvedMode != null
+                && ManiaSkinRules.ShouldFlipLightingHorizontally(resolvedMode.Definition, downScroll)
+                    ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
+            spriteBatch.Draw(lightingTexture, lightRect, null, tint * alpha, 0f, Vector2.Zero, effects, 0f);
             spriteBatch.End();
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
         }

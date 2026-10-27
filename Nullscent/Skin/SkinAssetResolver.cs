@@ -12,6 +12,7 @@ namespace Nullscent.Skin
     public sealed class ResolvedSkinAsset
     {
         public Texture2D? Texture { get; init; }
+        public string? ResolvedPath { get; init; }
         public Vector2 LogicalSize { get; init; }
         public Vector2 SourcePixelSize { get; init; }
         public Vector2 TexturePixelSize { get; init; }
@@ -46,6 +47,7 @@ namespace Nullscent.Skin
                 return new ResolvedSkinAsset
                 {
                     Texture = blank, LogicalSize = Vector2.One,
+                    ResolvedPath = "_blank",
                     SourcePixelSize = Vector2.One, TexturePixelSize = Vector2.One,
                     Origin = SkinAssetOrigin.IntentionalBlank
                 };
@@ -105,6 +107,7 @@ namespace Nullscent.Skin
                                 result = new ResolvedSkinAsset
                                 {
                                     Texture = texture,
+                                    ResolvedPath = candidate.Path,
                                     LogicalSize = ResolveLogicalSize(new Vector2(image.Width, image.Height), candidate.Hd, pairedStandardSize),
                                     SourcePixelSize = new Vector2(image.Width, image.Height),
                                     TexturePixelSize = new Vector2(uploadWidth, uploadHeight),

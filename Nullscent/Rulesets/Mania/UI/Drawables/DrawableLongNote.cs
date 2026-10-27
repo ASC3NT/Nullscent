@@ -159,6 +159,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             float headWidth = Math.Max(1f, columnWidth * (headMetrics.WidthRatio > 0 ? headMetrics.WidthRatio : 1f));
             float tailWidth = Math.Max(1f, columnWidth * (tailMetrics.WidthRatio > 0 ? tailMetrics.WidthRatio : 1f));
             float bodyWidth = Math.Max(1f, columnWidth * (bodyMetrics.WidthRatio > 0 ? bodyMetrics.WidthRatio : 1f));
+#if DEBUG
+            if (skinManager != null && resolvedMode != null && resolvedLane != null)
+                LongNoteRenderDiagnostics.TraceResolvedPieces(_longNote, keyCount, columnIndex, downScroll,
+                    skinManager, resolvedMode, resolvedLane, headAnimation, resolvedLane.LongBody, tailAnimation,
+                    headMetrics, bodyMetrics, tailMetrics);
+#endif
             int headX = (int)MathF.Round(columnX + (columnWidth - headWidth) / 2f + columnWidth * headMetrics.OffsetXRatio);
             int tailX = (int)MathF.Round(columnX + (columnWidth - tailWidth) / 2f + columnWidth * tailMetrics.OffsetXRatio);
             int bodyX = (int)MathF.Round(columnX + (columnWidth - bodyWidth) / 2f + columnWidth * bodyMetrics.OffsetXRatio);

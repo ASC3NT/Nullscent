@@ -4,7 +4,9 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Nullscent.Rulesets.Mania.Objects;
+using Nullscent.Skin;
 using System;
+using System.Linq;
 using System.Runtime.CompilerServices;
 
 namespace Nullscent.Rulesets.Mania.UI.Drawables;
@@ -18,6 +20,7 @@ internal static class LongNoteRenderDiagnostics
     private sealed class FrameTraceState
     {
         public long LastBucket = long.MinValue;
+        public bool AssetsLogged;
     }
 
     private static readonly ConditionalWeakTable<LongNote, FrameTraceState> frameTraceStates = new();
@@ -55,6 +58,51 @@ internal static class LongNoteRenderDiagnostics
 
     public static bool ShouldTraceEffect(double elapsedMs) =>
         Enabled && (!GameplayTraceMode || (double.IsFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs <= 48));
+
+    public static void TraceResolvedPieces(LongNote note, int keyCount, int column, bool downScroll,
+        SkinManager skinManager, ResolvedManiaKeymode mode, ResolvedManiaLane lane,
+        ResolvedSkinAnimation? head, ResolvedSkinAnimation? body, ResolvedSkinAnimation? tail,
+        SkinSpriteMetrics headMetrics, SkinSpriteMetrics bodyMetrics, SkinSpriteMetrics tailMetrics)
+    {
+        if (!Enabled) return;
+
+        FrameTraceState state = frameTraceStates.GetValue(note, static _ => new FrameTraceState());
+        if (state.AssetsLogged) return;
+        state.AssetsLogged = true;
+
+        ManiaSkinDefinition skin = skinManager.CurrentDefinition;
+        ManiaLaneDefinition laneDefinition = lane.Definition;
+        ManiaKeymodeDefinition modeDefinition = mode.Definition;
+        Console.WriteLine(
+            $"[LN-Assets] skin={skin.Name} id={skin.Id} profile={skin.CompatibilityProfile} version={skin.LegacyVersion?.ToString("0.##") ?? "latest"} " +
+            $"keys={keyCount} column={column} scroll={(downScroll ? "down" : "up")} " +
+            $"bodyMode={skinManager.GetNoteBodyMode(keyCount, column)} " +
+            $"connections={modeDefinition.HoldAssembly.HeadConnectionRatio:0.###}/{modeDefinition.HoldAssembly.TailConnectionRatio:0.###}");
+
+        TracePiece("H", CandidateList(laneDefinition.LongHeadAsset, modeDefinition.LongHeadStyle.Asset,
+                laneDefinition.NoteAsset, modeDefinition.NoteStyle.Asset),
+            head, headMetrics, skinManager.FlipNote(keyCount, column, "H", downScroll), skinManager);
+        TracePiece("L", CandidateList(laneDefinition.LongBodyAsset, modeDefinition.LongBodyStyle.Asset),
+            body, bodyMetrics, skinManager.FlipNote(keyCount, column, "L", downScroll), skinManager);
+        TracePiece("T", CandidateList(laneDefinition.LongTailAsset, modeDefinition.LongTailStyle.Asset,
+                laneDefinition.LongHeadAsset, modeDefinition.LongHeadStyle.Asset,
+                laneDefinition.NoteAsset, modeDefinition.NoteStyle.Asset),
+            tail, tailMetrics, skinManager.FlipNote(keyCount, column, "T", downScroll), skinManager);
+    }
+
+    private static string CandidateList(params string?[] candidates) =>
+        string.Join(" -> ", candidates.Where(static candidate => !string.IsNullOrWhiteSpace(candidate)));
+
+    private static void TracePiece(string role, string candidates, ResolvedSkinAnimation? animation,
+        SkinSpriteMetrics metrics, bool flipped, SkinManager skinManager)
+    {
+        Texture2D? texture = animation?.FirstFrame;
+        Console.WriteLine(
+            $"[LN-Assets] piece={role} candidates=[{candidates}] frames={animation?.Frames.Count ?? 0} " +
+            $"flip={flipped} metrics=width:{metrics.WidthRatio:0.###},height:{metrics.HeightMode}/{metrics.HeightValue:0.###}," +
+            $"reference:{metrics.ReferenceWidth:0.###},offset:{metrics.OffsetXRatio:0.###}/{metrics.OffsetY:0.###} " +
+            $"resolved=({skinManager.DescribeResolvedAsset(texture)})");
+    }
 
     public static void TraceStateEvent(string eventName, LongNote note, int column, double currentTime,
         LongNoteState previousState, bool previousTailJudged, bool drawableIsJudged, bool keyPressed)

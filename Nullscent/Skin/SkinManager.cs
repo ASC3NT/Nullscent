@@ -90,6 +90,20 @@ namespace Nullscent.Skin
         internal bool HasPreparedNumberPrefix(string prefix) => _resolvedNumberSets.ContainsKey(prefix);
         internal object? GetPreparedNumberPrefixState(string prefix) =>
             _resolvedNumberSets.TryGetValue(prefix, out ResolvedNumberSet? state) ? state : null;
+
+        internal string DescribeResolvedAsset(Texture2D? texture)
+        {
+            if (texture == null) return "missing";
+            if (ReferenceEquals(texture, _blankTexture))
+                return $"origin={SkinAssetOrigin.IntentionalBlank} path=_blank gpu={texture.Width}x{texture.Height} logical=1x1";
+            if (!_assetInfo.TryGetValue(texture, out ResolvedSkinAsset? asset))
+                return $"origin=generated path=<none> gpu={texture.Width}x{texture.Height}";
+
+            return $"origin={asset.Origin} path={asset.ResolvedPath ?? "<generated>"} " +
+                   $"source={asset.SourcePixelSize.X:0.##}x{asset.SourcePixelSize.Y:0.##} " +
+                   $"gpu={asset.TexturePixelSize.X:0.##}x{asset.TexturePixelSize.Y:0.##} " +
+                   $"logical={asset.LogicalSize.X:0.##}x{asset.LogicalSize.Y:0.##} @2x={asset.IsHighResolution}";
+        }
 #endif
 
         public SkinManager(GraphicsDevice graphicsDevice)
@@ -425,6 +439,7 @@ namespace Nullscent.Skin
                     asset = new ResolvedSkinAsset
                     {
                         Texture = fallback.Texture,
+                        ResolvedPath = fallback.ResolvedPath,
                         LogicalSize = fallback.LogicalSize,
                         SourcePixelSize = fallback.SourcePixelSize,
                         TexturePixelSize = fallback.TexturePixelSize,
@@ -489,6 +504,7 @@ namespace Nullscent.Skin
                 asset = new ResolvedSkinAsset
                 {
                     Texture = asset.Texture,
+                    ResolvedPath = asset.ResolvedPath,
                     LogicalSize = asset.LogicalSize,
                     SourcePixelSize = asset.SourcePixelSize,
                     TexturePixelSize = asset.TexturePixelSize,
@@ -714,6 +730,7 @@ namespace Nullscent.Skin
                 asset = new ResolvedSkinAsset
                 {
                     Texture = asset.Texture, LogicalSize = asset.LogicalSize,
+                    ResolvedPath = asset.ResolvedPath,
                     SourcePixelSize = asset.SourcePixelSize, TexturePixelSize = asset.TexturePixelSize,
                     Origin = SkinAssetOrigin.Internal, IsHighResolution = asset.IsHighResolution
                 };

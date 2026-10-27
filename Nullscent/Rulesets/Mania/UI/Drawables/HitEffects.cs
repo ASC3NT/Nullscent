@@ -102,6 +102,14 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             spriteBatch.Draw(activeTexture, explosionRect, null,
                 isSkinned ? (skinTint ?? Color.White) * alpha : explosionColor,
                 0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+            if (LongNoteRenderDiagnostics.DrawOutlines)
+                LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel, explosionRect, Color.LimeGreen);
+            Vector2 explosionLogicalSize = skinManager?.GetLogicalSize(activeTexture)
+                ?? new Vector2(activeTexture.Width, activeTexture.Height);
+            LongNoteRenderDiagnostics.TraceLayer("hit-explosion", activeTexture, explosionLogicalSize,
+                explosionRect, null, effects, LongNoteRenderDiagnostics.ShouldTraceEffect(elapsed));
+#endif
 
             // Draw bright core only if not using skinned texture
             if (!isSkinned && elapsed < SCALE_UP_DURATION * 2)

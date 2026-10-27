@@ -103,6 +103,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             double scrollSpeed, int receptorY, bool downScroll, int screenHeight, int columnWidth, float layoutScale, float noteHeightScale)
         {
             if (IsJudged) return;
+#if DEBUG
+            bool traceFrame = LongNoteRenderDiagnostics.ShouldTraceFrame(_longNote, currentTime);
+#endif
 
             // Calculate head and tail Y positions (use release time to prevent jumping/teleporting when released early)
             double bottomTime = (_longNote.TailReleaseTime > 0) ? _longNote.TailReleaseTime : _longNote.StartTime;
@@ -279,7 +282,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                         0f, Vector2.Zero, effects, 0f);
 #if DEBUG
                                     LongNoteRenderDiagnostics.TraceDraw("body", bodyTexture,
-                                        skinManager!.GetLogicalSize(bodyTexture), bodyRect, srcRect, effects);
+                                        skinManager!.GetLogicalSize(bodyTexture), bodyRect, srcRect, effects, traceFrame);
 #endif
                                 }
                                 currY += h;
@@ -300,7 +303,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                         0f, Vector2.Zero, effects, 0f);
 #if DEBUG
                                     LongNoteRenderDiagnostics.TraceDraw("body", bodyTexture,
-                                        skinManager!.GetLogicalSize(bodyTexture), bodyRect, srcRect, effects);
+                                        skinManager!.GetLogicalSize(bodyTexture), bodyRect, srcRect, effects, traceFrame);
 #endif
                                 }
                                 else
@@ -323,7 +326,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                             0f, Vector2.Zero, effects, 0f);
 #if DEBUG
                                         LongNoteRenderDiagnostics.TraceDraw("body", bodyTexture,
-                                            skinManager!.GetLogicalSize(bodyTexture), tileRect, srcRect, effects);
+                                            skinManager!.GetLogicalSize(bodyTexture), tileRect, srcRect, effects, traceFrame);
 #endif
                                     }
                                 }
@@ -351,7 +354,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             spriteBatch.Draw(pixel, bodyRect, baseBodyColor * (float)(bodyAlpha * 0.7f));
 #if DEBUG
                             LongNoteRenderDiagnostics.TraceDraw("fallback-body", pixel, Vector2.One,
-                                bodyRect, null, SpriteEffects.None);
+                                bodyRect, null, SpriteEffects.None, traceFrame);
 #endif
 
                             // Draw left border segment
@@ -373,7 +376,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             spriteBatch.Draw(pixel, bodyRect, baseBodyColor * (float)(bodyAlpha * 0.7f));
 #if DEBUG
                             LongNoteRenderDiagnostics.TraceDraw("fallback-body", pixel, Vector2.One,
-                                bodyRect, null, SpriteEffects.None);
+                                bodyRect, null, SpriteEffects.None, traceFrame);
 #endif
 
                             // Draw left border
@@ -424,7 +427,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
 #if DEBUG
                             LongNoteRenderDiagnostics.TraceDraw("tail", tailFrame,
                                 skinManager.GetLogicalSize(tailFrame), destination,
-                                tailMaskedAtReceptor ? source : null, effects);
+                                tailMaskedAtReceptor ? source : null, effects, traceFrame);
 #endif
                         }
                     }
@@ -447,7 +450,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             spriteBatch.Draw(pixel, destination, COLOR_TAIL * (float)tailAlpha);
 #if DEBUG
                             LongNoteRenderDiagnostics.TraceDraw("fallback-tail", pixel, Vector2.One,
-                                destination, null, SpriteEffects.None);
+                                destination, null, SpriteEffects.None, traceFrame);
 #endif
                         }
                     }
@@ -484,7 +487,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             0f, Vector2.Zero, effects, 0f);
 #if DEBUG
                         LongNoteRenderDiagnostics.TraceDraw("head", headFrame,
-                            skinManager.GetLogicalSize(headFrame), headRect, null, effects);
+                            skinManager.GetLogicalSize(headFrame), headRect, null, effects, traceFrame);
 #endif
                     }
                     else
@@ -500,7 +503,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                         spriteBatch.Draw(pixel, headRect, COLOR_HEAD * (float)headAlpha);
 #if DEBUG
                         LongNoteRenderDiagnostics.TraceDraw("fallback-head", pixel, Vector2.One,
-                            headRect, null, SpriteEffects.None);
+                            headRect, null, SpriteEffects.None, traceFrame);
 #endif
 
                         // Head border
@@ -516,7 +519,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 bool bodyDrawn = bodyDebugRect.HasValue && bodyHeight > 0;
                 LongNoteRenderDiagnostics.LogFrame(_longNote, currentTime, downScroll, receptorY,
                     rawHeadY, headY, rawTailY, tailY, rawBodyTopY, rawBodyBottomY,
-                    bodyTopY, bodyBottomY, headClamped, tailClamped, bodyDrawn, tailMaskedAtReceptor);
+                    bodyTopY, bodyBottomY, headClamped, tailClamped, bodyDrawn, tailMaskedAtReceptor,
+                    columnIndex, IsJudged, traceFrame);
 
                 if (LongNoteRenderDiagnostics.DrawOutlines)
                 {

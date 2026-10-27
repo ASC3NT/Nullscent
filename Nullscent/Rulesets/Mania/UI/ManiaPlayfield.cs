@@ -720,11 +720,20 @@ namespace Nullscent.Rulesets.Mania.UI
                 // Manejo especial para el estado de presión de las notas largas (LN)
                 if (drawable is DrawableLongNote drawableLN)
                 {
+#if DEBUG
+                    LongNoteState stateBeforeFrameChecks = ((LongNote)drawableLN.HitObject).State;
+                    bool tailJudgedBeforeFrameChecks = ((LongNote)drawableLN.HitObject).TailJudged;
+#endif
                     drawableLN.UpdateHold(currentTime, _isPressed);
                     drawableLN.CheckAutoMiss(currentTime, _hitWindows);
 
                     if (drawableLN.HitObject is LongNote ln)
                     {
+#if DEBUG
+                        if (stateBeforeFrameChecks != ln.State || tailJudgedBeforeFrameChecks != ln.TailJudged)
+                            LongNoteRenderDiagnostics.TraceStateEvent("playfield-update", ln, _index, currentTime,
+                                stateBeforeFrameChecks, tailJudgedBeforeFrameChecks, drawableLN.IsJudged, _isPressed);
+#endif
                         if (ln.State == LongNoteState.Holding)
                         {
                             _isHolding = true;
@@ -766,6 +775,10 @@ namespace Nullscent.Rulesets.Mania.UI
                         // Remove and dispose only when drawableLN.IsJudged is true (after scrolling past)
                         if (drawableLN.IsJudged)
                         {
+#if DEBUG
+                            LongNoteRenderDiagnostics.TraceStateEvent("drawable-removed", ln, _index, currentTime,
+                                ln.State, ln.TailJudged, drawableLN.IsJudged, _isPressed);
+#endif
                             _drawableHitObjects.RemoveAt(i);
                             drawable.Dispose();
                             i--;
@@ -878,7 +891,15 @@ namespace Nullscent.Rulesets.Mania.UI
                         }
 
                         // Procesar la pulsación de la cabeza de la LN
+#if DEBUG
+                        LongNoteState stateBeforeHeadInput = ln.State;
+                        bool tailJudgedBeforeHeadInput = ln.TailJudged;
+#endif
                         drawableLN.CheckForResult(currentTime, _hitWindows);
+#if DEBUG
+                        LongNoteRenderDiagnostics.TraceStateEvent("key-press", ln, _index, currentTime,
+                            stateBeforeHeadInput, tailJudgedBeforeHeadInput, drawableLN.IsJudged, _isPressed);
+#endif
 
                         if (ln.HeadJudged && ln.HeadResult != HitResult.Miss)
                         {
@@ -951,7 +972,15 @@ namespace Nullscent.Rulesets.Mania.UI
                 {
                     if (drawableLN.HitObject is LongNote ln && !ln.TailJudged)
                     {
+#if DEBUG
+                        LongNoteState stateBeforeRelease = ln.State;
+                        bool tailJudgedBeforeRelease = ln.TailJudged;
+#endif
                         drawableLN.OnKeyRelease(currentTime, _hitWindows);
+#if DEBUG
+                        LongNoteRenderDiagnostics.TraceStateEvent("key-release", ln, _index, currentTime,
+                            stateBeforeRelease, tailJudgedBeforeRelease, drawableLN.IsJudged, _isPressed);
+#endif
                         if (ln.TailJudged && ln.TailResult != HitResult.Miss)
                         {
                             PlayNoteHitsound(ln);
@@ -1079,6 +1108,13 @@ namespace Nullscent.Rulesets.Mania.UI
                     spriteBatch.End();
                     spriteBatch.Begin(SpriteSortMode.Deferred, StageLightBlend);
                     spriteBatch.Draw(stageLight, lightRect, null, lightTint * stageLightProgress, 0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+                    if (LongNoteRenderDiagnostics.DrawOutlines)
+                        LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel, lightRect, Color.Orange);
+                    double stageLightElapsed = currentTime - (_stageLightEndTime - 250d);
+                    LongNoteRenderDiagnostics.TraceLayer("stage-light", stageLight, lightSize, lightRect, null, effects,
+                        !_isPressed && LongNoteRenderDiagnostics.ShouldTraceEffect(stageLightElapsed));
+#endif
                     spriteBatch.End();
                     spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
                 }
@@ -1142,6 +1178,10 @@ namespace Nullscent.Rulesets.Mania.UI
                     SpriteEffects effects = _skinManager.FlipKey(_totalColumnCount, _index, _isPressed, downScroll)
                         ? SpriteEffects.FlipVertically : SpriteEffects.None;
                     spriteBatch.Draw(keyTexture, keyRect, null, Color.White, 0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+                    if (LongNoteRenderDiagnostics.DrawOutlines)
+                        LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel, keyRect, Color.Cyan);
+#endif
                 }
                 else
                 {
@@ -1156,6 +1196,10 @@ namespace Nullscent.Rulesets.Mania.UI
                     spriteBatch.Draw(pixel, new Rectangle(keyRect.X, keyRect.Y + keyRect.Height - 2, keyRect.Width, 2), keyBorderColor);
                     spriteBatch.Draw(pixel, new Rectangle(keyRect.X, keyRect.Y, 2, keyRect.Height), keyBorderColor);
                     spriteBatch.Draw(pixel, new Rectangle(keyRect.X + keyRect.Width - 2, keyRect.Y, 2, keyRect.Height), keyBorderColor);
+#if DEBUG
+                    if (LongNoteRenderDiagnostics.DrawOutlines)
+                        LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel, keyRect, Color.Cyan);
+#endif
                 }
             }
 
@@ -1238,6 +1282,13 @@ namespace Nullscent.Rulesets.Mania.UI
                 && ManiaSkinRules.ShouldFlipLightingHorizontally(resolvedMode.Definition, downScroll)
                     ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
             spriteBatch.Draw(lightingTexture, lightRect, null, tint * alpha, 0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+            if (LongNoteRenderDiagnostics.DrawOutlines)
+                LongNoteRenderDiagnostics.DrawOutline(spriteBatch, _pixel, lightRect, Color.Cyan);
+            double releaseElapsed = _isHolding ? 0 : (1f - alpha / 0.4f) * 120d;
+            LongNoteRenderDiagnostics.TraceLayer("lighting-L", lightingTexture, logicalSize, lightRect, null, effects,
+                !_isHolding && LongNoteRenderDiagnostics.ShouldTraceEffect(releaseElapsed));
+#endif
             spriteBatch.End();
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.NonPremultiplied);
         }

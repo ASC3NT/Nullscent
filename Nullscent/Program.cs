@@ -43,6 +43,10 @@ namespace Nullscent
             try
             {
 #if DEBUG
+                if (args.Length == 1 && args[0] == "--mania-ln-diagnostics")
+                {
+                    Rulesets.Mania.UI.Drawables.LongNoteRenderDiagnostics.EnableGameplayDiagnostics();
+                }
                 if (args.Length == 1 && args[0] == "--skin-tests")
                 {
                     Skin.SkinCoreSelfTests.RunAll();

@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using Microsoft.Xna.Framework;
 using Nullscent.Rulesets.Mania.Objects;
 using Nullscent.Skin;
 
@@ -103,6 +104,35 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             int tileOriginY = TileOriginY(bodyTopY, bodyBottomY, blockHeight, mode, downScroll, tileIndex);
             int offsetWithinTile = Math.Max(0, y - tileOriginY);
             return Math.Min(requestedHeight, Math.Max(1, blockHeight - offsetWithinTile));
+        }
+
+        public static bool TryClipTailToReceptor(Rectangle tailDestination, int receptorY, bool downScroll,
+            int textureWidth, int textureHeight, bool flipVertically,
+            out Rectangle visibleDestination, out Rectangle source)
+        {
+            visibleDestination = default;
+            source = default;
+            if (textureWidth <= 0 || textureHeight <= 0 || tailDestination.Width <= 0 || tailDestination.Height <= 0)
+                return false;
+
+            int visibleTop = downScroll ? tailDestination.Top : Math.Max(tailDestination.Top, receptorY);
+            int visibleBottom = downScroll ? Math.Min(tailDestination.Bottom, receptorY) : tailDestination.Bottom;
+            if (visibleBottom <= visibleTop)
+                return false;
+
+            double topFraction = (visibleTop - tailDestination.Top) / (double)tailDestination.Height;
+            double bottomFraction = (visibleBottom - tailDestination.Top) / (double)tailDestination.Height;
+            double sourceTopFraction = flipVertically ? 1d - bottomFraction : topFraction;
+            double sourceBottomFraction = flipVertically ? 1d - topFraction : bottomFraction;
+            int sourceTop = (int)Math.Floor(sourceTopFraction * textureHeight);
+            int sourceBottom = (int)Math.Ceiling(sourceBottomFraction * textureHeight);
+            sourceTop = Math.Clamp(sourceTop, 0, textureHeight - 1);
+            sourceBottom = Math.Clamp(sourceBottom, sourceTop + 1, textureHeight);
+
+            visibleDestination = new Rectangle(tailDestination.X, visibleTop,
+                tailDestination.Width, visibleBottom - visibleTop);
+            source = new Rectangle(0, sourceTop, textureWidth, sourceBottom - sourceTop);
+            return true;
         }
 
         public static (int Y, int Height) GetTileSourceRange(int y, int height, int bodyTopY, int bodyBottomY,

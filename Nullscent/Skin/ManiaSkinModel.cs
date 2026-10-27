@@ -154,6 +154,7 @@ namespace Nullscent.Skin
         public AnimationTimingDefinition? HoldLightingTiming { get; init; }
         public ManiaHoldAssemblyDefinition HoldAssembly { get; init; } = new();
         public bool HoldHeadAtReceptorWhileHolding { get; init; }
+        public bool ClipHoldTailAtReceptorWhileHolding { get; init; }
         public float[] ColumnLineWidths { get; init; } = Array.Empty<float>();
         public bool[] ColumnLines { get; init; } = Array.Empty<bool>();
         public float[] LightingNoteWidths { get; init; } = Array.Empty<float>();
@@ -358,6 +359,10 @@ namespace Nullscent.Skin
                     // The legacy hit cap stays at the receptor during a successful
                     // hold, matching the Stable behavior reported in ppy/osu#12127.
                     HoldHeadAtReceptorWhileHolding = true,
+                    // Legacy body/tail pieces share the shrinking hold mask. Stable's
+                    // expected tail clipping is described in ppy/osu#12128; lazer
+                    // implements it with DrawableHoldNote.maskingContainer.
+                    ClipHoldTailAtReceptorWhileHolding = true,
                     LightFramesPerSecond = source.LightFramePerSecond,
                     // Stable's wiki contract specifies a fixed looping 60 FPS for
                     // mania-hit assets. Lazer's legacy transformer uses 20 FPS for

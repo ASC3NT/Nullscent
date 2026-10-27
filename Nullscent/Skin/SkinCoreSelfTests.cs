@@ -920,6 +920,8 @@ namespace Nullscent.Skin
                     "Stable legacy hold bodies should extend halfway beneath the tail cap, matching osu!'s hold composition.");
                 Assert(v25Mode.HoldHeadAtReceptorWhileHolding,
                     "Legacy hold caps should remain at the receptor while a successful hold is active.");
+                Assert(v25Mode.ClipHoldTailAtReceptorWhileHolding,
+                    "Legacy holds should normalize body/tail masking to an explicit receptor clipping rule.");
                 ManiaKeymodeDefinition lazerV25Mode = LegacyManiaSkinAdapter.Decode(
                     SkinConfigParser.Parse(temp), compatibilityMode: LegacySkinCompatibilityMode.Lazer).Keymodes[4];
                 AssertNear(lazerV25Mode.HoldAssembly.HeadConnectionRatio, 0.5f,
@@ -1209,6 +1211,8 @@ namespace Nullscent.Skin
                 "Legacy holds keep their cap at the receptor through the hold; Native keeps its prior hidden-judged-head behavior.");
             Assert(!new ManiaKeymodeDefinition().HoldHeadAtReceptorWhileHolding,
                 "The legacy held-head visibility adaptation must remain opt-in so Native presentation is preserved.");
+            Assert(!new ManiaKeymodeDefinition().ClipHoldTailAtReceptorWhileHolding,
+                "Receptor clipping must remain opt-in so Native LN composition is unchanged.");
             Assert(!Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ShouldDrawHead(
                     headJudged: true, Nullscent.Rulesets.Mania.Objects.LongNoteState.Holding,
                     keepAtReceptorWhileHolding: new ManiaKeymodeDefinition().HoldHeadAtReceptorWhileHolding),
@@ -1251,6 +1255,40 @@ namespace Nullscent.Skin
             var flippedTile = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetTileSourceRange(
                 15, 10, 0, 95, 40, 400, NoteBodyRenderMode.TileFromTail, true, true);
             Assert(flippedTile == (150, 100), "A vertically flipped tile should crop the corresponding reversed source interval.");
+
+            bool downTailVisible = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TryClipTailToReceptor(
+                new Microsoft.Xna.Framework.Rectangle(20, 90, 40, 20), 100, true, 80, 40, false,
+                out var downTailDestination, out var downTailSource);
+            Assert(downTailVisible
+                && downTailDestination == new Microsoft.Xna.Framework.Rectangle(20, 90, 40, 10)
+                && downTailSource == new Microsoft.Xna.Framework.Rectangle(0, 0, 80, 20),
+                "A downscroll tail crossing the hit position should keep only its pre-receptor destination and matching source pixels.");
+            bool flippedDownTailVisible = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TryClipTailToReceptor(
+                new Microsoft.Xna.Framework.Rectangle(20, 90, 40, 20), 100, true, 80, 40, true,
+                out var flippedDownTailDestination, out var flippedDownTailSource);
+            Assert(flippedDownTailVisible
+                && flippedDownTailDestination == downTailDestination
+                && flippedDownTailSource == new Microsoft.Xna.Framework.Rectangle(0, 20, 80, 20),
+                "Clipping a vertically flipped downscroll tail should select the matching reversed physical source interval.");
+            bool upTailVisible = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TryClipTailToReceptor(
+                new Microsoft.Xna.Framework.Rectangle(20, 90, 40, 20), 100, false, 80, 40, false,
+                out var upTailDestination, out var upTailSource);
+            Assert(upTailVisible
+                && upTailDestination == new Microsoft.Xna.Framework.Rectangle(20, 100, 40, 10)
+                && upTailSource == new Microsoft.Xna.Framework.Rectangle(0, 20, 80, 20),
+                "An upscroll tail crossing the hit position should keep only its post-receptor destination and matching source pixels.");
+            bool scaledTailVisible = Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TryClipTailToReceptor(
+                new Microsoft.Xna.Framework.Rectangle(20, 90, 40, 20), 100, true, 256, 128, false,
+                out _, out var scaledTailSource);
+            Assert(scaledTailVisible && scaledTailSource == new Microsoft.Xna.Framework.Rectangle(0, 0, 256, 64),
+                "Tail clipping should map display geometry to uploaded texture pixels, including @2x and GPU-downscaled assets.");
+            Assert(!Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TryClipTailToReceptor(
+                    new Microsoft.Xna.Framework.Rectangle(20, 100, 40, 20), 100, true, 80, 40, false,
+                    out _, out _)
+                && !Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TryClipTailToReceptor(
+                    new Microsoft.Xna.Framework.Rectangle(20, 80, 40, 20), 100, false, 80, 40, false,
+                    out _, out _),
+                "A tail wholly past the hit position should not emit any visible slice in either scroll direction.");
             Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.MaxTileSegmentHeight(
                 35, 8, 0, 95, 40, NoteBodyRenderMode.TileFromTail, true) == 5,
                 "Hidden-fade segments should split at tile boundaries to avoid sampling across a repeat seam.");

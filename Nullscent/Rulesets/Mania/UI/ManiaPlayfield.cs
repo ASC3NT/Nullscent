@@ -1025,6 +1025,24 @@ namespace Nullscent.Rulesets.Mania.UI
             
             var columnRect = new Rectangle(_x, ScrollTop, _width, Math.Max(1, ScrollBottom - ScrollTop));
             spriteBatch.Draw(pixel, columnRect, columnBg);
+#if DEBUG
+            if (LongNoteRenderDiagnostics.DrawCheckerboardLaneBackground)
+            {
+                const int tileSize = 16;
+                for (int y = ScrollTop; y < ScrollBottom; y += tileSize)
+                {
+                    int row = (y - ScrollTop) / tileSize;
+                    for (int x = _x; x < _x + _width; x += tileSize)
+                    {
+                        int column = (x - _x) / tileSize;
+                        if (((row + column) & 1) == 0) continue;
+                        spriteBatch.Draw(pixel, new Rectangle(x, y,
+                            Math.Min(tileSize, _x + _width - x), Math.Min(tileSize, ScrollBottom - y)),
+                            new Color(80, 220, 255));
+                    }
+                }
+            }
+#endif
         }
 
         public void Draw(SpriteBatch spriteBatch, Texture2D pixel, double currentTime, double scrollSpeed,

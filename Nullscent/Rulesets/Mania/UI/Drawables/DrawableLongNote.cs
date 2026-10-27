@@ -108,22 +108,34 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             double bottomTime = (_longNote.TailReleaseTime > 0) ? _longNote.TailReleaseTime : _longNote.StartTime;
             int headY = CalculateYPosition(bottomTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
             int tailY = CalculateYPosition(_longNote.EndTime, currentTime, scrollSpeed, receptorY, downScroll, screenHeight);
+            int rawHeadY = headY;
+            int rawTailY = tailY;
+            bool headClamped = false;
+            bool tailClamped = false;
+            Rectangle? bodyDebugRect = null;
+            Rectangle? tailDebugRect = null;
+            Rectangle? headDebugRect = null;
 
             // Clampar la cabeza de la LN al receptor si está siendo sostenida (Holding) y no se ha soltado antes
             if (_longNote.State == LongNoteState.Holding && _longNote.HasHeldContinuously)
             {
                 headY = receptorY;
+                headClamped = headY != rawHeadY;
 
                 // Capping: prevent drawing the note past the receptor in the direction of scroll when holding past EndTime
                 if (downScroll)
                 {
                     headY = Math.Min(headY, receptorY);
+                    int beforeTailClamp = tailY;
                     tailY = Math.Min(tailY, receptorY);
+                    tailClamped = tailY != beforeTailClamp;
                 }
                 else
                 {
                     headY = Math.Max(headY, receptorY);
+                    int beforeTailClamp = tailY;
                     tailY = Math.Max(tailY, receptorY);
+                    tailClamped = tailY != beforeTailClamp;
                 }
             }
 
@@ -131,6 +143,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             ResolvedManiaKeymode? resolvedMode = skinManager?.GetResolvedKeymode(keyCount);
             ResolvedManiaLane? resolvedLane = resolvedMode != null && columnIndex >= 0 && columnIndex < resolvedMode.Lanes.Count
                 ? resolvedMode.Lanes[columnIndex] : null;
+            bool tailMaskedAtReceptor = resolvedMode?.Definition.ClipHoldTailAtReceptorWhileHolding == true
+                                        && _longNote.State == LongNoteState.Holding
+                                        && _longNote.HeadJudged && _longNote.HeadResult != HitResult.Miss;
             ResolvedSkinAnimation? headAnimation = resolvedLane?.LongHead;
             ResolvedSkinAnimation? tailAnimation = resolvedLane?.LongTail;
             Texture2D? headTexture = headAnimation?.FrameAt(currentTime);
@@ -190,6 +205,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 assembly.HeadConnectionRatio, assembly.TailConnectionRatio);
             int bodyOffsetY = (int)MathF.Round(bodyMetrics.OffsetY * layoutScale);
             (bodyTopY, bodyBottomY) = LongNoteRenderRules.OffsetBodySpan(bodyTopY, bodyBottomY, bodyOffsetY);
+            int rawBodyTopY = bodyTopY;
+            int rawBodyBottomY = bodyBottomY;
 
             // Capping: prevent the body from extending past the receptor in the direction of scroll
             if (downScroll)
@@ -214,6 +231,8 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
             int clampedTopY = Math.Max(-50, topY);
             int clampedBottomY = Math.Min(screenHeight + 50, bottomY);
             int bodyHeight = clampedBottomY - clampedTopY;
+            if (bodyHeight > 0)
+                bodyDebugRect = new Rectangle(bodyX, clampedTopY, Math.Max(1, (int)MathF.Round(bodyWidth)), bodyHeight);
 
             if (bodyHeight > 0)
             {
@@ -258,6 +277,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                         bodyMode, bodyTexture, blockH, downScroll, flipBody, out SpriteEffects effects);
                                     spriteBatch.Draw(bodyTexture, bodyRect, srcRect, holdColor * (float)bodyAlpha,
                                         0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+                                    LongNoteRenderDiagnostics.TraceDraw("body", bodyTexture,
+                                        skinManager!.GetLogicalSize(bodyTexture), bodyRect, srcRect, effects);
+#endif
                                 }
                                 currY += h;
                             }
@@ -275,6 +298,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                         downScroll, flipBody, out SpriteEffects effects);
                                     spriteBatch.Draw(bodyTexture, bodyRect, srcRect, holdColor * (float)bodyAlpha,
                                         0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+                                    LongNoteRenderDiagnostics.TraceDraw("body", bodyTexture,
+                                        skinManager!.GetLogicalSize(bodyTexture), bodyRect, srcRect, effects);
+#endif
                                 }
                                 else
                                 {
@@ -294,6 +321,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                                         var tileRect = new Rectangle(bodyX, drawY, drawWidth, drawH);
                                         spriteBatch.Draw(bodyTexture, tileRect, srcRect, holdColor * (float)bodyAlpha,
                                             0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+                                        LongNoteRenderDiagnostics.TraceDraw("body", bodyTexture,
+                                            skinManager!.GetLogicalSize(bodyTexture), tileRect, srcRect, effects);
+#endif
                                     }
                                 }
                             }
@@ -318,6 +349,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
 
                             var bodyRect = new Rectangle(columnX + PADDING, currY, columnWidth - PADDING * 2, h);
                             spriteBatch.Draw(pixel, bodyRect, baseBodyColor * (float)(bodyAlpha * 0.7f));
+#if DEBUG
+                            LongNoteRenderDiagnostics.TraceDraw("fallback-body", pixel, Vector2.One,
+                                bodyRect, null, SpriteEffects.None);
+#endif
 
                             // Draw left border segment
                             var leftBorder = new Rectangle(columnX + PADDING, currY, 2, h);
@@ -336,6 +371,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                         {
                             var bodyRect = new Rectangle(columnX + PADDING, clampedTopY, columnWidth - PADDING * 2, bodyHeight);
                             spriteBatch.Draw(pixel, bodyRect, baseBodyColor * (float)(bodyAlpha * 0.7f));
+#if DEBUG
+                            LongNoteRenderDiagnostics.TraceDraw("fallback-body", pixel, Vector2.One,
+                                bodyRect, null, SpriteEffects.None);
+#endif
 
                             // Draw left border
                             var leftBorder = new Rectangle(columnX + PADDING, clampedTopY, 2, bodyHeight);
@@ -372,8 +411,22 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                         );
                         SpriteEffects effects = skinManager!.FlipNote(keyCount, columnIndex, "T", downScroll)
                             ? SpriteEffects.FlipVertically : SpriteEffects.None;
-                        spriteBatch.Draw(tailFrame, tailRect, null, Color.White * (float)tailAlpha,
-                            0f, Vector2.Zero, effects, 0f);
+                        Rectangle destination = tailRect;
+                        Rectangle source = new Rectangle(0, 0, tailFrame.Width, tailFrame.Height);
+                        bool visible = !tailMaskedAtReceptor || LongNoteRenderRules.TryClipTailToReceptor(
+                            tailRect, receptorY, downScroll, tailFrame.Width, tailFrame.Height,
+                            (effects & SpriteEffects.FlipVertically) != 0, out destination, out source);
+                        if (visible)
+                        {
+                            tailDebugRect = destination;
+                            spriteBatch.Draw(tailFrame, destination, tailMaskedAtReceptor ? source : null, Color.White * (float)tailAlpha,
+                                0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+                            LongNoteRenderDiagnostics.TraceDraw("tail", tailFrame,
+                                skinManager.GetLogicalSize(tailFrame), destination,
+                                tailMaskedAtReceptor ? source : null, effects);
+#endif
+                        }
                     }
                     else if (tailTexture == null)
                     {
@@ -384,7 +437,19 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             columnWidth - PADDING * 2,
                             TAIL_HEIGHT
                         );
-                        spriteBatch.Draw(pixel, tailRect, COLOR_TAIL * (float)tailAlpha);
+                        Rectangle destination = tailRect;
+                        bool visible = !tailMaskedAtReceptor || LongNoteRenderRules.TryClipTailToReceptor(
+                            tailRect, receptorY, downScroll, pixel.Width, pixel.Height, false,
+                            out destination, out _);
+                        if (visible)
+                        {
+                            tailDebugRect = destination;
+                            spriteBatch.Draw(pixel, destination, COLOR_TAIL * (float)tailAlpha);
+#if DEBUG
+                            LongNoteRenderDiagnostics.TraceDraw("fallback-tail", pixel, Vector2.One,
+                                destination, null, SpriteEffects.None);
+#endif
+                        }
                     }
                 }
             }
@@ -412,10 +477,15 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             (int)MathF.Round(headWidth),
                             headHeight
                         );
+                        headDebugRect = headRect;
                         SpriteEffects effects = skinManager!.FlipNote(keyCount, columnIndex, "H", downScroll)
                             ? SpriteEffects.FlipVertically : SpriteEffects.None;
                         spriteBatch.Draw(headFrame, headRect, null, Color.White * (float)headAlpha,
                             0f, Vector2.Zero, effects, 0f);
+#if DEBUG
+                        LongNoteRenderDiagnostics.TraceDraw("head", headFrame,
+                            skinManager.GetLogicalSize(headFrame), headRect, null, effects);
+#endif
                     }
                     else
                     {
@@ -426,7 +496,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                             columnWidth - PADDING * 2,
                             HEAD_HEIGHT
                         );
+                        headDebugRect = headRect;
                         spriteBatch.Draw(pixel, headRect, COLOR_HEAD * (float)headAlpha);
+#if DEBUG
+                        LongNoteRenderDiagnostics.TraceDraw("fallback-head", pixel, Vector2.One,
+                            headRect, null, SpriteEffects.None);
+#endif
 
                         // Head border
                         var headBorder = new Rectangle(columnX + PADDING, headRenderY, columnWidth - PADDING * 2, 2);
@@ -434,6 +509,28 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                     }
                 }
             }
+
+#if DEBUG
+            if (LongNoteRenderDiagnostics.Enabled)
+            {
+                bool bodyDrawn = bodyDebugRect.HasValue && bodyHeight > 0;
+                LongNoteRenderDiagnostics.LogFrame(_longNote, currentTime, downScroll, receptorY,
+                    rawHeadY, headY, rawTailY, tailY, rawBodyTopY, rawBodyBottomY,
+                    bodyTopY, bodyBottomY, headClamped, tailClamped, bodyDrawn, tailMaskedAtReceptor);
+
+                if (LongNoteRenderDiagnostics.DrawOutlines)
+                {
+                    if (bodyDebugRect is { } bodyOutline)
+                        LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel, bodyOutline, Color.Lime);
+                    if (tailDebugRect is { } tailOutline)
+                        LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel, tailOutline, Color.Magenta);
+                    if (headDebugRect is { } headOutline)
+                        LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel, headOutline, Color.Red);
+                    LongNoteRenderDiagnostics.DrawOutline(spriteBatch, pixel,
+                        new Rectangle(columnX, receptorY - 1, Math.Max(1, columnWidth), 2), Color.Yellow);
+                }
+            }
+#endif
 
         }
 

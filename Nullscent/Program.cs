@@ -164,6 +164,26 @@ namespace Nullscent
                     timelineSmoke.Run();
                     return;
                 }
+                if (args.Length is >= 5 and <= 8
+                    && args[0] is "--skin-visual-at-ln-smoke" or "--skin-visual-at-ln-autocomplete-smoke"
+                    && int.TryParse(args[2], out int atLnKeyCount)
+                    && double.TryParse(args[4], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double atLnDuration))
+                {
+                    bool atLnDownScroll = args.Length < 6 || !args[5].Equals("up", StringComparison.OrdinalIgnoreCase);
+                    int atLnWidth = args.Length >= 7 && int.TryParse(args[6], out int parsedAtLnWidth) ? parsedAtLnWidth : 1280;
+                    int atLnHeight = args.Length >= 8 && int.TryParse(args[7], out int parsedAtLnHeight) ? parsedAtLnHeight : 720;
+                    string atLnOutputDirectory = Path.GetFullPath(args[3]);
+                    Directory.CreateDirectory(atLnOutputDirectory);
+                    using var atLnSmoke = new Skin.SkinVisualSmokeGame(args[1], atLnKeyCount,
+                        Path.Combine(atLnOutputDirectory, "00-at-ln-release.png"), atLnDownScroll,
+                        viewportWidth: atLnWidth, viewportHeight: atLnHeight,
+                        atReleaseTimelineOutputDirectory: atLnOutputDirectory,
+                        atReleaseTimelineDurationMs: atLnDuration,
+                        holdThroughAutoCompletion: args[0] == "--skin-visual-at-ln-autocomplete-smoke");
+                    atLnSmoke.Run();
+                    return;
+                }
                 if (args.Length is >= 4 and <= 7 && args[0] == "--skin-visual-smoke" && int.TryParse(args[2], out int keyCount))
                 {
                     bool downScroll = args.Length == 4 || !args[4].Equals("up", StringComparison.OrdinalIgnoreCase);
@@ -186,7 +206,9 @@ namespace Nullscent
                 if (args.Length > 0 && (args[0] == "--skin-tests" || args[0] == "--skin-visual-smoke" || args[0] == "--skin-visual-switch-smoke"
                     || args[0] == "--skin-visual-profile-smoke" || args[0] == "--skin-visual-resize-smoke"
                     || args[0] == "--skin-visual-timeline-smoke" || args[0] == "--skin-visual-cycle-smoke"
-                    || args[0] == "--skin-visual-profile-cycle-smoke" || args[0] == "--skin-visual-hd-cycle-smoke")) Environment.ExitCode = 1;
+                    || args[0] == "--skin-visual-at-ln-smoke" || args[0] == "--skin-visual-at-ln-autocomplete-smoke"
+                    || args[0] == "--skin-visual-profile-cycle-smoke"
+                    || args[0] == "--skin-visual-hd-cycle-smoke")) Environment.ExitCode = 1;
 #endif
             }
             finally

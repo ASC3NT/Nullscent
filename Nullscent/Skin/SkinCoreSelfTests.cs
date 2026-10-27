@@ -18,7 +18,9 @@ namespace Nullscent.Skin
             TestMultipleLegacyKeymodeSections();
             TestLegacySpecialStyleAssetMapping();
             TestLegacyParserDiagnosticsAndColourContracts();
+            TestLegacyMissingLaneColoursRemainUnspecified();
             TestLegacyNegativeColumnLineWidthsDisableBorders();
+            TestLegacyNegativeColumnSpacingIsPreserved();
             TestLegacyReservedUserVersion();
             TestAssetlessSkinsRemainPartial();
             TestResolvedCollectionsAreReadOnlySnapshots();
@@ -45,7 +47,7 @@ namespace Nullscent.Skin
             TestHitSoundSourcePrecedence();
             TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 32 deterministic skin checks passed.");
+            Console.WriteLine("[SkinTests] 34 deterministic skin checks passed.");
         }
 
         private static void TestLegacyNegativeColumnLineWidthsDisableBorders()
@@ -70,6 +72,60 @@ namespace Nullscent.Skin
                     && mode.ColumnLineWidths.Take(4).All(width => Math.Abs(width - -1.48f) < 0.001f)
                     && Math.Abs(mode.ColumnLineWidths[4] - 1.48f) < 0.001f,
                     "Legacy line widths must preserve negative border suppression and apply osu!'s 0.740 width transform without the 480px position scale.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyNegativeColumnSpacingIsPreserved()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-legacy-negative-spacing-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: latest
+                    [Mania]
+                    Keys: 4
+                    ColumnWidth: 30,30,30,30
+                    ColumnSpacing: -5,-5,-5,-5
+                    """);
+
+                SkinConfig config = SkinConfigParser.Parse(temp);
+                ManiaKeymodeDefinition mode = LegacyManiaSkinAdapter.Decode(config).Keymodes[4];
+                ManiaLayoutResult layout = ManiaLayoutEngine.Calculate(mode, 4, 1365, 768, downScroll: true);
+                Assert(!config.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.MalformedProperty
+                        && d.Property == "ColumnSpacing")
+                    && mode.Lanes.Take(3).All(lane => Math.Abs(lane.GapAfter - -8f) < 0.001f)
+                    && mode.Lanes[3].GapAfter == 0f,
+                    "Legacy ColumnSpacing accepts finite signed values, applies the legacy 1.6 scale, and ignores values beyond the three 4K inter-column gaps.");
+                AssertNear(layout.Lanes[1].X - layout.Lanes[0].X, 40f * layout.Scale,
+                    "Negative legacy spacing must overlap neighboring lanes instead of being clamped to zero.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyMissingLaneColoursRemainUnspecified()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-legacy-missing-colour-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: latest
+                    [Mania]
+                    Keys: 4
+                    Colour1: 10,20,30,0
+                    """);
+
+                ManiaKeymodeDefinition mode = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp)).Keymodes[4];
+                Assert(mode.Lanes[0].LaneColor == new SkinColor(10, 20, 30, 0),
+                    "An explicitly configured transparent Colour# must remain transparent.");
+                Assert(mode.Lanes.Skip(1).All(lane => lane.LaneColor == null),
+                    "An absent legacy Colour# must stay unspecified so the renderer can apply its default lane background.");
+                Assert(mode.Lanes.All(lane => lane.StageLightColor == null),
+                    "An absent legacy ColourLight# must stay unspecified instead of becoming a transparent black tint.");
             }
             finally { Directory.Delete(temp, true); }
         }

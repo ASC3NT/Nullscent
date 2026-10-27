@@ -72,7 +72,7 @@ namespace Nullscent.Skin
             {
                 ManiaLaneDefinition? lane = profile != null && i < profile.Lanes.Count ? profile.Lanes[i] : null;
                 widths[i] = PositiveOr(lane?.Width ?? 48f, 48f) * playfieldScale * laneScale;
-                gaps[i] = i == keyCount - 1 ? 0 : Math.Max(0, FiniteOr(lane?.GapAfter ?? 0, 0)) * playfieldScale * laneScale;
+                gaps[i] = i == keyCount - 1 ? 0 : FiniteOr(lane?.GapAfter ?? 0, 0) * playfieldScale * laneScale;
             }
 
             float totalWidth = 0;

@@ -361,7 +361,7 @@ namespace Nullscent.Skin
             if (key == "ColumnWidth")
                 maniaConfig.ColumnWidths = ParseFloatArray(config, property, allowZero: false);
             else if (key == "ColumnSpacing")
-                maniaConfig.ColumnSpacing = ParseFloatArray(config, property, allowZero: true);
+                maniaConfig.ColumnSpacing = ParseFloatArray(config, property, allowZero: true, allowNegative: true);
             else if (key == "ColumnLineWidth")
                 maniaConfig.ColumnLineWidths = ParseFloatArray(config, property, allowZero: true, allowNegative: true);
             else if (key == "ColumnLine")

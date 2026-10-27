@@ -290,7 +290,7 @@ namespace Nullscent.Skin
                 for (int i = 0; i < keys; i++)
                 {
                     float width = Read(source.ColumnWidths, i, 30f) * StableScale;
-                    float gap = Read(source.ColumnSpacing, i, 0f) * StableScale;
+                    float gap = i == keys - 1 ? 0f : ReadSigned(source.ColumnSpacing, i, 0f) * StableScale;
                     int singleStageSpecialStyle = compatibilityMode == LegacySkinCompatibilityMode.Stable
                         && !(keys > 4 && keys % 2 == 0) ? source.SpecialStyle : 0;
                     string suffix = ResolveLegacyColumnSuffix(keys, i, singleStageSpecialStyle);
@@ -306,8 +306,8 @@ namespace Nullscent.Skin
                         LongTailAsset = Value(source.NoteTailImages, i) ?? $"mania-note{suffix}T",
                         BodyMode = supportsBodyStyle && source.NoteBodyStyles.TryGetValue(i, out int columnBodyMode)
                             ? DecodeBodyMode(columnBodyMode, compatibilityMode) : null,
-                        LaneColor = SkinColor.FromLegacy(Value(source.ColumnColorsMap, i)),
-                        StageLightColor = SkinColor.FromLegacy(Value(source.ColourLights, i))
+                        LaneColor = SkinColor.FromLegacy(NullableValue(source.ColumnColorsMap, i)),
+                        StageLightColor = SkinColor.FromLegacy(NullableValue(source.ColourLights, i))
                     });
                 }
 
@@ -518,8 +518,14 @@ namespace Nullscent.Skin
         }
 
         private static T? Value<T>(Dictionary<int, T> values, int index) => values.TryGetValue(index, out T? value) ? value : default;
+
+        private static T? NullableValue<T>(Dictionary<int, T> values, int index) where T : struct =>
+            values.TryGetValue(index, out T value) ? value : null;
         private static float Read(float[]? values, int index, float fallback) =>
             values != null && index < values.Length && float.IsFinite(values[index]) && values[index] >= 0 ? values[index] : fallback;
+
+        private static float ReadSigned(float[]? values, int index, float fallback) =>
+            values != null && index < values.Length && float.IsFinite(values[index]) ? values[index] : fallback;
 
         private static T[] Expand<T>(T[]? values, int count, T fallback)
         {

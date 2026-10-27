@@ -357,6 +357,9 @@ namespace Nullscent.Rulesets.Mania.UI
         private void DrawFlashlightMask(bool downScroll)
         {
             if (_whitePixel == null || _linearGradient == null) return;
+            int fieldTop = (int)MathF.Round(_layoutResult?.OffsetY ?? 0f);
+            int fieldBottom = (int)MathF.Round((_layoutResult?.OffsetY ?? 0f)
+                + ManiaLayoutEngine.DesignHeight * (_layoutResult?.Scale ?? 1f));
 
             // Calcular el radio visible escalando con el combo (más pequeño a mayor combo, de 240px a 140px)
             double comboFactor = Math.Min(1.0, _currentCombo / 200.0);
@@ -366,24 +369,26 @@ namespace Nullscent.Rulesets.Mania.UI
             if (downScroll)
             {
                 // Rectángulo superior completamente negro
-                int topBlackHeight = Math.Max(0, ReceptorY - visibleRadius);
+                int topBlackY = Math.Clamp(ReceptorY - visibleRadius, fieldTop, fieldBottom);
+                int topBlackHeight = topBlackY - fieldTop;
                 if (topBlackHeight > 0)
                 {
-                    var topRect = new Rectangle(_stageX, 0, _stageWidth, topBlackHeight);
+                    var topRect = new Rectangle(_stageX, fieldTop, _stageWidth, topBlackHeight);
                     _spriteBatch.Draw(_whitePixel, topRect, Color.Black);
                 }
 
                 // Degradado superior (de negro a transparente)
-                int topGradientY = topBlackHeight;
-                if (gradientHeight > 0)
+                int topGradientY = topBlackY;
+                int topGradientHeight = Math.Min(gradientHeight, Math.Max(0, fieldBottom - topGradientY));
+                if (topGradientHeight > 0)
                 {
-                    var gradRect = new Rectangle(_stageX, topGradientY, _stageWidth, gradientHeight);
+                    var gradRect = new Rectangle(_stageX, topGradientY, _stageWidth, topGradientHeight);
                     _spriteBatch.Draw(_linearGradient, gradRect, Color.Black);
                 }
 
                 // Rectángulo inferior completamente negro (debajo del receptor)
-                int bottomBlackY = ReceptorY + 60;
-                int bottomBlackHeight = _screenHeight - bottomBlackY;
+                int bottomBlackY = Math.Clamp(ReceptorY + 60, fieldTop, fieldBottom);
+                int bottomBlackHeight = fieldBottom - bottomBlackY;
                 if (bottomBlackHeight > 0)
                 {
                     var bottomRect = new Rectangle(_stageX, bottomBlackY, _stageWidth, bottomBlackHeight);
@@ -395,8 +400,8 @@ namespace Nullscent.Rulesets.Mania.UI
                 // upScroll: las notas vienen desde abajo hacia ReceptorY (arriba).
                 
                 // Rectángulo inferior completamente negro
-                int bottomBlackY = ReceptorY + visibleRadius;
-                int bottomBlackHeight = _screenHeight - bottomBlackY;
+                int bottomBlackY = Math.Clamp(ReceptorY + visibleRadius, fieldTop, fieldBottom);
+                int bottomBlackHeight = fieldBottom - bottomBlackY;
                 if (bottomBlackHeight > 0)
                 {
                     var bottomRect = new Rectangle(_stageX, bottomBlackY, _stageWidth, bottomBlackHeight);
@@ -404,18 +409,19 @@ namespace Nullscent.Rulesets.Mania.UI
                 }
 
                 // Degradado inferior (de negro a transparente al subir)
-                int bottomGradientY = bottomBlackY - gradientHeight;
-                if (gradientHeight > 0)
+                int bottomGradientY = Math.Max(fieldTop, bottomBlackY - gradientHeight);
+                int bottomGradientHeight = bottomBlackY - bottomGradientY;
+                if (bottomGradientHeight > 0)
                 {
-                    var gradRect = new Rectangle(_stageX, bottomGradientY, _stageWidth, gradientHeight);
+                    var gradRect = new Rectangle(_stageX, bottomGradientY, _stageWidth, bottomGradientHeight);
                     _spriteBatch.Draw(_linearGradient, gradRect, null, Color.Black, 0f, Vector2.Zero, SpriteEffects.FlipVertically, 0f);
                 }
 
                 // Rectángulo superior completamente negro (encima del receptor)
-                int topBlackHeight = ReceptorY - 60;
+                int topBlackHeight = Math.Max(0, Math.Clamp(ReceptorY - 60, fieldTop, fieldBottom) - fieldTop);
                 if (topBlackHeight > 0)
                 {
-                    var topRect = new Rectangle(_stageX, 0, _stageWidth, topBlackHeight);
+                    var topRect = new Rectangle(_stageX, fieldTop, _stageWidth, topBlackHeight);
                     _spriteBatch.Draw(_whitePixel, topRect, Color.Black);
                 }
             }
@@ -426,16 +432,18 @@ namespace Nullscent.Rulesets.Mania.UI
             if (_whitePixel == null || _spriteBatch == null) return;
             ManiaKeymodeDefinition? profile = _skinManager?.GetManiaProfile(_columnCount);
             ManiaLayoutResult? layout = _layoutResult;
+            float layoutScale = layout?.Scale ?? 1f;
 
             // Fondo oscuro para la pista
-            var stageRect = new Rectangle(_stageX, 0, _stageWidth, _screenHeight);
+            int fieldTop = (int)MathF.Round(layout?.OffsetY ?? 0f);
+            int fieldHeight = Math.Max(1, (int)MathF.Round(ManiaLayoutEngine.DesignHeight * layoutScale));
+            var stageRect = new Rectangle(_stageX, fieldTop, _stageWidth, fieldHeight);
             if (profile == null)
                 _spriteBatch.Draw(_whitePixel, stageRect, new Color(15, 15, 20, 220));
 
             ManiaStageStyleDefinition stageStyle = profile?.StageStyle ?? ManiaStageStyleDefinition.Default;
             Texture2D? stageLeft = _skinManager?.GetStageTexture(_columnCount, "left");
             Texture2D? stageRight = _skinManager?.GetStageTexture(_columnCount, "right");
-            float layoutScale = layout?.Scale ?? 1f;
 
             // Legacy stage pieces are composed back-to-front: side artwork, lane
             // backgrounds/lines, then the centered hit target. See osu!'s legacy
@@ -473,7 +481,7 @@ namespace Nullscent.Rulesets.Mania.UI
                     float leftWidth = widths != null && i < widths.Length && float.IsFinite(widths[i]) ? widths[i] : 2f;
                     int leftPixels = (int)MathF.Round(leftWidth * unscaledSpriteScale);
                     if (leftPixels > 0)
-                        _spriteBatch.Draw(_whitePixel, new Rectangle(_columns[i].X, 0, leftPixels, _screenHeight), lineColor);
+                        _spriteBatch.Draw(_whitePixel, new Rectangle(_columns[i].X, fieldTop, leftPixels, fieldHeight), lineColor);
 
                     if (i == _columns.Count - 1 || drawBothEdges)
                     {
@@ -482,7 +490,7 @@ namespace Nullscent.Rulesets.Mania.UI
                         int rightPixels = (int)MathF.Round(rightWidth * unscaledSpriteScale);
                         if (rightPixels > 0)
                             _spriteBatch.Draw(_whitePixel, new Rectangle(_columns[i].X + _columns[i].Width - rightPixels,
-                                0, rightPixels, _screenHeight), lineColor);
+                                fieldTop, rightPixels, fieldHeight), lineColor);
                     }
                 }
             }
@@ -492,7 +500,7 @@ namespace Nullscent.Rulesets.Mania.UI
                 for (int i = 1; i < _columnCount; i++)
                 {
                     int separatorX = _columns[i].X;
-                    var separatorRect = new Rectangle(separatorX, 0, 2, _screenHeight);
+                    var separatorRect = new Rectangle(separatorX, fieldTop, 2, fieldHeight);
                     _spriteBatch.Draw(_whitePixel, separatorRect, new Color(40, 40, 50, 255));
                 }
             }
@@ -500,8 +508,8 @@ namespace Nullscent.Rulesets.Mania.UI
             if (stageLeft == null && stageRight == null)
             {
                 // Dibujar bordes laterales de pista predeterminados (Stage Sidebars) - estilo neón brillante (rosa)
-                var leftBorderRect = new Rectangle(_stageX - 4, 0, 4, _screenHeight);
-                var rightBorderRect = new Rectangle(_stageX + _stageWidth, 0, 4, _screenHeight);
+                var leftBorderRect = new Rectangle(_stageX - 4, fieldTop, 4, fieldHeight);
+                var rightBorderRect = new Rectangle(_stageX + _stageWidth, fieldTop, 4, fieldHeight);
                 Color neonColor = new Color(255, 102, 171); // Magenta de osu!
 
                 _spriteBatch.Draw(_whitePixel, leftBorderRect, neonColor);
@@ -1015,7 +1023,7 @@ namespace Nullscent.Rulesets.Mania.UI
                     customColColor.Value.B, customColColor.Value.A);
             }
             
-            var columnRect = new Rectangle(_x, 0, _width, _screenHeight);
+            var columnRect = new Rectangle(_x, ScrollTop, _width, Math.Max(1, ScrollBottom - ScrollTop));
             spriteBatch.Draw(pixel, columnRect, columnBg);
         }
 

@@ -171,6 +171,7 @@ namespace Nullscent.Skin
         public SpriteStyleDefinition LongTailStyle { get; init; } = new();
         public ManiaStageStyleDefinition StageStyle { get; init; } = new();
         public Dictionary<string, string?> StageAssets { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, bool> StageAssetAnimations { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, string> JudgementAssets { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         public string? LightingNoteAsset { get; init; }
         public string? LightingHoldAsset { get; init; }
@@ -234,6 +235,7 @@ namespace Nullscent.Skin
         public float HeightValue { get; init; }
         public float OffsetXRatio { get; init; }
         public float OffsetY { get; init; }
+        public bool Animate { get; init; } = true;
         public int? FramesPerSecond { get; init; }
         public AnimationTimingDefinition? Timing { get; init; }
     }
@@ -270,9 +272,14 @@ namespace Nullscent.Skin
                 : null;
             double? version = double.TryParse(config.Version, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedVersion)
                 ? parsedVersion : null;
-            // A conventional-name skin without skin.ini has a defined newest-rules
-            // interpretation. Missing keymode sections use the format defaults.
-            for (int keys = 1; keys <= 18; keys++)
+            // A skin without skin.ini follows the conventional latest profile.
+            // A present skin.ini only defines the keycounts whose [Mania] section
+            // supplies Keys; an absent keycount is resolved as one coherent built-in
+            // keymode by SkinManager instead of borrowing this skin's guessed geometry.
+            IEnumerable<int> keyCounts = config.HasSkinIni
+                ? config.ManiaConfigs.Keys.OrderBy(k => k)
+                : Enumerable.Range(1, 18);
+            foreach (int keys in keyCounts)
             {
                 ManiaKeyConfig source = config.ManiaConfigs.TryGetValue(keys, out ManiaKeyConfig? configured)
                     ? configured : new ManiaKeyConfig();
@@ -282,16 +289,19 @@ namespace Nullscent.Skin
                 {
                     float width = Read(source.ColumnWidths, i, 30f) * StableScale;
                     float gap = Read(source.ColumnSpacing, i, 0f) * StableScale;
+                    int singleStageSpecialStyle = compatibilityMode == LegacySkinCompatibilityMode.Stable
+                        && !(keys > 4 && keys % 2 == 0) ? source.SpecialStyle : 0;
+                    string suffix = ResolveLegacyColumnSuffix(keys, i, singleStageSpecialStyle);
                     lanes.Add(new ManiaLaneDefinition
                     {
                         Width = width,
                         GapAfter = gap,
-                        NoteAsset = Value(source.NoteImages, i),
-                        ReceptorAsset = Value(source.KeyImages, i),
-                        PressedReceptorAsset = Value(source.KeyPressedImages, i),
-                        LongHeadAsset = Value(source.NoteHeadImages, i),
-                        LongBodyAsset = Value(source.NoteBodyImages, i),
-                        LongTailAsset = Value(source.NoteTailImages, i),
+                        NoteAsset = Value(source.NoteImages, i) ?? $"mania-note{suffix}",
+                        ReceptorAsset = Value(source.KeyImages, i) ?? $"mania-key{suffix}",
+                        PressedReceptorAsset = Value(source.KeyPressedImages, i) ?? $"mania-key{suffix}D",
+                        LongHeadAsset = Value(source.NoteHeadImages, i) ?? $"mania-note{suffix}H",
+                        LongBodyAsset = Value(source.NoteBodyImages, i) ?? $"mania-note{suffix}L",
+                        LongTailAsset = Value(source.NoteTailImages, i) ?? $"mania-note{suffix}T",
                         BodyMode = supportsBodyStyle && source.NoteBodyStyles.TryGetValue(i, out int columnBodyMode)
                             ? DecodeBodyMode(columnBodyMode, compatibilityMode) : null,
                         LaneColor = SkinColor.FromLegacy(Value(source.ColumnColorsMap, i)),
@@ -368,12 +378,21 @@ namespace Nullscent.Skin
                         HeightMode = SpriteHeightMode.ReferenceWidthAspect,
                         FramesPerSecond = 60
                     },
-                    ReceptorStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.TextureAspect },
+                    // The osu!mania skin table marks idle/pressed key images static.
+                    ReceptorStyle = new SpriteStyleDefinition
+                    {
+                        LaneWidthRatio = 1f,
+                        HeightMode = SpriteHeightMode.TextureAspect,
+                        Animate = false
+                    },
                     LongHeadStyle = new SpriteStyleDefinition { LaneWidthRatio = 1f, HeightMode = SpriteHeightMode.ReferenceWidthAspect, FramesPerSecond = 60 },
                     LongBodyStyle = new SpriteStyleDefinition
                     {
                         LaneWidthRatio = 1f,
-                        HeightMode = SpriteHeightMode.TextureAspect,
+                        // The legacy contract derives all note and LN piece heights
+                        // from WidthForNoteHeightScale (or the smallest column width).
+                        // Texture aspect is not allowed to change height per lane.
+                        HeightMode = SpriteHeightMode.ReferenceWidthAspect,
                         FramesPerSecond = 30,
                         Timing = compatibilityMode == LegacySkinCompatibilityMode.Lazer
                             ? AnimationTimingDefinition.FixedFrameDuration(30d)
@@ -394,11 +413,25 @@ namespace Nullscent.Skin
                     },
                     StageAssets = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["left"] = source.StageLeft, ["right"] = source.StageRight,
-                        ["bottom"] = source.StageBottom, ["hint"] = source.StageHint,
-                        ["light"] = source.StageLight
+                        ["left"] = source.StageLeft ?? "mania-stage-left",
+                        ["right"] = source.StageRight ?? "mania-stage-right",
+                        ["bottom"] = source.StageBottom ?? "mania-stage-bottom",
+                        ["hint"] = source.StageHint ?? "mania-stage-hint",
+                        ["light"] = source.StageLight ?? "mania-stage-light"
                     },
-                    JudgementAssets = new Dictionary<string, string>(source.HitImages, StringComparer.OrdinalIgnoreCase),
+                    // The official osu!mania skin table marks StageLeft/Right/Hint
+                    // static, while StageBottom and StageLight support numbered frames.
+                    StageAssetAnimations = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["left"] = false, ["right"] = false, ["bottom"] = true,
+                        ["hint"] = false, ["light"] = true
+                    },
+                    JudgementAssets = new Dictionary<string, string>(
+                        new[] { "Hit0", "Hit50", "Hit100", "Hit200", "Hit300", "Hit300g" }
+                            .ToDictionary(key => key,
+                                key => source.HitImages.TryGetValue(key, out string? custom)
+                                    ? custom : $"mania-{key.ToLowerInvariant()}"),
+                        StringComparer.OrdinalIgnoreCase),
                     LightingNoteAsset = source.LightingN,
                     LightingHoldAsset = source.LightingL
                 };
@@ -445,6 +478,24 @@ namespace Nullscent.Skin
                 2 => NoteBodyRenderMode.TileFromHead,
                 _ => NoteBodyRenderMode.TileFromTail
             };
+        }
+
+        private static string ResolveLegacyColumnSuffix(int keyCount, int columnIndex, int specialStyle)
+        {
+            // The published conventional key layout assigns S to the centre lane
+            // for odd keycounts through 9K. SpecialStyle can move that artwork to
+            // the configured left/right single-play lane; even DP positioning is
+            // handled as unsupported by the adapter/catalog policy.
+            int specialColumn = specialStyle switch
+            {
+                1 => 0,
+                2 => keyCount - 1,
+                _ => keyCount is <= 9 && keyCount % 2 == 1 ? keyCount / 2 : -1
+            };
+            if (columnIndex == specialColumn) return "S";
+
+            int distanceToEdge = Math.Min(columnIndex, keyCount - 1 - columnIndex);
+            return distanceToEdge % 2 == 0 ? "1" : "2";
         }
 
         private static T? Value<T>(Dictionary<int, T> values, int index) => values.TryGetValue(index, out T? value) ? value : default;

@@ -103,7 +103,7 @@ namespace Nullscent.Skin
                     throw new InvalidDataException($"El keymode {keyCount}K contiene anchors de LN inválidos (rango permitido: 0 a 0.5).");
                 if (mode.ColumnLineWidths == null || mode.ColumnLines == null
                     || mode.LightingNoteWidths == null || mode.LightingHoldWidths == null
-                    || mode.StageAssets == null || mode.JudgementAssets == null
+                    || mode.StageAssets == null || mode.StageAssetAnimations == null || mode.JudgementAssets == null
                     || mode.NoteFlips == null || mode.KeyFlips == null)
                     throw new InvalidDataException($"El keymode {keyCount}K contiene una colección nula.");
 

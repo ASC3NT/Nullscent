@@ -140,7 +140,7 @@ namespace Nullscent.Skin
 
                 candidate = new SkinAssetResolver(_graphicsDevice, validation.Directory, _highResolutionSkinAssets);
                 var names = new HashSet<string>(SkinCatalog.ReferencedImages(definition), StringComparer.OrdinalIgnoreCase)
-                { "cursor", "mania-note1", "mania-note2", "mania-key1", "mania-key2" };
+                { "cursor" };
                 foreach (string name in names)
                     candidate.Resolve(name);
                 SkinAssetResolver preparedAssets = candidate;
@@ -209,11 +209,6 @@ namespace Nullscent.Skin
                 candidateInternalAssets = new SkinAssetResolver(_graphicsDevice,
                     Directory.Exists(_internalSkinDirectory) ? _internalSkinDirectory : null, preferHighResolution);
 
-                var names = new HashSet<string>(SkinCatalog.ReferencedImages(_currentDefinition), StringComparer.OrdinalIgnoreCase)
-                { "cursor", "mania-note1", "mania-note2", "mania-key1", "mania-key2" };
-                foreach (string name in names)
-                    candidateAssets.Resolve(name);
-
                 SkinAssetResolver preparedAssets = candidateAssets;
                 SkinAssetResolver preparedInternalAssets = candidateInternalAssets;
                 candidateAssets = null;
@@ -221,6 +216,7 @@ namespace Nullscent.Skin
                 SkinValidation? validation = CurrentValidation;
                 string[] previousWarnings = validation?.Warnings.ToArray() ?? Array.Empty<string>();
                 string[] previousErrors = validation?.Errors.ToArray() ?? Array.Empty<string>();
+                SkinDiagnostic[] previousDiagnostics = validation?.Diagnostics.ToArray() ?? Array.Empty<SkinDiagnostic>();
                 SkinValidity? previousValidationStatus = validation?.Status;
                 bool committed = TryCommitActivation(preparedAssets, _currentDefinition, CurrentSkinDirectory, validation,
                     _legacyCompatibilityMode, persistPreference, preparedInternalAssets, preferHighResolution);
@@ -230,6 +226,8 @@ namespace Nullscent.Skin
                     validation.Warnings.AddRange(previousWarnings);
                     validation.Errors.Clear();
                     validation.Errors.AddRange(previousErrors);
+                    validation.Diagnostics.Clear();
+                    validation.Diagnostics.AddRange(previousDiagnostics);
                     if (previousValidationStatus.HasValue)
                         validation.Status = previousValidationStatus.Value;
                 }
@@ -288,13 +286,7 @@ namespace Nullscent.Skin
                     GetResolvedKeymode(keyCount);
                 PrepareHudAssets();
 
-                if (validation != null && candidate.Warnings.Count > 0)
-                {
-                    foreach (string warning in candidate.Warnings)
-                        if (!validation.Warnings.Contains(warning, StringComparer.OrdinalIgnoreCase))
-                            validation.Warnings.Add(warning);
-                    validation.Status = SkinValidity.Partial;
-                }
+                if (validation != null) AppendResolverDiagnostics(candidate, validation);
 
                 bool persisted;
                 try { persisted = persistSelection?.Invoke() ?? true; }
@@ -529,48 +521,56 @@ namespace Nullscent.Skin
                     ? fallback : CreateFallbackMode(keyCount);
             ManiaSkinDefinition sourceDefinition = internalOnly ? _internalDefinition : _currentDefinition;
             int generalAnimationFramerate = sourceDefinition.AnimationFramerate ?? -1;
+            ManiaKeymodeDefinition internalProfile = GetInternalProfile(keyCount);
 
             var lanes = new List<ResolvedManiaLane>(profile.Lanes.Count);
             for (int i = 0; i < profile.Lanes.Count; i++)
             {
                 ManiaLaneDefinition lane = profile.Lanes[i];
-                string suffix = GetDefaultStyleSuffix(keyCount, i);
-                bool legacy = !internalOnly && _currentDefinition.Provider == SkinProviderKind.OsuLegacy;
-                string? noteName = First(lane.NoteAsset, profile.NoteStyle.Asset,
-                    legacy ? $"mania-note{suffix}" : null);
+                ManiaLaneDefinition internalLane = internalProfile.Lanes.Count > 0
+                    ? internalProfile.Lanes[i % internalProfile.Lanes.Count] : new ManiaLaneDefinition();
+                string? noteName = First(lane.NoteAsset, profile.NoteStyle.Asset);
                 var note = ResolveAnimationCascade("note", profile.NoteStyle.FramesPerSecond ?? 60, internalOnly,
-                    new[] { noteName }, new[] { "bar-note" }, profile.NoteStyle.Timing);
+                    new[] { noteName }, new[] { internalLane.NoteAsset, internalProfile.NoteStyle.Asset },
+                    profile.NoteStyle.Timing, profile.NoteStyle.Animate);
 
-                string? receptorName = First(lane.ReceptorAsset, profile.ReceptorStyle.Asset,
-                    legacy ? $"mania-key{suffix}" : null);
+                string? receptorName = First(lane.ReceptorAsset, profile.ReceptorStyle.Asset);
                 var receptor = ResolveAnimationCascade("receptor", profile.ReceptorStyle.FramesPerSecond ?? generalAnimationFramerate, internalOnly,
-                    new[] { receptorName }, new[] { "bar-key" }, profile.ReceptorStyle.Timing);
-                string? pressedName = First(lane.PressedReceptorAsset, profile.ReceptorStyle.PressedAsset,
-                    legacy ? $"mania-key{suffix}D" : null);
+                    new[] { receptorName }, new[] { internalLane.ReceptorAsset, internalProfile.ReceptorStyle.Asset },
+                    profile.ReceptorStyle.Timing, profile.ReceptorStyle.Animate);
+                string? pressedName = First(lane.PressedReceptorAsset, profile.ReceptorStyle.PressedAsset);
                 var pressed = ResolveAnimationCascade("pressed receptor", profile.ReceptorStyle.FramesPerSecond ?? generalAnimationFramerate, internalOnly,
-                    new[] { pressedName, receptorName }, new[] { "bar-key-pressed", "bar-key" }, profile.ReceptorStyle.Timing) ?? receptor;
+                    new[] { pressedName, receptorName },
+                    new[] { internalLane.PressedReceptorAsset, internalProfile.ReceptorStyle.PressedAsset,
+                        internalLane.ReceptorAsset, internalProfile.ReceptorStyle.Asset },
+                    profile.ReceptorStyle.Timing, profile.ReceptorStyle.Animate) ?? receptor;
 
-                string? headName = First(lane.LongHeadAsset, profile.LongHeadStyle.Asset,
-                    legacy ? $"mania-note{suffix}H" : null);
+                string? headName = First(lane.LongHeadAsset, profile.LongHeadStyle.Asset);
                 var head = ResolveAnimationCascade("hold head", profile.LongHeadStyle.FramesPerSecond ?? 60, internalOnly,
-                    new[] { headName, noteName }, new[] { "bar-hold-head", "bar-note" }, profile.LongHeadStyle.Timing) ?? note;
-                string? bodyName = First(lane.LongBodyAsset, profile.LongBodyStyle.Asset,
-                    legacy ? $"mania-note{suffix}L" : null);
+                    new[] { headName, noteName },
+                    new[] { internalLane.LongHeadAsset, internalProfile.LongHeadStyle.Asset,
+                        internalLane.NoteAsset, internalProfile.NoteStyle.Asset },
+                    profile.LongHeadStyle.Timing, profile.LongHeadStyle.Animate) ?? note;
+                string? bodyName = First(lane.LongBodyAsset, profile.LongBodyStyle.Asset);
                 var body = ResolveAnimationCascade("hold body", profile.LongBodyStyle.FramesPerSecond ?? 30, internalOnly,
-                    new[] { bodyName }, new[] { "bar-hold-body" }, profile.LongBodyStyle.Timing);
-                string? tailName = First(lane.LongTailAsset, profile.LongTailStyle.Asset,
-                    legacy ? $"mania-note{suffix}T" : null);
+                    new[] { bodyName }, new[] { internalLane.LongBodyAsset, internalProfile.LongBodyStyle.Asset },
+                    profile.LongBodyStyle.Timing, profile.LongBodyStyle.Animate);
+                string? tailName = First(lane.LongTailAsset, profile.LongTailStyle.Asset);
                 var tail = ResolveAnimationCascade("hold tail", profile.LongTailStyle.FramesPerSecond ?? 60, internalOnly,
-                    new[] { tailName, headName, noteName }, new[] { "bar-hold-tail", "bar-hold-head", "bar-note" }, profile.LongTailStyle.Timing) ?? head;
+                    new[] { tailName, headName, noteName },
+                    new[] { internalLane.LongTailAsset, internalProfile.LongTailStyle.Asset,
+                        internalLane.LongHeadAsset, internalProfile.LongHeadStyle.Asset,
+                        internalLane.NoteAsset, internalProfile.NoteStyle.Asset },
+                    profile.LongTailStyle.Timing, profile.LongTailStyle.Animate) ?? head;
 
-                string lightSuffix = First(profile.LightingNoteAsset, legacy ? "lightingN" : null) ?? "bar-light-note";
-                string holdLightSuffix = First(profile.LightingHoldAsset, legacy ? "lightingL" : null) ?? "bar-light-hold";
+                string? lightAsset = profile.LightingNoteAsset;
+                string? holdLightAsset = profile.LightingHoldAsset;
                 // LightFramePerSecond belongs to StageLight. Note/hold lighting
                 // uses its normalized timing policy, separate from General.
                 var noteLight = ResolveAnimationCascade("note lighting", 60, internalOnly,
-                    new[] { lightSuffix }, new[] { "bar-light-note" }, profile.NoteLightingTiming);
+                    new[] { lightAsset }, new[] { internalProfile.LightingNoteAsset }, profile.NoteLightingTiming);
                 var holdLight = ResolveAnimationCascade("hold lighting", 60, internalOnly,
-                    new[] { holdLightSuffix }, new[] { "bar-light-hold" }, profile.HoldLightingTiming);
+                    new[] { holdLightAsset }, new[] { internalProfile.LightingHoldAsset }, profile.HoldLightingTiming);
                 lanes.Add(new ResolvedManiaLane(lane, note, receptor, pressed, head, body, tail, noteLight, holdLight));
             }
 
@@ -578,13 +578,11 @@ namespace Nullscent.Skin
             foreach (string part in new[] { "left", "right", "bottom", "hint", "light" })
             {
                 profile.StageAssets.TryGetValue(part, out string? configured);
-                string conventional = $"mania-stage-{part}";
-                string? name = First(configured, conventional);
-                string? emergency = part == "hint" ? "bar-stage-hint" : null;
+                internalProfile.StageAssets.TryGetValue(part, out string? internalName);
                 int frameRate = part.Equals("light", StringComparison.OrdinalIgnoreCase)
                     ? profile.LightFramesPerSecond : generalAnimationFramerate;
                 ResolvedSkinAnimation? animation = ResolveAnimationCascade($"stage {part}", frameRate, internalOnly,
-                    new[] { name }, new[] { name, emergency });
+                    new[] { configured }, new[] { internalName }, animated: !profile.StageAssetAnimations.TryGetValue(part, out bool animate) || animate);
                 if (animation != null) stage[part] = animation;
             }
 
@@ -593,9 +591,10 @@ namespace Nullscent.Skin
             {
                 string? configured = profile.JudgementAssets.TryGetValue(key, out string? hit) ? hit : null;
                 string suffix = key[3..];
-                string? name = First(configured, $"mania-hit{suffix}", $"hit{suffix}");
+                string? internalName = internalProfile.JudgementAssets.TryGetValue(key, out string? internalHit)
+                    ? internalHit : null;
                 var animation = ResolveAnimationCascade($"judgement {suffix}", profile.JudgementFramesPerSecond, internalOnly,
-                    new[] { name }, new[] { name }, profile.JudgementTiming);
+                    new[] { configured }, new[] { internalName }, profile.JudgementTiming);
                 if (animation != null) judgements[suffix] = animation;
             }
 
@@ -629,19 +628,19 @@ namespace Nullscent.Skin
 
         private ResolvedSkinAnimation? ResolveAnimationCascade(string role, int fps, bool internalOnly,
             IEnumerable<string?> activeNames, IEnumerable<string?> internalNames,
-            AnimationTimingDefinition? timing = null)
+            AnimationTimingDefinition? timing = null, bool animated = true)
         {
             ResolvedSkinAnimation? resolved;
             if (internalOnly)
             {
                 resolved = SkinAssetCascade.FirstResolved(
-                    name => ResolveAnimationFromProvider(_internalAssets, name, fps, timing), internalNames);
+                    name => ResolveAnimationFromProvider(_internalAssets, name, fps, timing, animated), internalNames);
             }
             else
             {
                 resolved = SkinAssetCascade.Resolve(
-                    name => ResolveAnimationFromProvider(_assets, name, fps, timing), activeNames,
-                    name => ResolveAnimationFromProvider(_internalAssets, name, fps, timing), internalNames);
+                    name => ResolveAnimationFromProvider(_assets, name, fps, timing, animated), activeNames,
+                    name => ResolveAnimationFromProvider(_internalAssets, name, fps, timing, animated), internalNames);
             }
 
             if (!internalOnly && resolved?.FirstFrame != null && _assetInfo.TryGetValue(resolved.FirstFrame, out ResolvedSkinAsset? info)
@@ -651,17 +650,57 @@ namespace Nullscent.Skin
                 string fallbackName = First(internalNames.ToArray()) ?? "(sin candidato interno)";
                 string key = $"{_currentDefinition.Id}:{role}:{request}->{fallbackName}";
                 if (_reportedDiagnostics.Add(key))
+                {
                     Console.WriteLine($"[Skin] Fallback visual usado: {request} -> proveedor interno/{fallbackName}.");
+                    var diagnostic = new SkinDiagnostic(SkinDiagnosticKind.FallbackUsed,
+                        SkinDiagnosticSeverity.Information,
+                        $"The {role} component '{request}' uses internal fallback '{fallbackName}'.", Asset: request);
+                    if (CurrentValidation != null && !CurrentValidation.Diagnostics.Contains(diagnostic))
+                        CurrentValidation.Diagnostics.Add(diagnostic);
+                }
             }
 
             return resolved;
         }
 
+        private static void AppendResolverDiagnostics(SkinAssetResolver resolver, SkinValidation validation)
+        {
+            foreach (string warning in resolver.Warnings)
+            {
+                if (!validation.Warnings.Contains(warning, StringComparer.OrdinalIgnoreCase))
+                    validation.Warnings.Add(warning);
+
+                SkinDiagnosticKind kind = warning.StartsWith("@2x variant", StringComparison.Ordinal)
+                    ? SkinDiagnosticKind.MalformedHighResolutionPair
+                    : SkinDiagnosticKind.AssetLoadFailure;
+                var diagnostic = new SkinDiagnostic(kind, SkinDiagnosticSeverity.Warning, warning,
+                    Asset: warning.StartsWith("@2x variant", StringComparison.Ordinal) ? null : GetWarningAssetName(warning));
+                if (!validation.Diagnostics.Contains(diagnostic)) validation.Diagnostics.Add(diagnostic);
+            }
+            if (resolver.Warnings.Count > 0) validation.Status = SkinValidity.Partial;
+        }
+
+        private static string? GetWarningAssetName(string warning)
+        {
+            const string prefix = "No se pudo cargar ";
+            if (!warning.StartsWith(prefix, StringComparison.Ordinal)) return null;
+            int separator = warning.IndexOf(':', prefix.Length);
+            return separator > prefix.Length ? warning[prefix.Length..separator] : warning[prefix.Length..];
+        }
+
         private ResolvedSkinAnimation? ResolveAnimationFromProvider(SkinAssetResolver provider, string fileName,
-            int fps, AnimationTimingDefinition? timing)
+            int fps, AnimationTimingDefinition? timing, bool animated)
         {
             if (string.Equals(fileName, "_blank", StringComparison.OrdinalIgnoreCase))
                 return _blankTexture == null ? null : new ResolvedSkinAnimation(new[] { _blankTexture }, fps, timing);
+
+            if (!animated)
+            {
+                ResolvedSkinAsset asset = provider.Resolve(fileName);
+                if (asset.Texture == null) return null;
+                RememberResolvedAsset(provider, asset);
+                return new ResolvedSkinAnimation(new[] { asset.Texture }, fps, timing);
+            }
 
             IReadOnlyList<Texture2D>? frames = GetAnimationFromProvider(provider, fileName);
             return frames == null ? null : new ResolvedSkinAnimation(frames, fps, timing);
@@ -761,11 +800,11 @@ namespace Nullscent.Skin
             return animation[Math.Clamp((int)(timeMs * fps / 1000d) % animation.Count, 0, animation.Count - 1)];
         }
 
-        private string GetDefaultStyleSuffix(int keyCount, int columnIndex)
+        private ManiaKeymodeDefinition GetInternalProfile(int keyCount)
         {
-            if (keyCount % 2 == 1 && columnIndex == keyCount / 2) return "S";
-            int distanceToEdge = Math.Min(columnIndex, keyCount - 1 - columnIndex);
-            return distanceToEdge % 2 == 0 ? "1" : "2";
+            if (_internalDefinition.Keymodes.TryGetValue(keyCount, out ManiaKeymodeDefinition? exact))
+                return exact;
+            return CreateFallbackMode(keyCount);
         }
 
         /// <summary>

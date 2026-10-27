@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Xna.Framework.Graphics;
 using Nullscent.Config;
 
@@ -13,6 +14,12 @@ namespace Nullscent.Skin
         public static void RunAll()
         {
             TestLegacyNormalizationAndTextAlias();
+            TestLegacyProfilesStayScopedToConfiguredKeymodes();
+            TestMultipleLegacyKeymodeSections();
+            TestLegacySpecialStyleAssetMapping();
+            TestLegacyParserDiagnosticsAndColourContracts();
+            TestLegacyReservedUserVersion();
+            TestAssetlessSkinsRemainPartial();
             TestResolvedCollectionsAreReadOnlySnapshots();
             TestSkinWithoutIniHasConventionalKeymodes();
             TestResponsiveLayoutAndScrollMirror();
@@ -37,7 +44,7 @@ namespace Nullscent.Skin
             TestHitSoundSourcePrecedence();
             TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 25 pruebas deterministas pasaron.");
+            Console.WriteLine("[SkinTests] 31 deterministic skin checks passed.");
         }
 
         private static void TestPairedHighResolutionLogicalSizing()
@@ -154,6 +161,18 @@ namespace Nullscent.Skin
                 Assert(mode.JudgementFramesPerSecond == 60,
                     "Mania hit bursts should retain their fixed 60 FPS rate despite the general animation setting.");
                 Assert(mode.Lanes[2].BodyMode == NoteBodyRenderMode.TileFromHead, "Per-column body style should survive normalization.");
+                Assert(mode.LongBodyStyle.HeightMode == SpriteHeightMode.ReferenceWidthAspect,
+                    "Legacy long-note body tiles must use WidthForNoteHeightScale just like the head and tail.");
+                Assert(!mode.ReceptorStyle.Animate
+                    && mode.StageAssetAnimations["left"] == false
+                    && mode.StageAssetAnimations["right"] == false
+                    && mode.StageAssetAnimations["hint"] == false
+                    && mode.StageAssetAnimations["bottom"]
+                    && mode.StageAssetAnimations["light"],
+                    "Legacy numbered-frame discovery must follow osu!mania's static receptor/side/hint and animated bottom/light asset contracts.");
+                Assert(mode.LongBodyStyle.FramesPerSecond == 30
+                    && mode.NoteStyle.FramesPerSecond == 60,
+                    "Legacy Mania animation defaults must stay component-specific instead of inheriting General.AnimationFramerate.");
                 Assert(mode.UpsideDown == true, "The skin orientation preference should survive normalization.");
                 Assert(mode.SupportsFlipOverrides && mode.NoteFlipWhenUpsideDown == false && mode.KeyFlipWhenUpsideDown == false,
                     "Version 2.5 global flip rules should be normalized.");
@@ -183,6 +202,247 @@ namespace Nullscent.Skin
                 Assert(iniWithoutVersion.LegacyVersion == 1.0
                     && !ManiaSkinRules.FlipNote(iniWithoutVersion.Keymodes[4], 0, "", downScroll: false),
                     "A present skin.ini without Version should use v1.0 and not receive v2.5 note flips.");
+                Assert(!iniWithoutVersion.Keymodes.ContainsKey(7),
+                    "A legacy skin.ini must not synthesize an active keymode when that keymode section is absent.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyProfilesStayScopedToConfiguredKeymodes()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-skin-keymode-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 4
+                    ColumnWidth: 40,40,40,40
+                    """);
+                ManiaSkinDefinition definition = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp));
+                Assert(definition.Keymodes.Count == 1 && definition.Keymodes.ContainsKey(4),
+                    "A skin.ini with one explicit keymode should keep only that legacy profile so other keycounts use the coherent internal profile.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestMultipleLegacyKeymodeSections()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-skin-multiple-keymodes-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 4
+                    ColumnWidth: 40,50,60,70,999
+                    [Mania]
+                    Keys: 7
+                    ColumnWidth: 20,21,22,23,24,25,26
+                    """);
+                ManiaSkinDefinition definition = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp));
+                Assert(definition.Keymodes.Count == 2 && definition.Keymodes.ContainsKey(4) && definition.Keymodes.ContainsKey(7),
+                    "Each repeated [Mania] section should contribute its own configured keymode.");
+                AssertNear(definition.Keymodes[4].Lanes[3].Width, 70f * LegacyManiaSkinAdapter.StableScale,
+                    "Values beyond the configured key count must be ignored.");
+                AssertNear(definition.Keymodes[7].Lanes[3].Width, 23f * LegacyManiaSkinAdapter.StableScale,
+                    "Repeated Mania sections must keep their own per-column values.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyReservedUserVersion()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "nullscent-user-version-" + Guid.NewGuid().ToString("N"));
+            string userSkin = Path.Combine(root, "User");
+            Directory.CreateDirectory(userSkin);
+            try
+            {
+                File.WriteAllText(Path.Combine(userSkin, "skin.ini"), """
+                    [General]
+                    Version: 1.0
+                    [Mania]
+                    Keys: 4
+                    """);
+                SkinConfig config = SkinConfigParser.Parse(userSkin);
+                Assert(config.Version == "latest" && config.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.IgnoredByDesign),
+                    "The osu! reserved User skin folder must use latest rules regardless of its declared Version.");
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
+        private static void TestLegacySpecialStyleAssetMapping()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-skin-special-style-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                foreach ((int keys, int specialColumn) in new[] { (1, 0), (3, 1), (5, 2), (7, 3), (9, 4) })
+                {
+                    File.WriteAllText(Path.Combine(temp, "skin.ini"), $"[Mania]\nKeys: {keys}\n");
+                    ManiaKeymodeDefinition defaultMode = LegacyManiaSkinAdapter.Decode(
+                        SkinConfigParser.Parse(temp)).Keymodes[keys];
+                    Assert(defaultMode.Lanes[specialColumn].NoteAsset == "mania-noteS",
+                        $"The official conventional {keys}K note layout should assign its centred special lane to mania-noteS.");
+                }
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 8
+                    """);
+                ManiaKeymodeDefinition evenMode = LegacyManiaSkinAdapter.Decode(
+                    SkinConfigParser.Parse(temp)).Keymodes[8];
+                Assert(evenMode.Lanes.Select(l => l.NoteAsset).SequenceEqual(new[]
+                    { "mania-note1", "mania-note2", "mania-note1", "mania-note2", "mania-note2", "mania-note1", "mania-note2", "mania-note1" }),
+                    "The conventional even-key layout should alternate inward from both outer edges without inventing a special lane.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.5
+                    [Mania]
+                    Keys: 7
+                    SpecialStyle: 1
+                    """);
+                ManiaSkinDefinition definition = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp));
+                ManiaKeymodeDefinition mode = definition.Keymodes[7];
+                Assert(mode.Lanes[0].NoteAsset == "mania-noteS"
+                    && mode.Lanes[0].ReceptorAsset == "mania-keyS"
+                    && mode.Lanes[0].LongHeadAsset == "mania-noteSH",
+                    "SpecialStyle 1 should select the conventional special assets on the outer left column.");
+                ManiaKeymodeDefinition lazerMode = LegacyManiaSkinAdapter.Decode(
+                    SkinConfigParser.Parse(temp), compatibilityMode: LegacySkinCompatibilityMode.Lazer).Keymodes[7];
+                Assert(lazerMode.Lanes[0].NoteAsset == "mania-note1"
+                    && lazerMode.Lanes[3].NoteAsset == "mania-noteS",
+                    "The experimental Lazer profile must ignore the configured SpecialStyle override while retaining the conventional 7K asset pattern.");
+                Assert(mode.Lanes[3].NoteAsset == "mania-note2",
+                    "An unconfigured odd centre column must use the normal alternating asset pattern, not an implicit special asset.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.5
+                    [Mania]
+                    Keys: 7
+                    SpecialStyle: 2
+                    """);
+                mode = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp)).Keymodes[7];
+                Assert(mode.Lanes[6].NoteAsset == "mania-noteS",
+                    "SpecialStyle 2 should select the conventional special assets on the outer right column.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 6
+                    SpecialStyle: 1
+                    """);
+                mode = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp)).Keymodes[6];
+                SkinValidation splitMode = new SkinCatalog(temp).Validate(temp);
+                Assert(mode.Lanes[0].NoteAsset == "mania-note1"
+                    && splitMode.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.UnsupportedProperty && d.Property == "SpecialStyle"),
+                    "Double-play SpecialStyle lane placement must be diagnosed as unsupported instead of guessed as a single-stage edge.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestLegacyParserDiagnosticsAndColourContracts()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-skin-diagnostics-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.5
+                    [Colours]
+                    Combo1: 1,2,3,4
+                    [Mania]
+                    Keys: 4
+                    ColumnWidth: 30,invalid,60,30
+                    KeysUnderNotes: true
+                    Colour1: 10,20,30,0
+                    ColourLight1: 40,50,60,0
+                    ColourJudgementLine: 70,80,90,0
+                    columnwidth: 200,200,200,200
+                    """);
+                SkinConfig config = SkinConfigParser.Parse(temp);
+                ManiaKeymodeDefinition mode = LegacyManiaSkinAdapter.Decode(config).Keymodes[4];
+                AssertNear(mode.Lanes[0].Width, 48f, "The valid first legacy column width should be scaled from the 480-high coordinate space.");
+                AssertNear(mode.Lanes[1].Width, 48f, "A malformed column width should use the documented default at the same list index.");
+                AssertNear(mode.Lanes[2].Width, 96f, "A malformed list entry must not shift later per-column values.");
+                Assert(!mode.KeysUnderNotes, "skin.ini boolean commands accept 0 or 1; the text true must not silently become a valid override.");
+                Assert(mode.Lanes[0].LaneColor == new SkinColor(10, 20, 30, 0),
+                    "Colour# is RGB(a), so its explicit alpha must be preserved.");
+                Assert(mode.Lanes[0].StageLightColor == new SkinColor(40, 50, 60, 255)
+                    && mode.JudgementLineColor == new SkinColor(70, 80, 90, 255),
+                    "ColourLight# and ColourJudgementLine are RGB properties; a fourth component must be ignored.");
+
+                SkinValidation validation = new SkinCatalog(temp).Validate(temp);
+                Assert(validation.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.MalformedProperty && d.Property == "ColumnWidth"),
+                    "Malformed list values should be reported during validation.");
+                Assert(validation.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.MalformedProperty && d.Property == "KeysUnderNotes"),
+                    "Invalid boolean syntax should be reported instead of silently interpreted.");
+                Assert(validation.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.UnsupportedProperty && d.Property == "columnwidth"),
+                    "The official skin.ini command spelling is case-sensitive and misspellings must not be applied.");
+                Assert(validation.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.IgnoredByDesign && d.Property == "Combo1"),
+                    "Global [Colours] combo values should be identified as intentionally unused by the current Mania renderer.");
+                Assert(validation.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.IgnoredByDesign && d.Property == "ColourLight1"),
+                    "An extra alpha value on an RGB-only property should be explicitly reported as ignored.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Name: Blank-template example
+                    Version:
+                    [Mania]
+                    Keys: 4
+                    ColumnWidth:
+                    Colour0:
+                    KeyFlipWhenUpsideDown
+                    """);
+                SkinConfig templateConfig = SkinConfigParser.Parse(temp);
+                ManiaKeymodeDefinition templateMode = LegacyManiaSkinAdapter.Decode(templateConfig).Keymodes[4];
+                Assert(templateConfig.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.IgnoredByDesign
+                        && d.Message.Contains("empty template placeholder", StringComparison.OrdinalIgnoreCase))
+                    && !templateConfig.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.MalformedProperty),
+                    "The official blank skin.ini template's empty key:value placeholders should be ignored, not reported as malformed entries.");
+                AssertNear(templateMode.Lanes[0].Width, 48f,
+                    "Empty template values should leave the property's format default in effect.");
+            }
+            finally { Directory.Delete(temp, true); }
+        }
+
+        private static void TestAssetlessSkinsRemainPartial()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-skin-assetless-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, NativeSkinAdapter.ManifestFileName), """
+                    {
+                      "formatVersion": 1,
+                      "id": "assetless-native",
+                      "keymodes": {
+                        "4": {
+                          "keyCount": 4,
+                          "noteStyle": { "asset": "missing-note" },
+                          "lanes": [{}, {}, {}, {}]
+                        }
+                      }
+                    }
+                    """);
+                SkinValidation native = new SkinCatalog(temp).Validate(temp);
+                Assert(native.Status == SkinValidity.Partial,
+                    "A valid Native manifest with missing art should remain selectable and use component fallbacks.");
+                Assert(native.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.MissingAsset),
+                    "Missing Native assets should be visible in catalog diagnostics.");
+
+                File.Delete(Path.Combine(temp, NativeSkinAdapter.ManifestFileName));
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [Mania]
+                    Keys: 4
+                    """);
+                SkinValidation legacy = new SkinCatalog(temp).Validate(temp);
+                Assert(legacy.Status == SkinValidity.Partial,
+                    "A skin.ini-only legacy skin should be usable with the internal visual provider.");
+                Assert(legacy.ManiaKeyModes.Contains(4),
+                    "The configured legacy geometry should remain available even when its art falls back internally.");
             }
             finally { Directory.Delete(temp, true); }
         }
@@ -199,6 +459,10 @@ namespace Nullscent.Skin
                 ManiaLayoutResult up = ManiaLayoutEngine.Calculate(profile, 7, width, height, false);
                 Assert(down.Lanes.Count == 7, "Layout must preserve arbitrary keycount data.");
                 Assert(down.Playfield.X >= 0 && down.Playfield.Right <= width + .1f, $"Playfield must fit {width}x{height}.");
+                AssertNear(down.Lanes[0].Y, down.OffsetY,
+                    "Lane backgrounds and scroll bounds should begin at the centered logical canvas offset.");
+                AssertNear(down.Lanes[0].Bottom, down.OffsetY + ManiaLayoutEngine.DesignHeight * down.Scale,
+                    "The logical playfield height should remain consistent across aspect ratios.");
                 AssertNear(down.ReceptorY + up.ReceptorY, height, "Upscroll and downscroll receptor positions should mirror around the viewport center.");
                 AssertNear(down.NoteScale, 1.25f, "Note height scale should travel through the layout snapshot.");
                 AssertNear(down.ReceptorScale, 0.75f, "Receptor height scale should remain independent.");
@@ -238,6 +502,9 @@ namespace Nullscent.Skin
             ManiaSkinDefinition circles = NativeSkinAdapter.Load(Path.Combine(root, "Circles"));
             Assert(bars.Provider == SkinProviderKind.NullscentNative && circles.Provider == SkinProviderKind.NullscentNative,
                 "Built-in definitions should use the native provider.");
+            Assert(!bars.Keymodes[4].StageAssets.Values.Any(asset => asset?.StartsWith("mania-", StringComparison.Ordinal) == true)
+                && !circles.Keymodes[7].JudgementAssets.Values.Any(asset => asset.StartsWith("mania-", StringComparison.Ordinal)),
+                "Native manifests must not acquire osu! conventional asset names from the legacy adapter.");
             ManiaSkinDefinition lazerRequested = SkinSourceDecoder.Load(Path.Combine(root, "Bars"), out _,
                 LegacySkinCompatibilityMode.Lazer);
             Assert(lazerRequested.Provider == SkinProviderKind.NullscentNative
@@ -273,6 +540,8 @@ namespace Nullscent.Skin
                           "keyCount": 4,
                           "flipLightingHorizontallyWhenUpsideDown": true,
                           "judgementTiming": { "minimumFrameDurationMs": 20, "targetAnimationDurationMs": 80 },
+                        "stageAssetAnimations": { "left": false, "bottom": true },
+                        "receptorStyle": { "animate": false },
                           "stageStyle": { "sideHeightScale": 0.8, "hintHeightScale": 1.25, "bottomScale": 1.6 },
                           "lanes": [{ "width": 48 }, { "width": 48 }, { "width": 48 }, { "width": 48 }]
                         }
@@ -283,6 +552,10 @@ namespace Nullscent.Skin
                 ManiaStageStyleDefinition stageStyle = nativeMode.StageStyle;
                 Assert(nativeMode.FlipLightingHorizontallyWhenUpsideDown,
                     "Native manifests should be able to opt in to the normalized upside-down lighting transform.");
+                Assert(!nativeMode.ReceptorStyle.Animate
+                    && nativeMode.StageAssetAnimations["left"] == false
+                    && nativeMode.StageAssetAnimations["bottom"],
+                    "Native skins should be able to declare which resolved assets are static or animated without a legacy renderer branch.");
                 Assert(nativeMode.JudgementTiming is { TargetAnimationDurationMs: 80d, MinimumFrameDurationMs: 20d },
                     "Native manifests should be able to define a validated normalized animation timing policy.");
                 AssertNear(stageStyle.SideHeightScale, 0.8f, "Native stage side scaling should deserialize as normalized data.");
@@ -513,6 +786,7 @@ namespace Nullscent.Skin
                     [Mania]
                     Keys: 4
                     NoteFlipWhenUpsideDown: 1
+                    NoteBodyStyle: 2
                     """);
                 ManiaSkinDefinition pre25 = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp));
                 ManiaKeymodeDefinition pre25Mode = pre25.Keymodes[4];
@@ -520,6 +794,21 @@ namespace Nullscent.Skin
                     && !ManiaSkinRules.FlipNote(pre25Mode, 0, "H", downScroll: false)
                     && !ManiaSkinRules.FlipNote(pre25Mode, 0, "T", downScroll: true),
                     "Stable legacy skins below v2.5 must not vertically flip note sprites, even when the option is present.");
+                SkinValidation pre25Validation = new SkinCatalog(temp).Validate(temp);
+                Assert(pre25Mode.DrawColumnEdgesBothSides
+                    && pre25Mode.BodyMode == NoteBodyRenderMode.TileFromTail
+                    && pre25Validation.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.VersionInapplicable
+                        && d.Property == "NoteBodyStyle"),
+                    "Version 2.4 keeps the post-2.4 column-edge rule but ignores and diagnoses NoteBodyStyle until version 2.5.");
+
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: 2.3
+                    [Mania]
+                    Keys: 4
+                    """);
+                Assert(!LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp)).Keymodes[4].DrawColumnEdgesBothSides,
+                    "Legacy versions before 2.4 must retain the single-sided column-edge behavior.");
 
                 File.WriteAllText(Path.Combine(temp, "skin.ini"), """
                     [General]

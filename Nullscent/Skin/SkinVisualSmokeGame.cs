@@ -928,7 +928,12 @@ internal sealed class SkinVisualSmokeGame : Game
         foreach (string part in new[] { "left", "right", "bottom", "hint", "light" })
         {
             string? configured = profile.StageAssets.TryGetValue(part, out string? value) ? value : null;
-            string name = string.IsNullOrWhiteSpace(configured) ? $"mania-stage-{part}" : configured;
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                Console.WriteLine($"[SkinVisualSmoke] stage {part}: no active skin asset configured.");
+                continue;
+            }
+            string name = configured;
             IReadOnlyList<Texture2D>? frames = skin.GetStageAnimation(keyCount, part);
             string resolvedName = skin.HasTextureFile($"{name}-0") ? $"{name}-0" : name;
             ResolvedSkinAsset resolved = skin.ResolveAsset(resolvedName);

@@ -9,6 +9,10 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     /// <summary>Pure geometry and clock rules shared by the long-note renderer and tests.</summary>
     internal static class LongNoteRenderRules
     {
+        public static bool ShouldDrawHead(bool headJudged, LongNoteState state, bool keepAtReceptorWhileHolding = false) =>
+            !headJudged || state == LongNoteState.Broken
+                || (keepAtReceptorWhileHolding && state == LongNoteState.Holding);
+
         public static float GetPieceHeight(SkinSpriteMetrics metrics, float logicalWidth, float logicalHeight,
             float drawWidth, float columnWidth, float layoutScale, float noteHeightScale)
         {

@@ -514,6 +514,10 @@ namespace Nullscent.Skin
                 "Native families should define their own lane geometry.");
             Assert(circles.Keymodes[4].NoteStyle.LaneWidthRatio < circles.Keymodes[4].ReceptorStyle.LaneWidthRatio,
                 "Native note and receptor widths should remain independent.");
+            Assert(!bars.Keymodes[4].HoldHeadAtReceptorWhileHolding
+                && !circles.Keymodes[4].HoldHeadAtReceptorWhileHolding
+                && !lazerRequested.Keymodes[4].HoldHeadAtReceptorWhileHolding,
+                "Legacy held-head visibility behavior must not enter either Native family when compatibility profile changes.");
             AssertNear(bars.Keymodes[4].StageStyle.BottomScale, 1f,
                 "Native manifests without stage overrides should keep their native StageBottom scale.");
             AssertNear(bars.Keymodes[4].HoldAssembly.HeadConnectionRatio, 0f,
@@ -794,6 +798,11 @@ namespace Nullscent.Skin
                     && !ManiaSkinRules.FlipNote(pre25Mode, 0, "H", downScroll: false)
                     && !ManiaSkinRules.FlipNote(pre25Mode, 0, "T", downScroll: true),
                     "Stable legacy skins below v2.5 must not vertically flip note sprites, even when the option is present.");
+                ManiaKeymodeDefinition lazerPre25Mode = LegacyManiaSkinAdapter.Decode(
+                    SkinConfigParser.Parse(temp), compatibilityMode: LegacySkinCompatibilityMode.Lazer).Keymodes[4];
+                Assert(ManiaSkinRules.FlipNote(lazerPre25Mode, 0, "H", downScroll: false)
+                    && ManiaSkinRules.FlipNote(lazerPre25Mode, 0, "T", downScroll: true),
+                    "Current Lazer legacy source direction-flips H/T independent of the Stable version gate.");
                 SkinValidation pre25Validation = new SkinCatalog(temp).Validate(temp);
                 Assert(pre25Mode.DrawColumnEdgesBothSides
                     && pre25Mode.BodyMode == NoteBodyRenderMode.TileFromTail
@@ -818,8 +827,22 @@ namespace Nullscent.Skin
                     """);
                 ManiaKeymodeDefinition v25Mode = LegacyManiaSkinAdapter.Decode(SkinConfigParser.Parse(temp)).Keymodes[4];
                 Assert(ManiaSkinRules.FlipNote(v25Mode, 0, "", downScroll: false)
-                    && ManiaSkinRules.FlipNote(v25Mode, 0, "T", downScroll: true),
-                    "Stable legacy v2.5+ note sprites should use the documented default upscroll/tail flipping.");
+                    && !ManiaSkinRules.FlipNote(v25Mode, 0, "H", downScroll: true)
+                    && ManiaSkinRules.FlipNote(v25Mode, 0, "T", downScroll: true)
+                    && !ManiaSkinRules.FlipNote(v25Mode, 0, "T", downScroll: false),
+                    "Stable legacy v2.5+ should flip heads/notes only in upscroll and tails only in downscroll.");
+                AssertNear(v25Mode.HoldAssembly.HeadConnectionRatio, 0f,
+                    "Stable legacy keeps the existing edge-joined head/body geometry because its documented overlap amount is unspecified.");
+                AssertNear(v25Mode.HoldAssembly.TailConnectionRatio, 0f,
+                    "Stable legacy keeps the existing edge-joined tail/body geometry because its documented overlap amount is unspecified.");
+                Assert(v25Mode.HoldHeadAtReceptorWhileHolding,
+                    "Legacy hold caps should remain at the receptor while a successful hold is active.");
+                ManiaKeymodeDefinition lazerV25Mode = LegacyManiaSkinAdapter.Decode(
+                    SkinConfigParser.Parse(temp), compatibilityMode: LegacySkinCompatibilityMode.Lazer).Keymodes[4];
+                AssertNear(lazerV25Mode.HoldAssembly.HeadConnectionRatio, 0.5f,
+                    "Current Lazer legacy body geometry overlaps halfway under the head cap.");
+                AssertNear(lazerV25Mode.HoldAssembly.TailConnectionRatio, 0.5f,
+                    "Current Lazer legacy body geometry overlaps halfway under the tail cap.");
 
                 File.WriteAllText(Path.Combine(temp, "skin.ini"), """
                     [General]
@@ -1084,12 +1107,29 @@ namespace Nullscent.Skin
                 && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileFromTop(NoteBodyRenderMode.TileFromHead, false),
                 "In upscroll the tail is physically below the head, so their tiling anchors must mirror downscroll.");
             Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetBodySpan(
-                    200, 500, 40, 60, true, 0f, 0f) == (200, 500)
+                    500, 200, 40, 60, true, 0f, 0f) == (200, 500)
                 && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetBodySpan(
-                    200, 500, 40, 60, true, 0.5f, 0.5f) == (180, 530)
+                    500, 200, 40, 60, true, 0.5f, 0.5f) == (230, 480)
                 && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.GetBodySpan(
                     200, 500, 40, 60, false, 0.5f, 0.5f) == (220, 470),
-                "Hold cap overlap ratios should map consistently to body anchors in both scroll directions.");
+                "Hold body geometry should overlap halfway inside the head/tail caps in their physical order for both scroll directions.");
+            Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ShouldDrawHead(
+                    headJudged: false, Nullscent.Rulesets.Mania.Objects.LongNoteState.Idle)
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ShouldDrawHead(
+                    headJudged: true, Nullscent.Rulesets.Mania.Objects.LongNoteState.Holding, keepAtReceptorWhileHolding: true)
+                && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ShouldDrawHead(
+                    headJudged: true, Nullscent.Rulesets.Mania.Objects.LongNoteState.Broken)
+                && !Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ShouldDrawHead(
+                    headJudged: true, Nullscent.Rulesets.Mania.Objects.LongNoteState.Holding)
+                && !Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ShouldDrawHead(
+                    headJudged: true, Nullscent.Rulesets.Mania.Objects.LongNoteState.Finished),
+                "Legacy holds keep their cap at the receptor through the hold; Native keeps its prior hidden-judged-head behavior.");
+            Assert(!new ManiaKeymodeDefinition().HoldHeadAtReceptorWhileHolding,
+                "The legacy held-head visibility adaptation must remain opt-in so Native presentation is preserved.");
+            Assert(!Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.ShouldDrawHead(
+                    headJudged: true, Nullscent.Rulesets.Mania.Objects.LongNoteState.Holding,
+                    keepAtReceptorWhileHolding: new ManiaKeymodeDefinition().HoldHeadAtReceptorWhileHolding),
+                "Native's default mode must retain the pre-patch behavior of hiding a judged head during Holding.");
             Assert(Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(
                     0, 95, 40, NoteBodyRenderMode.TileFromTail, true, 0) == 0
                 && Nullscent.Rulesets.Mania.UI.Drawables.LongNoteRenderRules.TileOriginY(

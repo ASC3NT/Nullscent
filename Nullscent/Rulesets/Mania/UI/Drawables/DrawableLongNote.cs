@@ -13,7 +13,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     /// Drawable for Long Notes (LN) with ScoreV2-style head+tail separation.
     /// 
     /// Rendering behavior:
-    /// - Head: Visible until judged
+    /// - Head: Remains at the receptor while a successful hold is active
     /// - Body: Visible while holding OR broken
     /// - Tail: Visible until judged
     /// - Receptor lighting: Active during hold
@@ -21,7 +21,7 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
     /// Visual feedback:
     /// - Holding: Body highlighted
     /// - Broken: Body color changes (red tint)
-    /// - Head judged: Head disappears
+    /// - Head judged: Head remains visible during the hold and after a break
     /// - Tail judged: Entire LN disappears
     /// 
     /// Deterministic: Uses song time, not frame delta.
@@ -349,8 +349,12 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 }
             }
 
-            // Draw head (if not judged yet OR if note is broken and scrolling down)
-            if ((!_longNote.HeadJudged || _longNote.State == LongNoteState.Broken) && headY >= -50 && headY <= screenHeight + 50)
+            // Keep a successfully judged legacy hold head at the receptor. The
+            // Stable expectation recorded in ppy/osu#12127 is that the cap covers
+            // the body's mask at the judgement point; hiding it exposes that edge.
+            if (LongNoteRenderRules.ShouldDrawHead(_longNote.HeadJudged, _longNote.State,
+                    resolvedMode?.Definition.HoldHeadAtReceptorWhileHolding ?? false)
+                && headY >= -50 && headY <= screenHeight + 50)
             {
                 double headAlpha = GetHiddenAlpha(headY, downScroll, receptorY, screenHeight, CurrentCombo);
                 if (_longNote.State == LongNoteState.Broken)

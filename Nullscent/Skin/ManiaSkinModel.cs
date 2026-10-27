@@ -153,6 +153,7 @@ namespace Nullscent.Skin
         public AnimationTimingDefinition? NoteLightingTiming { get; init; }
         public AnimationTimingDefinition? HoldLightingTiming { get; init; }
         public ManiaHoldAssemblyDefinition HoldAssembly { get; init; } = new();
+        public bool HoldHeadAtReceptorWhileHolding { get; init; }
         public float[] ColumnLineWidths { get; init; } = Array.Empty<float>();
         public bool[] ColumnLines { get; init; } = Array.Empty<bool>();
         public float[] LightingNoteWidths { get; init; } = Array.Empty<float>();
@@ -344,6 +345,20 @@ namespace Nullscent.Skin
                     NoteFlipWhenUpsideDown = supportsFlipOverrides ? source.NoteFlipWhenUpsideDown : null,
                     KeyFlipWhenUpsideDown = supportsFlipOverrides ? source.KeyFlipWhenUpsideDown : null,
                     DrawColumnEdgesBothSides = config.IsVersionAtLeast(2.4),
+                    // Current Lazer source overlaps each cap by half its height.
+                    // The wiki does not specify Stable's overlap amount, so Stable
+                    // keeps the existing edge join instead of inheriting that value.
+                    // Native skins continue to use their manifest-defined assembly.
+                    HoldAssembly = compatibilityMode == LegacySkinCompatibilityMode.Lazer
+                        ? new ManiaHoldAssemblyDefinition
+                        {
+                            HeadConnectionRatio = 0.5f,
+                            TailConnectionRatio = 0.5f
+                        }
+                        : ManiaHoldAssemblyDefinition.Default,
+                    // The legacy hit cap stays at the receptor during a successful
+                    // hold, matching the Stable behavior reported in ppy/osu#12127.
+                    HoldHeadAtReceptorWhileHolding = true,
                     LightFramesPerSecond = source.LightFramePerSecond,
                     // Stable's wiki contract specifies a fixed looping 60 FPS for
                     // mania-hit assets. Lazer's legacy transformer uses 20 FPS for

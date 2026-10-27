@@ -18,6 +18,7 @@ namespace Nullscent.Skin
             TestMultipleLegacyKeymodeSections();
             TestLegacySpecialStyleAssetMapping();
             TestLegacyParserDiagnosticsAndColourContracts();
+            TestLegacyNegativeColumnLineWidthsDisableBorders();
             TestLegacyReservedUserVersion();
             TestAssetlessSkinsRemainPartial();
             TestResolvedCollectionsAreReadOnlySnapshots();
@@ -44,7 +45,33 @@ namespace Nullscent.Skin
             TestHitSoundSourcePrecedence();
             TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 31 deterministic skin checks passed.");
+            Console.WriteLine("[SkinTests] 32 deterministic skin checks passed.");
+        }
+
+        private static void TestLegacyNegativeColumnLineWidthsDisableBorders()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-legacy-column-line-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), """
+                    [General]
+                    Version: latest
+                    [Mania]
+                    Keys: 4
+                    ColumnLineWidth: -2,-2,-2,-2,2
+                    """);
+
+                SkinConfig config = SkinConfigParser.Parse(temp);
+                ManiaKeymodeDefinition mode = LegacyManiaSkinAdapter.Decode(config).Keymodes[4];
+                Assert(!config.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.MalformedProperty
+                        && d.Property == "ColumnLineWidth")
+                    && mode.ColumnLineWidths.Length == 5
+                    && mode.ColumnLineWidths.Take(4).All(width => Math.Abs(width - -1.48f) < 0.001f)
+                    && Math.Abs(mode.ColumnLineWidths[4] - 1.48f) < 0.001f,
+                    "Legacy line widths must preserve negative border suppression and apply osu!'s 0.740 width transform without the 480px position scale.");
+            }
+            finally { Directory.Delete(temp, true); }
         }
 
         private static void TestPairedHighResolutionLogicalSizing()
@@ -831,10 +858,10 @@ namespace Nullscent.Skin
                     && ManiaSkinRules.FlipNote(v25Mode, 0, "T", downScroll: true)
                     && !ManiaSkinRules.FlipNote(v25Mode, 0, "T", downScroll: false),
                     "Stable legacy v2.5+ should flip heads/notes only in upscroll and tails only in downscroll.");
-                AssertNear(v25Mode.HoldAssembly.HeadConnectionRatio, 0f,
-                    "Stable legacy keeps the existing edge-joined head/body geometry because its documented overlap amount is unspecified.");
-                AssertNear(v25Mode.HoldAssembly.TailConnectionRatio, 0f,
-                    "Stable legacy keeps the existing edge-joined tail/body geometry because its documented overlap amount is unspecified.");
+                AssertNear(v25Mode.HoldAssembly.HeadConnectionRatio, 0.5f,
+                    "Stable legacy hold bodies should extend halfway beneath the head cap, matching osu!'s hold composition.");
+                AssertNear(v25Mode.HoldAssembly.TailConnectionRatio, 0.5f,
+                    "Stable legacy hold bodies should extend halfway beneath the tail cap, matching osu!'s hold composition.");
                 Assert(v25Mode.HoldHeadAtReceptorWhileHolding,
                     "Legacy hold caps should remain at the receptor while a successful hold is active.");
                 ManiaKeymodeDefinition lazerV25Mode = LegacyManiaSkinAdapter.Decode(

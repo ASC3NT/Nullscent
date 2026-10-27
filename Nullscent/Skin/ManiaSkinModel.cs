@@ -260,6 +260,7 @@ namespace Nullscent.Skin
     {
         public const float StableScale = 1.6f;
         public const float StableDesignHeight = 768f;
+        private const float LegacyColumnLineWidthScale = 0.740f;
 
         public static ManiaSkinDefinition Decode(SkinConfig config, string? id = null,
             LegacySkinCompatibilityMode compatibilityMode = LegacySkinCompatibilityMode.Stable)
@@ -345,17 +346,15 @@ namespace Nullscent.Skin
                     NoteFlipWhenUpsideDown = supportsFlipOverrides ? source.NoteFlipWhenUpsideDown : null,
                     KeyFlipWhenUpsideDown = supportsFlipOverrides ? source.KeyFlipWhenUpsideDown : null,
                     DrawColumnEdgesBothSides = config.IsVersionAtLeast(2.4),
-                    // Current Lazer source overlaps each cap by half its height.
-                    // The wiki does not specify Stable's overlap amount, so Stable
-                    // keeps the existing edge join instead of inheriting that value.
-                    // Native skins continue to use their manifest-defined assembly.
-                    HoldAssembly = compatibilityMode == LegacySkinCompatibilityMode.Lazer
-                        ? new ManiaHoldAssemblyDefinition
-                        {
-                            HeadConnectionRatio = 0.5f,
-                            TailConnectionRatio = 0.5f
-                        }
-                        : ManiaHoldAssemblyDefinition.Default,
+                    // osu!'s hold drawable positions the body halfway beneath both
+                    // caps (bodyPiece.Y = -Head.Height / 2 and Height = DrawHeight
+                    // - Head.Height / 2 + Tail.Height / 2). This is shared legacy
+                    // presentation geometry; Native skins retain their manifest values.
+                    HoldAssembly = new ManiaHoldAssemblyDefinition
+                    {
+                        HeadConnectionRatio = 0.5f,
+                        TailConnectionRatio = 0.5f
+                    },
                     // The legacy hit cap stays at the receptor during a successful
                     // hold, matching the Stable behavior reported in ppy/osu#12127.
                     HoldHeadAtReceptorWhileHolding = true,
@@ -370,7 +369,12 @@ namespace Nullscent.Skin
                     JudgementFramesPerSecond = compatibilityMode == LegacySkinCompatibilityMode.Lazer ? 20 : 60,
                     NoteLightingTiming = lazerLightingTiming,
                     HoldLightingTiming = lazerLightingTiming,
-                    ColumnLineWidths = Expand(source.ColumnLineWidths, keys + 1, 2f).Select(v => v * StableScale).ToArray(),
+                    // ppy's legacy decoder does not apply the 480px position scale
+                    // to ColumnLineWidth; LegacyColumnBackground then scales each
+                    // border container horizontally by 0.740. Layout applies the
+                    // viewport scale after this normalization.
+                    ColumnLineWidths = Expand(source.ColumnLineWidths, keys + 1, 2f)
+                        .Select(v => v * LegacyColumnLineWidthScale).ToArray(),
                     ColumnLines = Expand(source.ColumnLines, keys + 1, true),
                     LightingNoteWidths = config.IsVersionAtLeast(2.5) ? source.LightingNWidths?.Select(v => v * StableScale).ToArray() ?? Array.Empty<float>() : Array.Empty<float>(),
                     LightingHoldWidths = config.IsVersionAtLeast(2.5) ? source.LightingLWidths?.Select(v => v * StableScale).ToArray() ?? Array.Empty<float>() : Array.Empty<float>(),

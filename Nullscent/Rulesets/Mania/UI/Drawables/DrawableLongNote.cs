@@ -349,6 +349,46 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 }
             }
 
+            // osu! draws the head above the masked body and tail. Preserve that
+            // order explicitly: an opaque tail texture must not cover the head
+            // when short holds overlap their caps.
+            if ((!_longNote.TailJudged || _longNote.State == LongNoteState.Broken) && tailY >= -50 && tailY <= screenHeight + 50)
+            {
+                double tailAlpha = GetHiddenAlpha(tailY, downScroll, receptorY, screenHeight, CurrentCombo);
+                if (_longNote.State == LongNoteState.Broken)
+                    tailAlpha *= 0.5;
+
+                if (tailAlpha > 0.0)
+                {
+                    if (tailTexture != null && tailHeight > 0)
+                    {
+                        Texture2D? tailFrame = tailAnimation?.FrameAt(currentTime) ?? tailTexture;
+                        int tailRenderY = (int)MathF.Round(downScroll ? tailY + tailMetrics.OffsetY * layoutScale : tailY - tailHeight + tailMetrics.OffsetY * layoutScale);
+                        var tailRect = new Rectangle(
+                            tailX,
+                            tailRenderY,
+                            (int)MathF.Round(tailWidth),
+                            tailHeight
+                        );
+                        SpriteEffects effects = skinManager!.FlipNote(keyCount, columnIndex, "T", downScroll)
+                            ? SpriteEffects.FlipVertically : SpriteEffects.None;
+                        spriteBatch.Draw(tailFrame, tailRect, null, Color.White * (float)tailAlpha,
+                            0f, Vector2.Zero, effects, 0f);
+                    }
+                    else if (tailTexture == null)
+                    {
+                        int tailRenderY = downScroll ? tailY : tailY - TAIL_HEIGHT;
+                        var tailRect = new Rectangle(
+                            columnX + PADDING,
+                            tailRenderY,
+                            columnWidth - PADDING * 2,
+                            TAIL_HEIGHT
+                        );
+                        spriteBatch.Draw(pixel, tailRect, COLOR_TAIL * (float)tailAlpha);
+                    }
+                }
+            }
+
             // Keep a successfully judged legacy hold head at the receptor. The
             // Stable expectation recorded in ppy/osu#12127 is that the cap covers
             // the body's mask at the judgement point; hiding it exposes that edge.
@@ -395,43 +435,6 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                 }
             }
 
-            // Draw tail (if not judged yet OR if note is broken and scrolling down)
-            if ((!_longNote.TailJudged || _longNote.State == LongNoteState.Broken) && tailY >= -50 && tailY <= screenHeight + 50)
-            {
-                double tailAlpha = GetHiddenAlpha(tailY, downScroll, receptorY, screenHeight, CurrentCombo);
-                if (_longNote.State == LongNoteState.Broken)
-                    tailAlpha *= 0.5;
-
-                if (tailAlpha > 0.0)
-                {
-                    if (tailTexture != null && tailHeight > 0)
-                    {
-                        Texture2D? tailFrame = tailAnimation?.FrameAt(currentTime) ?? tailTexture;
-                        int tailRenderY = (int)MathF.Round(downScroll ? tailY + tailMetrics.OffsetY * layoutScale : tailY - tailHeight + tailMetrics.OffsetY * layoutScale);
-                        var tailRect = new Rectangle(
-                            tailX,
-                            tailRenderY,
-                            (int)MathF.Round(tailWidth),
-                            tailHeight
-                        );
-                        SpriteEffects effects = skinManager!.FlipNote(keyCount, columnIndex, "T", downScroll)
-                            ? SpriteEffects.FlipVertically : SpriteEffects.None;
-                        spriteBatch.Draw(tailFrame, tailRect, null, Color.White * (float)tailAlpha,
-                            0f, Vector2.Zero, effects, 0f);
-                    }
-                    else if (tailTexture == null)
-                    {
-                        int tailRenderY = downScroll ? tailY : tailY - TAIL_HEIGHT;
-                        var tailRect = new Rectangle(
-                            columnX + PADDING,
-                            tailRenderY,
-                            columnWidth - PADDING * 2,
-                            TAIL_HEIGHT
-                        );
-                        spriteBatch.Draw(pixel, tailRect, COLOR_TAIL * (float)tailAlpha);
-                    }
-                }
-            }
         }
 
         public override void CheckForResult(double currentTime, ManiaHitWindows hitWindows)

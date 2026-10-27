@@ -124,7 +124,7 @@ Legacy property diagnostics use the selected compatibility profile and the skin'
 
 | Properties | Status | Current behavior |
 | --- | --- | --- |
-| `Keys`, `ColumnWidth`, `ColumnSpacing`, `ColumnLine`, `ColumnLineWidth` | SUPPORTED | Per-keymode lanes and line geometry; missing values use defaults. |
+| `Keys`, `ColumnWidth`, `ColumnSpacing`, `ColumnLine`, `ColumnLineWidth` | SUPPORTED | Per-keymode lanes and line geometry; missing values use defaults. Legacy negative `ColumnLineWidth` values suppress their corresponding borders, and positive widths use osu!'s 0.740 transform. |
 | `ColumnStart` | ADAPTED | Converts the documented 480-high coordinate to logical units and anchors the left edge. |
 | `ColumnRight` | ADAPTED | Right-edge constraint in the responsive design canvas; exact Stable parity is uncertain. |
 | `HitPosition`, `LightPosition`, `ScorePosition`, `ComboPosition` | SUPPORTED | Converted once; hit position feeds layout, score/combo feed legacy judgement presentation. |
@@ -149,6 +149,8 @@ Legacy property diagnostics use the selected compatibility profile and the skin'
 `NoteBodyStyle` string aliases currently accepted are `stretch`; `repeatbottom`, `repeat-bottom`, `bottom`, `tilefromtail`, `tile-from-tail`; and `repeattop`, `repeat-top`, `top`, `tilefromhead`, `tile-from-head`.
 
 The normalized tile modes name the semantic anchor: the note head is the hold start, and the tail is its end. Downscroll places the tail at the upper edge and head at the lower edge; upscroll mirrors those positions. `TileFromTail` therefore starts at the upper edge in downscroll and the lower edge in upscroll. `TileFromHead` uses the opposite edge. Partial end tiles crop the matching source rows instead of stretching them. Stretch maps the whole source image over the body. A missing legacy tail may use the selected skin's head first; otherwise each missing piece uses its matching internal component. The direction mapping is covered by geometry tests for both scroll directions. The mapping follows the published Stable behavior, not the known current Lazer regression where style 1 and 2 do not retain distinct directions.
+
+Legacy hold body geometry overlaps halfway beneath the head and tail caps, following osu!'s `DrawableHoldNote` placement (`-Head.Height / 2` and the matching half-height tail extension). This rule is normalized only for osu! legacy profiles; Native skins continue to use their manifest assembly ratios. The exact historical Stable overlap amount is not specified by the wiki and has not been compared against a live Stable build, so this remains an evidence-based adaptation rather than a claim of exact Stable parity.
 
 The Lazer profile is deliberately not described as an exact port of its body sizing. The current official `LegacyBodyPiece` uses repeat wrapping for every non-stretch style, anchors by scroll direction, and scales the body sprite using `32800 / sprite.DrawHeight`. Nullscent currently repeats according to the resolved asset's logical aspect and width, while normalizing both Lazer repeat styles to the tail-side anchor. Very tall assets with transparent source regions can therefore show a different portion or an apparently empty body under this experimental profile. This does not affect Stable or Native. See the official [LegacyBodyPiece source](https://github.com/ppy/osu/blob/master/osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyBodyPiece.cs) and [NoteBodyStyle issue #35502](https://github.com/ppy/osu/issues/35502).
 

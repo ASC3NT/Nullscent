@@ -363,7 +363,7 @@ namespace Nullscent.Skin
             else if (key == "ColumnSpacing")
                 maniaConfig.ColumnSpacing = ParseFloatArray(config, property, allowZero: true);
             else if (key == "ColumnLineWidth")
-                maniaConfig.ColumnLineWidths = ParseFloatArray(config, property, allowZero: true);
+                maniaConfig.ColumnLineWidths = ParseFloatArray(config, property, allowZero: true, allowNegative: true);
             else if (key == "ColumnLine")
                 maniaConfig.ColumnLines = ParseBoolArray(config, property);
             else if (key == "ColumnStart")
@@ -546,12 +546,14 @@ namespace Nullscent.Skin
             }
         }
 
-        private static float[] ParseFloatArray(SkinConfig config, SkinConfigProperty property, bool allowZero)
+        private static float[] ParseFloatArray(SkinConfig config, SkinConfigProperty property, bool allowZero,
+            bool allowNegative = false)
         {
             bool malformed = false;
             float[] values = property.Value.Split(',').Select(token =>
             {
-                if (TryParseFiniteFloat(token.Trim(), out float value) && (allowZero ? value >= 0f : value > 0f))
+                if (TryParseFiniteFloat(token.Trim(), out float value)
+                    && (allowNegative || (allowZero ? value >= 0f : value > 0f)))
                     return value;
                 malformed = true;
                 return float.NaN;

@@ -200,6 +200,20 @@ namespace Nullscent.Rulesets.Mania.UI
             }
         }
 
+        internal static bool IsBeyondVisualLookahead(double startTime, double currentTime, double scrollTime,
+            Nullscent.Beatmap.Beatmap? beatmap, bool downScroll, int receptorY, int scrollTop, int scrollBottom, int screenHeight)
+        {
+            if (startTime <= currentTime + scrollTime + 1000) return false;
+            if (beatmap == null) return true;
+            // Match the drawable's 100px visibility margin while retaining the
+            // existing timing guard for judgement processing. Scroll positions
+            // integrate every SV region between now and the object's start.
+            double travel = Math.Max(1, downScroll ? receptorY - scrollTop : scrollBottom - receptorY);
+            double visibleTravel = Math.Max(0, downScroll ? receptorY + 100 : screenHeight + 100 - receptorY);
+            double scrollDistance = beatmap.GetScrollPosition(startTime) - beatmap.GetScrollPosition(currentTime);
+            return scrollDistance > scrollTime * visibleTravel / travel;
+        }
+
         private void CalculateLayout(int screenWidth, int screenHeight, bool downScroll, float? receptorPositionOverride,
             float noteHeightScale, float receptorHeightScale)
         {
@@ -703,13 +717,13 @@ namespace Nullscent.Rulesets.Mania.UI
         {
             double scrollTime = 2000.0 - (scrollSpeed - 1.0) * 45.0;
             scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
-            double limitTime = currentTime + scrollTime + 1000;
             _isHolding = false;
 
             for (int i = 0; i < _drawableHitObjects.Count; i++)
             {
                 var drawable = _drawableHitObjects[i];
-                if (drawable.HitObject.StartTime > limitTime)
+                if (ManiaPlayfield.IsBeyondVisualLookahead(drawable.HitObject.StartTime, currentTime, scrollTime,
+                    Beatmap, downScroll, receptorY, scrollTop, scrollBottom, _screenHeight))
                 {
                     break;
                 }
@@ -1127,11 +1141,11 @@ namespace Nullscent.Rulesets.Mania.UI
             {
                 double scrollTime = 2000.0 - (scrollSpeed - 1.0) * 45.0;
                 scrollTime = Math.Clamp(scrollTime, 150.0, 2000.0);
-                double limitTime = currentTime + scrollTime + 1000;
                 int maxIndex = 0;
                 for (int i = 0; i < _drawableHitObjects.Count; i++)
                 {
-                    if (_drawableHitObjects[i].HitObject.StartTime > limitTime)
+                    if (ManiaPlayfield.IsBeyondVisualLookahead(_drawableHitObjects[i].HitObject.StartTime, currentTime, scrollTime,
+                        Beatmap, downScroll, receptorY, ScrollTop, ScrollBottom, _screenHeight))
                     {
                         maxIndex = i;
                         break;

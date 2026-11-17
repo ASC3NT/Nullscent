@@ -41,6 +41,7 @@ namespace Nullscent.Skin
             TestStagePresentationNormalizationAndLayout();
             TestLongNoteBodyVisualRules();
             TestLongNoteJudgementSurvivesOffscreenSv();
+            TestSlowSvLookahead();
             TestLegacyColourLightIsStageOnly();
             TestLegacyHoldColourSuffixIsNotMisrepresentedAsSupported();
             TestLegacyAnimationRateSemantics();
@@ -50,7 +51,30 @@ namespace Nullscent.Skin
             TestHitSoundSourcePrecedence();
             TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 37 deterministic skin checks passed.");
+            Console.WriteLine("[SkinTests] 38 deterministic skin checks passed.");
+        }
+
+        private static void TestSlowSvLookahead()
+        {
+            var beatmap = new Nullscent.Beatmap.Beatmap();
+            beatmap.TimingPoints.Add(new Nullscent.Beatmap.TimingPoint { Offset = 0, Uninherited = false, BeatLength = -1000 });
+            foreach (bool downScroll in new[] { true, false })
+            {
+                int receptor = downScroll ? 600 : 120;
+                Assert(!Nullscent.Rulesets.Mania.UI.ManiaPlayfield.IsBeyondVisualLookahead(5000, 0, 1000, beatmap, downScroll, receptor, 0, 720, 720),
+                    "Slow SV can place a temporally distant object inside the visible field.");
+                Assert(Nullscent.Rulesets.Mania.UI.ManiaPlayfield.IsBeyondVisualLookahead(20000, 0, 1000, beatmap, downScroll, receptor, 0, 720, 720),
+                    "Objects beyond both the timing and scroll-space lookahead can remain deferred.");
+                Assert(!Nullscent.Rulesets.Mania.UI.ManiaPlayfield.IsBeyondVisualLookahead(100, 0, 1000, beatmap, downScroll, receptor, 0, 720, 720),
+                    "Nearby judgements must never be deferred by visual lookahead.");
+                var changing = new Nullscent.Beatmap.Beatmap();
+                changing.TimingPoints.Add(new Nullscent.Beatmap.TimingPoint { Offset = 0, Uninherited = false, BeatLength = -1000 });
+                changing.TimingPoints.Add(new Nullscent.Beatmap.TimingPoint { Offset = 4000, Uninherited = false, BeatLength = -100 });
+                Assert(!Nullscent.Rulesets.Mania.UI.ManiaPlayfield.IsBeyondVisualLookahead(4500, 0, 1000, changing, downScroll, receptor, 0, 720, 720),
+                    "Lookahead must integrate slow and normal SV regions rather than assuming the current multiplier.");
+                Assert(Nullscent.Rulesets.Mania.UI.ManiaPlayfield.IsBeyondVisualLookahead(6000, 0, 1000, changing, downScroll, receptor, 0, 720, 720),
+                    "A later object beyond the integrated visible range should be deferred.");
+            }
         }
 
         private static void TestLongNoteJudgementSurvivesOffscreenSv()

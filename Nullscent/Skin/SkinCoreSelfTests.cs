@@ -21,6 +21,7 @@ namespace Nullscent.Skin
             TestLegacyMissingLaneColoursRemainUnspecified();
             TestLegacyNegativeColumnLineWidthsDisableBorders();
             TestLegacyMalformedColumnLineWidths();
+            TestLegacyMalformedLightingWidths();
             TestLegacyNegativeColumnSpacingIsPreserved();
             TestLegacyReservedUserVersion();
             TestAssetlessSkinsRemainPartial();
@@ -48,7 +49,28 @@ namespace Nullscent.Skin
             TestHitSoundSourcePrecedence();
             TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 35 deterministic skin checks passed.");
+            Console.WriteLine("[SkinTests] 36 deterministic skin checks passed.");
+        }
+
+        private static void TestLegacyMalformedLightingWidths()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-lighting-invalid-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), "[General]\nVersion: 2.5\n[Mania]\nKeys: 4\nLightingNWidth: 20,,40\nLightingLWidth: 10,bad,30\n");
+                SkinConfig config = SkinConfigParser.Parse(temp);
+                ManiaKeymodeDefinition mode = LegacyManiaSkinAdapter.Decode(config).Keymodes[4];
+                AssertNear(mode.LightingNoteWidths[0], 32f, "Valid note lighting width must be scaled.");
+                AssertNear(mode.LightingNoteWidths[1], 0f, "Empty note lighting width must become zero.");
+                AssertNear(mode.LightingNoteWidths[2], 64f, "Later note lighting widths must retain their indices.");
+                AssertNear(mode.LightingHoldWidths[1], 0f, "Malformed hold lighting width must become zero.");
+                AssertNear(mode.LightingHoldWidths[2], 48f, "Later hold lighting widths must retain their indices.");
+                Assert(config.Diagnostics.Count(d => d.Kind == SkinDiagnosticKind.MalformedProperty
+                    && (d.Property == "LightingNWidth" || d.Property == "LightingLWidth")) == 2,
+                    "Both malformed lighting properties must remain visible in diagnostics.");
+            }
+            finally { Directory.Delete(temp, true); }
         }
 
         private static void TestLegacyMalformedColumnLineWidths()

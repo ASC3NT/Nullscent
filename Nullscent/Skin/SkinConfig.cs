@@ -385,9 +385,9 @@ namespace Nullscent.Skin
                 else if (fps.HasValue) ReportMalformed(config, property, "LightFramePerSecond must be a positive integer.");
             }
             else if (key == "LightingNWidth")
-                maniaConfig.LightingNWidths = ParseFloatArray(config, property, allowZero: true);
+                maniaConfig.LightingNWidths = ParseFloatArray(config, property, allowZero: true, malformedAsZero: true);
             else if (key == "LightingLWidth")
-                maniaConfig.LightingLWidths = ParseFloatArray(config, property, allowZero: true);
+                maniaConfig.LightingLWidths = ParseFloatArray(config, property, allowZero: true, malformedAsZero: true);
             else if (key == "ScorePosition")
                 maniaConfig.ScorePosition = ParseInteger(config, property);
             else if (key == "ComboPosition")
@@ -561,7 +561,7 @@ namespace Nullscent.Skin
 
             if (malformed)
                 ReportMalformed(config, property, malformedAsZero
-                    ? "The list contains a non-finite or malformed value; that entry is interpreted as zero."
+                    ? "The list contains a malformed, non-finite, or out-of-range value; that entry is interpreted as zero."
                     : "The list contains a non-finite value or a value outside the property's range; that entry uses its format default.");
             return values;
         }

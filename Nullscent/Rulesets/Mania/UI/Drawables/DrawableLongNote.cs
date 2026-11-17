@@ -91,12 +91,9 @@ namespace Nullscent.Rulesets.Mania.UI.Drawables
                     Result = CombineResults(_longNote.HeadResult, _longNote.TailResult);
                 }
             }
-            else if (isOutOfScreen && currentTime > _longNote.EndTime)
-            {
-                // Salvaguarda: si por alguna razón no se juzgó pero ya salió, finalizarla
-                IsJudged = true;
-                Result = CombineResults(_longNote.HeadResult, HitResult.Miss);
-            }
+            // An off-screen tail is still playable until its judgement window closes.
+            // SV can move the whole drawable out of view before that happens; only
+            // an actual tail judgement may retire the drawable and its score events.
         }
 
         public override void Draw(SpriteBatch spriteBatch, Texture2D pixel, SkinManager? skinManager, int keyCount, int columnIndex, int columnX, double currentTime, 

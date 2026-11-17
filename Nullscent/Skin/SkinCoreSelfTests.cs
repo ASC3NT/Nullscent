@@ -40,6 +40,7 @@ namespace Nullscent.Skin
             TestHighResolutionSettingRollback();
             TestStagePresentationNormalizationAndLayout();
             TestLongNoteBodyVisualRules();
+            TestLongNoteJudgementSurvivesOffscreenSv();
             TestLegacyColourLightIsStageOnly();
             TestLegacyHoldColourSuffixIsNotMisrepresentedAsSupported();
             TestLegacyAnimationRateSemantics();
@@ -49,7 +50,40 @@ namespace Nullscent.Skin
             TestHitSoundSourcePrecedence();
             TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 36 deterministic skin checks passed.");
+            Console.WriteLine("[SkinTests] 37 deterministic skin checks passed.");
+        }
+
+        private static void TestLongNoteJudgementSurvivesOffscreenSv()
+        {
+            foreach (bool downScroll in new[] { true, false })
+            {
+                var beatmap = new Nullscent.Beatmap.Beatmap();
+                beatmap.TimingPoints.Add(new Nullscent.Beatmap.TimingPoint { Offset = 0, Uninherited = true, BeatLength = 500 });
+                beatmap.TimingPoints.Add(new Nullscent.Beatmap.TimingPoint { Offset = 1080, Uninherited = false, BeatLength = -1 });
+                var note = new Nullscent.Rulesets.Mania.Objects.LongNote(1000, 1100, 0);
+                var windows = new Nullscent.Rulesets.Mania.Judgements.ScoreV2HitWindows(5);
+                var drawable = new Nullscent.Rulesets.Mania.UI.Drawables.DrawableLongNote(note) { Beatmap = beatmap };
+                Assert(note.TryJudgeHead(1000, windows), "The synthetic hold head must be hit.");
+                drawable.Update(1105, 42, 0.8f, downScroll, 720, downScroll ? 600 : 120);
+                Assert(!drawable.IsJudged && !note.TailJudged,
+                    "A held LN outside the viewport must remain playable inside its tail window after an SV change.");
+                note.TryJudgeTail(1105, windows);
+                Assert(note.TailJudged && note.TailResult != Nullscent.Rulesets.Mania.Judgements.HitResult.Miss,
+                    "A valid tail release must remain judgeable after the visual leaves the viewport.");
+                drawable.Update(1105, 42, 0.8f, downScroll, 720, downScroll ? 600 : 120);
+                Assert(drawable.IsJudged, "A successful tail can be retired after its actual judgement.");
+
+                var autoNote = new Nullscent.Rulesets.Mania.Objects.LongNote(1000, 1100, 0);
+                var autoDrawable = new Nullscent.Rulesets.Mania.UI.Drawables.DrawableLongNote(autoNote) { Beatmap = beatmap };
+                Assert(autoNote.TryJudgeHead(1000, windows), "The automatic-completion hold head must be hit.");
+                autoDrawable.Update(1105, 42, 0.8f, downScroll, 720, downScroll ? 600 : 120);
+                Assert(!autoDrawable.IsJudged, "Off-screen movement must not cancel automatic completion.");
+                autoDrawable.CheckAutoMiss(1500, windows);
+                Assert(autoNote.TailJudged && autoNote.TailResult != Nullscent.Rulesets.Mania.Judgements.HitResult.Miss,
+                    "Holding through the tail window must still use the existing automatic completion rule.");
+                autoDrawable.Update(1500, 42, 0.8f, downScroll, 720, downScroll ? 600 : 120);
+                Assert(autoDrawable.IsJudged, "The auto-completed hold must eventually retire.");
+            }
         }
 
         private static void TestLegacyMalformedLightingWidths()

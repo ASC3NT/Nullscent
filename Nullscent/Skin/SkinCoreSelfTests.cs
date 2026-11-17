@@ -20,6 +20,7 @@ namespace Nullscent.Skin
             TestLegacyParserDiagnosticsAndColourContracts();
             TestLegacyMissingLaneColoursRemainUnspecified();
             TestLegacyNegativeColumnLineWidthsDisableBorders();
+            TestLegacyMalformedColumnLineWidths();
             TestLegacyNegativeColumnSpacingIsPreserved();
             TestLegacyReservedUserVersion();
             TestAssetlessSkinsRemainPartial();
@@ -47,7 +48,27 @@ namespace Nullscent.Skin
             TestHitSoundSourcePrecedence();
             TestPairedHighResolutionLogicalSizing();
             TestTextureDownscalePreservesStraightAlphaEdges();
-            Console.WriteLine("[SkinTests] 34 deterministic skin checks passed.");
+            Console.WriteLine("[SkinTests] 35 deterministic skin checks passed.");
+        }
+
+        private static void TestLegacyMalformedColumnLineWidths()
+        {
+            string temp = Path.Combine(Path.GetTempPath(), "nullscent-column-line-invalid-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            try
+            {
+                File.WriteAllText(Path.Combine(temp, "skin.ini"), "[Mania]\nKeys: 4\nColumnLineWidth: 3,,bad,4\n");
+                SkinConfig config = SkinConfigParser.Parse(temp);
+                ManiaKeymodeDefinition mode = LegacyManiaSkinAdapter.Decode(config).Keymodes[4];
+                AssertNear(mode.ColumnLineWidths[0], 3f * 0.740f, "Valid line width must be retained.");
+                AssertNear(mode.ColumnLineWidths[1], 0f, "An empty line width must suppress that border.");
+                AssertNear(mode.ColumnLineWidths[2], 0f, "A malformed line width must suppress that border.");
+                AssertNear(mode.ColumnLineWidths[3], 4f * 0.740f, "Later line widths must retain their indices.");
+                AssertNear(mode.ColumnLineWidths[4], 2f * 0.740f, "Omitted trailing line widths retain their defaults.");
+                Assert(config.Diagnostics.Any(d => d.Kind == SkinDiagnosticKind.MalformedProperty && d.Property == "ColumnLineWidth"),
+                    "Malformed line widths must remain visible in diagnostics.");
+            }
+            finally { Directory.Delete(temp, true); }
         }
 
         private static void TestLegacyNegativeColumnLineWidthsDisableBorders()
@@ -1505,7 +1526,7 @@ namespace Nullscent.Skin
 
         private static void AssertNear(float actual, float expected, string message)
         {
-            if (MathF.Abs(actual - expected) > 0.02f)
+            if (!float.IsFinite(actual) || !float.IsFinite(expected) || MathF.Abs(actual - expected) > 0.02f)
                 throw new InvalidOperationException($"{message} Expected {expected}, found {actual}.");
         }
     }

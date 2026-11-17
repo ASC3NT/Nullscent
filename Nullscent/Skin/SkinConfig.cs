@@ -363,7 +363,7 @@ namespace Nullscent.Skin
             else if (key == "ColumnSpacing")
                 maniaConfig.ColumnSpacing = ParseFloatArray(config, property, allowZero: true, allowNegative: true);
             else if (key == "ColumnLineWidth")
-                maniaConfig.ColumnLineWidths = ParseFloatArray(config, property, allowZero: true, allowNegative: true);
+                maniaConfig.ColumnLineWidths = ParseFloatArray(config, property, allowZero: true, allowNegative: true, malformedAsZero: true);
             else if (key == "ColumnLine")
                 maniaConfig.ColumnLines = ParseBoolArray(config, property);
             else if (key == "ColumnStart")
@@ -547,7 +547,7 @@ namespace Nullscent.Skin
         }
 
         private static float[] ParseFloatArray(SkinConfig config, SkinConfigProperty property, bool allowZero,
-            bool allowNegative = false)
+            bool allowNegative = false, bool malformedAsZero = false)
         {
             bool malformed = false;
             float[] values = property.Value.Split(',').Select(token =>
@@ -556,11 +556,13 @@ namespace Nullscent.Skin
                     && (allowNegative || (allowZero ? value >= 0f : value > 0f)))
                     return value;
                 malformed = true;
-                return float.NaN;
+                return malformedAsZero ? 0f : float.NaN;
             }).ToArray();
 
             if (malformed)
-                ReportMalformed(config, property, "The list contains a non-finite value or a value outside the property's range; that entry uses its format default.");
+                ReportMalformed(config, property, malformedAsZero
+                    ? "The list contains a non-finite or malformed value; that entry is interpreted as zero."
+                    : "The list contains a non-finite value or a value outside the property's range; that entry uses its format default.");
             return values;
         }
 

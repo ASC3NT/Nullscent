@@ -255,6 +255,8 @@ Append `--stage-only` to `--skin-visual-profile-cycle-smoke` to run the same pro
 6. Validate the folder in the catalog, then run DEBUG smoke for 4K and 7K at 1920x1080 and 1366x768, including long notes and one resize.
 7. Review both missing-asset warnings and the generated screenshots. The renderer should not need a skin-name branch.
 
+Official built-in files are explicitly listed in `Nullscent.csproj` for output copying; update that list and the built-in skin ignore exceptions when deliberately adding a new official family. Imported or personal skins must remain user data and are not build content.
+
 ## References and limits
 
 * Official [osu! skin.ini wiki](https://osu.ppy.sh/wiki/en/Skinning/skin.ini): version defaults, 480-pixel Mania coordinate reference, missing/extra list rules, `NoteBodyStyle`, and animation exceptions.

@@ -17,6 +17,9 @@ settings.json
 scores.json
 nullscent_log.txt
 *.log
+**/Screenshots/
+*.osk
+*.osz
 
 # Temporary/cache
 *.cache
@@ -31,6 +34,11 @@ Songs/
 
 # User skin subfolders inside the project (local content, not source)
 Nullscent/Skin/*/
+
+# Only built-in skin families belong in the source tree
+/Nullscent/Skins/*
+!/Nullscent/Skins/Bars/
+!/Nullscent/Skins/Circles/
 
 # OS files
 Thumbs.db

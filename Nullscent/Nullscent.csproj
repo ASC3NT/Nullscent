@@ -24,7 +24,7 @@
     <Folder Include="Ui\" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Skins\**\*.*">
+    <Content Include="Skins\Bars\NullscentSkin.json;Skins\Bars\bar-hold-body.png;Skins\Bars\bar-hold-head.png;Skins\Bars\bar-hold-tail.png;Skins\Bars\bar-key-pressed.png;Skins\Bars\bar-key.png;Skins\Bars\bar-light-hold.png;Skins\Bars\bar-light-note.png;Skins\Bars\bar-note.png;Skins\Bars\bar-stage-hint.png;Skins\Circles\NullscentSkin.json;Skins\Circles\circle-body.png;Skins\Circles\circle-head.png;Skins\Circles\circle-key-pressed.png;Skins\Circles\circle-key.png;Skins\Circles\circle-light-hold.png;Skins\Circles\circle-light-note.png;Skins\Circles\circle-note.png;Skins\Circles\circle-stage-hint.png;Skins\Circles\circle-tail.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
